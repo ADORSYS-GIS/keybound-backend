@@ -1,5 +1,6 @@
 use backend_core::{Config, Error, Result};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -49,10 +50,7 @@ impl TryFrom<&Config> for BackendServerConfig {
 
         Ok(Self {
             listen_addr,
-            tls: Some(TlsConfig {
-                cert_path: cfg.server.api.tls.cert_path.clone().into(),
-                key_path: cfg.server.api.tls.key_path.clone().into(),
-            }),
+            tls: resolve_tls(cfg),
             database_url: cfg.database.url.clone(),
             database_pool_size: cfg.database.pool_size.unwrap_or(10),
             auth_static_bearer_tokens: cfg.server.api.auth.static_bearer_tokens.clone(),
@@ -73,3 +71,13 @@ impl TryFrom<&Config> for BackendServerConfig {
     }
 }
 
+fn resolve_tls(cfg: &Config) -> Option<TlsConfig> {
+    let cert_path: PathBuf = cfg.server.api.tls.cert_path.clone().into();
+    let key_path: PathBuf = cfg.server.api.tls.key_path.clone().into();
+
+    if Path::new(&cert_path).exists() && Path::new(&key_path).exists() {
+        Some(TlsConfig { cert_path, key_path })
+    } else {
+        None
+    }
+}
