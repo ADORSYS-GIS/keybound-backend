@@ -1,9 +1,9 @@
 use backend_model::{db, kc as kc_map, staff as staff_map};
 use backend_repository::{
-    ApprovalCreated, BffRepo, KcRepo, KycDocumentInsert, KycSubmissionsQuery, PgRepository,
+    ApprovalCreated, BffRepo, KcRepo, KycDocumentInsert, PgRepository,
     RepoResult, SmsPendingInsert, SmsQueued, StaffRepo,
 };
-use sqlx_data::Serial;
+use sqlx_data::{ParamsBuilder, Serial};
 
 #[derive(Clone)]
 pub struct BackendService {
@@ -39,8 +39,14 @@ impl BackendService {
         page: i32,
         limit: i32,
     ) -> RepoResult<Serial<db::KycDocumentRow>> {
+        let params = ParamsBuilder::new()
+            .serial()
+            .page(page.max(1) as u32, limit.clamp(1, 100) as u32)
+            .done()
+            .build();
+
         self.repository
-            .list_kyc_documents(external_id, page, limit)
+            .list_kyc_documents(external_id.to_owned(), params)
             .await
     }
 
@@ -50,9 +56,29 @@ impl BackendService {
 
     pub async fn list_kyc_submissions(
         &self,
-        query: KycSubmissionsQuery,
+        status: Option<String>,
+        search: Option<String>,
+        page: i32,
+        limit: i32,
     ) -> RepoResult<Serial<db::KycProfileRow>> {
-        self.repository.list_kyc_submissions(query).await
+        let mut builder = ParamsBuilder::new()
+            .serial()
+            .page(page.max(1) as u32, limit.clamp(1, 100) as u32)
+            .done();
+
+        if let Some(status) = status {
+            builder = builder.filter().eq("kyc_status", status).done();
+        }
+
+        if let Some(search) = search {
+            builder = builder
+                .search()
+                .search(search, ["external_id", "email", "phone_number"])
+                .case_sensitive(false)
+                .done();
+        }
+
+        self.repository.list_kyc_submissions(builder.build()).await
     }
 
     pub async fn get_kyc_submission(

@@ -20,6 +20,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 axum = { workspace = true, optional = true }
 utoipa.workspace = true
+sqlx-data-parser = "0.1.0"
 
 [features]
 default = []

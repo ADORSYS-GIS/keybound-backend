@@ -27,6 +27,9 @@ pub enum Error {
 
     #[error("SQLx error: {0}")]
     SqlxError(#[from] sqlx::Error),
+
+    #[error("SQLx-Data parser error: {0}")]
+    SqlxDataParser(#[from] sqlx_data_parser::ParserError),
 }
 
 #[cfg(feature = "axum")]
@@ -46,6 +49,7 @@ mod axum_impl {
                 Error::Server(_) => StatusCode::INTERNAL_SERVER_ERROR,
 
                 Error::SqlxError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                Error::SqlxDataParser(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
 
             (status_code, self.to_string()).into_response()

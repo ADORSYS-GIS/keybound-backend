@@ -781,6 +781,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "sqlx",
+ "sqlx-data-parser",
  "thiserror 2.0.18",
  "utoipa",
 ]

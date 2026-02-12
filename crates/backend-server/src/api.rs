@@ -3,9 +3,7 @@ use aws_sdk_s3::presigning::PresigningConfig;
 use backend_auth::{KcContext, ServiceContext};
 use backend_core::Error;
 use backend_model::{bff as bff_map, kc as kc_map, staff as staff_map};
-use backend_repository::{
-    ApprovalCreated, KycDocumentInsert, KycSubmissionsQuery, SmsPendingInsert,
-};
+use backend_repository::{ApprovalCreated, KycDocumentInsert, SmsPendingInsert};
 use chrono::Utc;
 use gen_oas_server_bff::{
     Api as BffApi, ApiRegistrationKycDocumentsPostResponse, ApiRegistrationKycStatusGetResponse,
@@ -273,16 +271,12 @@ impl StaffApi<ServiceContext> for BackendApi {
         limit: Option<i32>,
         _context: &ServiceContext,
     ) -> std::result::Result<ApiKycStaffSubmissionsGetResponse, ApiError> {
-        let query = KycSubmissionsQuery {
-            status,
-            search,
-            page: page.unwrap_or(1).max(1),
-            limit: limit.unwrap_or(20).clamp(1, 100),
-        };
+        let page = page.unwrap_or(1).max(1);
+        let limit = limit.unwrap_or(20).clamp(1, 100);
         let data = self
             .state
             .service
-            .list_kyc_submissions(query.clone())
+            .list_kyc_submissions(status, search, page, limit)
             .await
             .map_err(repo_err)?;
         let total_items = data.total_items as i32;
@@ -306,6 +300,26 @@ impl StaffApi<ServiceContext> for BackendApi {
         Ok(ApiKycStaffSubmissionsGetResponse::PageOfKYCSubmissions(
             dto.into(),
         ))
+    }
+
+    async fn api_kyc_staff_submissions_external_id_approve_post(
+        &self,
+        external_id: String,
+        kyc_approval_request: gen_oas_server_staff::models::KycApprovalRequest,
+        _context: &ServiceContext,
+    ) -> std::result::Result<ApiKycStaffSubmissionsExternalIdApprovePostResponse, ApiError> {
+        let req: staff_map::KycApprovalRequest = kyc_approval_request.into();
+        let updated = self
+            .state
+            .service
+            .update_kyc_approved(&external_id, &req)
+            .await
+            .map_err(repo_err)?;
+        if !updated {
+            return Ok(ApiKycStaffSubmissionsExternalIdApprovePostResponse::ValidationFailed);
+        }
+        self.state.invalidate_bff_cache(&external_id);
+        Ok(ApiKycStaffSubmissionsExternalIdApprovePostResponse::KYCApproved)
     }
 
     async fn api_kyc_staff_submissions_external_id_get(
@@ -347,26 +361,6 @@ impl StaffApi<ServiceContext> for BackendApi {
         dto.total_documents = Some(total_documents);
 
         Ok(ApiKycStaffSubmissionsExternalIdGetResponse::DetailedSubmission(dto.into()))
-    }
-
-    async fn api_kyc_staff_submissions_external_id_approve_post(
-        &self,
-        external_id: String,
-        kyc_approval_request: gen_oas_server_staff::models::KycApprovalRequest,
-        _context: &ServiceContext,
-    ) -> std::result::Result<ApiKycStaffSubmissionsExternalIdApprovePostResponse, ApiError> {
-        let req: staff_map::KycApprovalRequest = kyc_approval_request.into();
-        let updated = self
-            .state
-            .service
-            .update_kyc_approved(&external_id, &req)
-            .await
-            .map_err(repo_err)?;
-        if !updated {
-            return Ok(ApiKycStaffSubmissionsExternalIdApprovePostResponse::ValidationFailed);
-        }
-        self.state.invalidate_bff_cache(&external_id);
-        Ok(ApiKycStaffSubmissionsExternalIdApprovePostResponse::KYCApproved)
     }
 
     async fn api_kyc_staff_submissions_external_id_reject_post(
@@ -415,113 +409,127 @@ impl StaffApi<ServiceContext> for BackendApi {
 
 #[backend_core::async_trait]
 impl KcApi<KcContext> for BackendApi {
-    async fn create_user(
+    async fn create_approval(
         &self,
-        user_upsert_request: gen_oas_server_kc::models::UserUpsertRequest,
+        approval_create_request: gen_oas_server_kc::models::ApprovalCreateRequest,
+        idempotency_key: Option<String>,
         _context: &KcContext,
-    ) -> std::result::Result<CreateUserResponse, ApiError> {
-        let req: kc_map::UserUpsert = user_upsert_request.into();
-        match self.state.service.create_user(&req).await {
-            Ok(row) => Ok(CreateUserResponse::Created(
-                kc_map::UserRecordDto::from(row).into(),
-            )),
-            Err(err) if is_unique_violation(&err) => Ok(CreateUserResponse::Conflict(kc_error(
-                "CONFLICT",
-                "User already exists",
-            ))),
-            Err(err) => Err(repo_err(err)),
-        }
-    }
-
-    async fn get_user(
-        &self,
-        user_id: String,
-        _context: &KcContext,
-    ) -> std::result::Result<GetUserResponse, ApiError> {
-        let row = self
+    ) -> std::result::Result<CreateApprovalResponse, ApiError> {
+        let req: kc_map::ApprovalCreateRequest = approval_create_request.into();
+        let created: ApprovalCreated = match self
             .state
             .service
-            .get_user(&user_id)
+            .create_approval(&req, idempotency_key)
             .await
-            .map_err(repo_err)?;
-        let Some(row) = row else {
-            return Ok(GetUserResponse::NotFound(kc_error(
-                "NOT_FOUND",
-                "User not found",
-            )));
+        {
+            Ok(created) => created,
+            Err(err) if is_unique_violation(&err) => {
+                return Ok(CreateApprovalResponse::Conflict(kc_error(
+                    "CONFLICT",
+                    "Duplicate idempotency key",
+                )));
+            }
+            Err(err) => return Err(repo_err(err)),
         };
-        Ok(GetUserResponse::User(
-            kc_map::UserRecordDto::from(row).into(),
-        ))
+
+        let mut resp = gen_oas_server_kc::models::ApprovalCreateResponse::new(
+            created.request_id,
+            created
+                .status
+                .parse()
+                .unwrap_or(gen_oas_server_kc::models::ApprovalCreateResponseStatus::Pending),
+        );
+        resp.expires_at = created.expires_at;
+        Ok(CreateApprovalResponse::Created(resp))
     }
 
-    async fn update_user(
+    async fn cancel_approval(
         &self,
-        user_id: String,
-        user_upsert_request: gen_oas_server_kc::models::UserUpsertRequest,
+        request_id: String,
         _context: &KcContext,
-    ) -> std::result::Result<UpdateUserResponse, ApiError> {
-        let req: kc_map::UserUpsert = user_upsert_request.into();
-        let row = self
-            .state
-            .service
-            .update_user(&user_id, &req)
-            .await
-            .map_err(repo_err)?;
-        let Some(row) = row else {
-            return Ok(UpdateUserResponse::NotFound(kc_error(
-                "NOT_FOUND",
-                "User not found",
-            )));
-        };
-        Ok(UpdateUserResponse::Updated(
-            kc_map::UserRecordDto::from(row).into(),
-        ))
-    }
-
-    async fn delete_user(
-        &self,
-        user_id: String,
-        _context: &KcContext,
-    ) -> std::result::Result<DeleteUserResponse, ApiError> {
+    ) -> std::result::Result<CancelApprovalResponse, ApiError> {
         let affected = self
             .state
             .service
-            .delete_user(&user_id)
+            .cancel_approval(&request_id)
             .await
             .map_err(repo_err)?;
         if affected == 0 {
-            return Ok(DeleteUserResponse::NotFound(kc_error(
+            return Ok(CancelApprovalResponse::NotFound(kc_error(
                 "NOT_FOUND",
-                "User not found",
+                "Approval not found",
             )));
         }
-        Ok(DeleteUserResponse::Deleted)
+        Ok(CancelApprovalResponse::Cancelled)
     }
 
-    async fn search_users(
+    async fn decide_approval(
         &self,
-        user_search_request: gen_oas_server_kc::models::UserSearchRequest,
+        request_id: String,
+        approval_decision_request: gen_oas_server_kc::models::ApprovalDecisionRequest,
         _context: &KcContext,
-    ) -> std::result::Result<SearchUsersResponse, ApiError> {
-        let req: kc_map::UserSearch = user_search_request.into();
-        let users = self
+    ) -> std::result::Result<DecideApprovalResponse, ApiError> {
+        let req: kc_map::ApprovalDecisionRequest = approval_decision_request.into();
+        let row = self
             .state
             .service
-            .search_users(&req)
+            .decide_approval(&request_id, &req)
             .await
             .map_err(repo_err)?;
-        let out_users = users
+        let Some(row) = row else {
+            return Ok(DecideApprovalResponse::NotFound(kc_error(
+                "NOT_FOUND",
+                "Approval not found",
+            )));
+        };
+        Ok(DecideApprovalResponse::UpdatedStatus(
+            kc_map::ApprovalStatusDto::from(row).into(),
+        ))
+    }
+
+    async fn get_approval(
+        &self,
+        request_id: String,
+        _context: &KcContext,
+    ) -> std::result::Result<GetApprovalResponse, ApiError> {
+        let row = self
+            .state
+            .service
+            .get_approval(&request_id)
+            .await
+            .map_err(repo_err)?;
+        let Some(row) = row else {
+            return Ok(GetApprovalResponse::NotFound(kc_error(
+                "NOT_FOUND",
+                "Approval not found",
+            )));
+        };
+        Ok(GetApprovalResponse::Status(
+            kc_map::ApprovalStatusDto::from(row).into(),
+        ))
+    }
+
+    async fn list_user_approvals<'a>(
+        &self,
+        user_id: String,
+        status: Option<&'a Vec<gen_oas_server_kc::models::ListUserApprovalsStatusParameterInner>>,
+        _context: &KcContext,
+    ) -> std::result::Result<ListUserApprovalsResponse, ApiError> {
+        let statuses = status.map(|v| v.iter().map(ToString::to_string).collect::<Vec<_>>());
+        let rows = self
+            .state
+            .service
+            .list_user_approvals(&user_id, statuses)
+            .await
+            .map_err(repo_err)?;
+        let approvals = rows
             .into_iter()
-            .map(kc_map::UserRecordDto::from)
+            .map(kc_map::UserApprovalRecordDto::from)
             .map(Into::into)
             .collect::<Vec<_>>();
-        let total_count = out_users.len() as i32;
-        let resp = gen_oas_server_kc::models::UserSearchResponse {
-            users: out_users,
-            total_count: Some(total_count),
-        };
-        Ok(SearchUsersResponse::SearchResults(resp))
+        Ok(ListUserApprovalsResponse::ApprovalList(
+            gen_oas_server_kc::models::UserApprovalsResponse { user_id, approvals },
+        ))
     }
 
     async fn lookup_device(
@@ -620,29 +628,51 @@ impl KcApi<KcContext> for BackendApi {
         )
     }
 
-    async fn enrollment_precheck(
+    async fn confirm_sms(
         &self,
-        enrollment_precheck_request: gen_oas_server_kc::models::EnrollmentPrecheckRequest,
-        _idempotency_key: Option<String>,
+        sms_confirm_request: gen_oas_server_kc::models::SmsConfirmRequest,
         _context: &KcContext,
-    ) -> std::result::Result<EnrollmentPrecheckResponse, ApiError> {
-        let req: kc_map::EnrollmentPrecheckRequest = enrollment_precheck_request.into();
-        let mut resp = gen_oas_server_kc::models::EnrollmentPrecheckResponse::new(
-            gen_oas_server_kc::models::EnrollmentPrecheckResponseDecision::Allow,
-        );
-
-        let existing = self
+    ) -> std::result::Result<ConfirmSmsResponse, ApiError> {
+        let req: kc_map::SmsConfirmRequest = sms_confirm_request.into();
+        let row = self
             .state
             .service
-            .find_device_binding(&req.device_id, &req.jkt)
+            .get_sms_by_hash(&req.hash)
             .await
             .map_err(repo_err)?;
-        if let Some((_record_id, user_id)) = existing {
-            resp.decision = gen_oas_server_kc::models::EnrollmentPrecheckResponseDecision::Reject;
-            resp.reason = Some("DEVICE_ALREADY_BOUND".to_owned());
-            resp.bound_user_id = Some(user_id);
+        let Some(row) = row else {
+            let mut resp = gen_oas_server_kc::models::SmsConfirmResponse::new(false);
+            resp.reason = Some("NOT_FOUND".to_owned());
+            return Ok(ConfirmSmsResponse::ConfirmationResult(resp));
+        };
+
+        if let Some(ttl) = row.ttl_seconds {
+            let expires_at = row.created_at + chrono::Duration::seconds(ttl as i64);
+            if Utc::now() > expires_at {
+                let mut resp = gen_oas_server_kc::models::SmsConfirmResponse::new(false);
+                resp.reason = Some("EXPIRED".to_owned());
+                return Ok(ConfirmSmsResponse::ConfirmationResult(resp));
+            }
         }
-        Ok(EnrollmentPrecheckResponse::PolicyDecision(resp))
+
+        let mut hasher = Sha256::new();
+        hasher.update(req.otp.as_bytes());
+        let provided = hasher.finalize().to_vec();
+        if provided != row.otp_sha256 {
+            let mut resp = gen_oas_server_kc::models::SmsConfirmResponse::new(false);
+            resp.reason = Some("INVALID_OTP".to_owned());
+            return Ok(ConfirmSmsResponse::ConfirmationResult(resp));
+        }
+
+        self.state
+            .service
+            .mark_sms_confirmed(&req.hash)
+            .await
+            .map_err(repo_err)?;
+
+        Ok(ConfirmSmsResponse::ConfirmationResult(
+            gen_oas_server_kc::models::SmsConfirmResponse::new(true),
+        ))
     }
 
     async fn enrollment_bind(
@@ -710,127 +740,55 @@ impl KcApi<KcContext> for BackendApi {
         Ok(EnrollmentBindResponse::Bound(resp))
     }
 
-    async fn create_approval(
+    async fn enrollment_precheck(
         &self,
-        approval_create_request: gen_oas_server_kc::models::ApprovalCreateRequest,
-        idempotency_key: Option<String>,
+        enrollment_precheck_request: gen_oas_server_kc::models::EnrollmentPrecheckRequest,
+        _idempotency_key: Option<String>,
         _context: &KcContext,
-    ) -> std::result::Result<CreateApprovalResponse, ApiError> {
-        let req: kc_map::ApprovalCreateRequest = approval_create_request.into();
-        let created: ApprovalCreated = match self
-            .state
-            .service
-            .create_approval(&req, idempotency_key)
-            .await
-        {
-            Ok(created) => created,
-            Err(err) if is_unique_violation(&err) => {
-                return Ok(CreateApprovalResponse::Conflict(kc_error(
-                    "CONFLICT",
-                    "Duplicate idempotency key",
-                )));
-            }
-            Err(err) => return Err(repo_err(err)),
-        };
-
-        let mut resp = gen_oas_server_kc::models::ApprovalCreateResponse::new(
-            created.request_id,
-            created
-                .status
-                .parse()
-                .unwrap_or(gen_oas_server_kc::models::ApprovalCreateResponseStatus::Pending),
+    ) -> std::result::Result<EnrollmentPrecheckResponse, ApiError> {
+        let req: kc_map::EnrollmentPrecheckRequest = enrollment_precheck_request.into();
+        let mut resp = gen_oas_server_kc::models::EnrollmentPrecheckResponse::new(
+            gen_oas_server_kc::models::EnrollmentPrecheckResponseDecision::Allow,
         );
-        resp.expires_at = created.expires_at;
-        Ok(CreateApprovalResponse::Created(resp))
-    }
 
-    async fn get_approval(
-        &self,
-        request_id: String,
-        _context: &KcContext,
-    ) -> std::result::Result<GetApprovalResponse, ApiError> {
-        let row = self
+        let existing = self
             .state
             .service
-            .get_approval(&request_id)
+            .find_device_binding(&req.device_id, &req.jkt)
             .await
             .map_err(repo_err)?;
-        let Some(row) = row else {
-            return Ok(GetApprovalResponse::NotFound(kc_error(
-                "NOT_FOUND",
-                "Approval not found",
-            )));
-        };
-        Ok(GetApprovalResponse::Status(
-            kc_map::ApprovalStatusDto::from(row).into(),
-        ))
-    }
-
-    async fn list_user_approvals<'a>(
-        &self,
-        user_id: String,
-        status: Option<&'a Vec<gen_oas_server_kc::models::ListUserApprovalsStatusParameterInner>>,
-        _context: &KcContext,
-    ) -> std::result::Result<ListUserApprovalsResponse, ApiError> {
-        let statuses = status.map(|v| v.iter().map(ToString::to_string).collect::<Vec<_>>());
-        let rows = self
-            .state
-            .service
-            .list_user_approvals(&user_id, statuses)
-            .await
-            .map_err(repo_err)?;
-        let approvals = rows
-            .into_iter()
-            .map(kc_map::UserApprovalRecordDto::from)
-            .map(Into::into)
-            .collect::<Vec<_>>();
-        Ok(ListUserApprovalsResponse::ApprovalList(
-            gen_oas_server_kc::models::UserApprovalsResponse { user_id, approvals },
-        ))
-    }
-
-    async fn decide_approval(
-        &self,
-        request_id: String,
-        approval_decision_request: gen_oas_server_kc::models::ApprovalDecisionRequest,
-        _context: &KcContext,
-    ) -> std::result::Result<DecideApprovalResponse, ApiError> {
-        let req: kc_map::ApprovalDecisionRequest = approval_decision_request.into();
-        let row = self
-            .state
-            .service
-            .decide_approval(&request_id, &req)
-            .await
-            .map_err(repo_err)?;
-        let Some(row) = row else {
-            return Ok(DecideApprovalResponse::NotFound(kc_error(
-                "NOT_FOUND",
-                "Approval not found",
-            )));
-        };
-        Ok(DecideApprovalResponse::UpdatedStatus(
-            kc_map::ApprovalStatusDto::from(row).into(),
-        ))
-    }
-
-    async fn cancel_approval(
-        &self,
-        request_id: String,
-        _context: &KcContext,
-    ) -> std::result::Result<CancelApprovalResponse, ApiError> {
-        let affected = self
-            .state
-            .service
-            .cancel_approval(&request_id)
-            .await
-            .map_err(repo_err)?;
-        if affected == 0 {
-            return Ok(CancelApprovalResponse::NotFound(kc_error(
-                "NOT_FOUND",
-                "Approval not found",
-            )));
+        if let Some((_record_id, user_id)) = existing {
+            resp.decision = gen_oas_server_kc::models::EnrollmentPrecheckResponseDecision::Reject;
+            resp.reason = Some("DEVICE_ALREADY_BOUND".to_owned());
+            resp.bound_user_id = Some(user_id);
         }
-        Ok(CancelApprovalResponse::Cancelled)
+        Ok(EnrollmentPrecheckResponse::PolicyDecision(resp))
+    }
+
+    async fn resolve_or_create_user_by_phone(
+        &self,
+        phone_resolve_or_create_request: gen_oas_server_kc::models::PhoneResolveOrCreateRequest,
+        _context: &KcContext,
+    ) -> std::result::Result<ResolveOrCreateUserByPhoneResponse, ApiError> {
+        let (user, created) = self
+            .state
+            .service
+            .resolve_or_create_user_by_phone(
+                &phone_resolve_or_create_request.realm,
+                &phone_resolve_or_create_request.phone_number,
+            )
+            .await
+            .map_err(repo_err)?;
+
+        let resp = gen_oas_server_kc::models::PhoneResolveOrCreateResponse::new(
+            phone_resolve_or_create_request.phone_number,
+            user.user_id,
+            user.username,
+            created,
+        );
+        Ok(ResolveOrCreateUserByPhoneResponse::UserResolvedOrCreated(
+            resp,
+        ))
     }
 
     async fn resolve_user_by_phone(
@@ -872,32 +830,6 @@ impl KcApi<KcContext> for BackendApi {
         Ok(ResolveUserByPhoneResponse::PhoneResolutionAndRoutingRecommendation(resp))
     }
 
-    async fn resolve_or_create_user_by_phone(
-        &self,
-        phone_resolve_or_create_request: gen_oas_server_kc::models::PhoneResolveOrCreateRequest,
-        _context: &KcContext,
-    ) -> std::result::Result<ResolveOrCreateUserByPhoneResponse, ApiError> {
-        let (user, created) = self
-            .state
-            .service
-            .resolve_or_create_user_by_phone(
-                &phone_resolve_or_create_request.realm,
-                &phone_resolve_or_create_request.phone_number,
-            )
-            .await
-            .map_err(repo_err)?;
-
-        let resp = gen_oas_server_kc::models::PhoneResolveOrCreateResponse::new(
-            phone_resolve_or_create_request.phone_number,
-            user.user_id,
-            user.username,
-            created,
-        );
-        Ok(ResolveOrCreateUserByPhoneResponse::UserResolvedOrCreated(
-            resp,
-        ))
-    }
-
     async fn send_sms(
         &self,
         sms_send_request: gen_oas_server_kc::models::SmsSendRequest,
@@ -933,50 +865,112 @@ impl KcApi<KcContext> for BackendApi {
         Ok(SendSmsResponse::OTPQueued(resp))
     }
 
-    async fn confirm_sms(
+    async fn create_user(
         &self,
-        sms_confirm_request: gen_oas_server_kc::models::SmsConfirmRequest,
+        user_upsert_request: gen_oas_server_kc::models::UserUpsertRequest,
         _context: &KcContext,
-    ) -> std::result::Result<ConfirmSmsResponse, ApiError> {
-        let req: kc_map::SmsConfirmRequest = sms_confirm_request.into();
+    ) -> std::result::Result<CreateUserResponse, ApiError> {
+        let req: kc_map::UserUpsert = user_upsert_request.into();
+        match self.state.service.create_user(&req).await {
+            Ok(row) => Ok(CreateUserResponse::Created(
+                kc_map::UserRecordDto::from(row).into(),
+            )),
+            Err(err) if is_unique_violation(&err) => Ok(CreateUserResponse::Conflict(kc_error(
+                "CONFLICT",
+                "User already exists",
+            ))),
+            Err(err) => Err(repo_err(err)),
+        }
+    }
+
+    async fn search_users(
+        &self,
+        user_search_request: gen_oas_server_kc::models::UserSearchRequest,
+        _context: &KcContext,
+    ) -> std::result::Result<SearchUsersResponse, ApiError> {
+        let req: kc_map::UserSearch = user_search_request.into();
+        let users = self
+            .state
+            .service
+            .search_users(&req)
+            .await
+            .map_err(repo_err)?;
+        let out_users = users
+            .into_iter()
+            .map(kc_map::UserRecordDto::from)
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        let total_count = out_users.len() as i32;
+        let resp = gen_oas_server_kc::models::UserSearchResponse {
+            users: out_users,
+            total_count: Some(total_count),
+        };
+        Ok(SearchUsersResponse::SearchResults(resp))
+    }
+
+    async fn delete_user(
+        &self,
+        user_id: String,
+        _context: &KcContext,
+    ) -> std::result::Result<DeleteUserResponse, ApiError> {
+        let affected = self
+            .state
+            .service
+            .delete_user(&user_id)
+            .await
+            .map_err(repo_err)?;
+        if affected == 0 {
+            return Ok(DeleteUserResponse::NotFound(kc_error(
+                "NOT_FOUND",
+                "User not found",
+            )));
+        }
+        Ok(DeleteUserResponse::Deleted)
+    }
+
+    async fn get_user(
+        &self,
+        user_id: String,
+        _context: &KcContext,
+    ) -> std::result::Result<GetUserResponse, ApiError> {
         let row = self
             .state
             .service
-            .get_sms_by_hash(&req.hash)
+            .get_user(&user_id)
             .await
             .map_err(repo_err)?;
         let Some(row) = row else {
-            let mut resp = gen_oas_server_kc::models::SmsConfirmResponse::new(false);
-            resp.reason = Some("NOT_FOUND".to_owned());
-            return Ok(ConfirmSmsResponse::ConfirmationResult(resp));
+            return Ok(GetUserResponse::NotFound(kc_error(
+                "NOT_FOUND",
+                "User not found",
+            )));
         };
+        Ok(GetUserResponse::User(
+            kc_map::UserRecordDto::from(row).into(),
+        ))
+    }
 
-        if let Some(ttl) = row.ttl_seconds {
-            let expires_at = row.created_at + chrono::Duration::seconds(ttl as i64);
-            if Utc::now() > expires_at {
-                let mut resp = gen_oas_server_kc::models::SmsConfirmResponse::new(false);
-                resp.reason = Some("EXPIRED".to_owned());
-                return Ok(ConfirmSmsResponse::ConfirmationResult(resp));
-            }
-        }
-
-        let mut hasher = Sha256::new();
-        hasher.update(req.otp.as_bytes());
-        let provided = hasher.finalize().to_vec();
-        if provided != row.otp_sha256 {
-            let mut resp = gen_oas_server_kc::models::SmsConfirmResponse::new(false);
-            resp.reason = Some("INVALID_OTP".to_owned());
-            return Ok(ConfirmSmsResponse::ConfirmationResult(resp));
-        }
-
-        self.state
+    async fn update_user(
+        &self,
+        user_id: String,
+        user_upsert_request: gen_oas_server_kc::models::UserUpsertRequest,
+        _context: &KcContext,
+    ) -> std::result::Result<UpdateUserResponse, ApiError> {
+        let req: kc_map::UserUpsert = user_upsert_request.into();
+        let row = self
+            .state
             .service
-            .mark_sms_confirmed(&req.hash)
+            .update_user(&user_id, &req)
             .await
             .map_err(repo_err)?;
-
-        Ok(ConfirmSmsResponse::ConfirmationResult(
-            gen_oas_server_kc::models::SmsConfirmResponse::new(true),
+        let Some(row) = row else {
+            return Ok(UpdateUserResponse::NotFound(kc_error(
+                "NOT_FOUND",
+                "User not found",
+            )));
+        };
+        Ok(UpdateUserResponse::Updated(
+            kc_map::UserRecordDto::from(row).into(),
         ))
     }
 }
