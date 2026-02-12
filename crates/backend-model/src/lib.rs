@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod db;
+pub mod bff;
+pub mod kc;
+pub mod staff;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use chrono;
+pub use serde_json;
+pub use sqlx;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}

@@ -7,6 +7,29 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
+backend-core = { workspace = true, features = ["axum"] }
+backend-model.workspace = true
+axum.workspace = true
+axum-server.workspace = true
+bytes = "1"
+chrono.workspace = true
+http = "1"
+http-body-util = "0.1"
+hyper = "1"
+sqlx.workspace = true
+tokio = { workspace = true, features = ["signal", "time"] }
+tower = "0.5"
+tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+swagger = "7"
+
+aws-config = "1"
+aws-sdk-s3 = "1"
+aws-sdk-sns = "1"
+aws-types = "1"
+
 gen_oas_server_bff.workspace = true
 gen_oas_server_kc.workspace = true
 gen_oas_server_staff.workspace = true

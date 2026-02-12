@@ -1,11 +1,12 @@
 mod branding;
 
-use backend_cli::{AppCli, AppCommands, Parser};
-use branding::banner::BANNER;
 use mimalloc::MiMalloc;
+use branding::banner::BANNER;
+use backend_cli::{AppCli, AppCommands, Parser};
 use backend_core::{load_from_path, Result};
 use backend_otlp::init_tracing;
 use backend_otlp::tracing::info;
+use backend_server::serve;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -20,6 +21,7 @@ async fn main() -> Result<()> {
             init_tracing(&config.logging);
 
             info!("Starting the server");
+            serve(&config).await?;
         }
         Some(AppCommands::Migrate { config_path }) => {
             let config = load_from_path(&config_path)?;

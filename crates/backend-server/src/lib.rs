@@ -1,3 +1,101 @@
-pub fn lib() {
-    todo!("This is a placeholder for the backend server library. The actual implementation will be added in the future.")
+mod api;
+mod configuration;
+mod context;
+mod sms_retry;
+mod state;
+
+use axum::routing::get;
+use axum::Router;
+use backend_core::{Config, Result};
+use http::{Request, Response, StatusCode};
+use std::convert::Infallible;
+use std::sync::Arc;
+use tower::service_fn;
+use tracing::{error, info};
+
+pub use configuration::BackendServerConfig;
+
+pub async fn serve(core_config: &Config) -> Result<()> {
+    let config = BackendServerConfig::try_from(core_config)?;
+    let state = Arc::new(state::AppState::from_config(&config).await?);
+
+    // Spawn the in-process SNS retry worker.
+    sms_retry::spawn(state.clone());
+
+    let api = api::BackendApi::new(state.clone());
+    let router = router(state.clone(), api.clone());
+
+    info!("Listening on {}", config.listen_addr);
+
+    let handle = axum_server::Handle::new();
+    let shutdown_handle = handle.clone();
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        shutdown_handle.graceful_shutdown(None);
+    });
+
+    match config.tls {
+        Some(tls) => {
+            let rustls_config =
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(tls.cert_path, tls.key_path)
+                    .await
+                    .map_err(|e| backend_core::Error::Server(e.to_string()))?;
+            axum_server::bind_rustls(config.listen_addr, rustls_config)
+                .handle(handle)
+                .serve(router.into_make_service())
+                .await
+                .map_err(|e| backend_core::Error::Server(e.to_string()))?;
+        }
+        None => {
+            axum_server::bind(config.listen_addr)
+                .handle(handle)
+                .serve(router.into_make_service())
+                .await
+                .map_err(|e| backend_core::Error::Server(e.to_string()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn router(state: Arc<state::AppState>, api: api::BackendApi) -> Router {
+    let fallback = service_fn(move |req: Request<axum::body::Body>| {
+        let state = state.clone();
+        let api = api.clone();
+        async move { Ok::<Response<axum::body::Body>, Infallible>(dispatch(state, api, req).await) }
+    });
+
+    Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .fallback_service(fallback)
+}
+
+async fn dispatch(
+    state: Arc<state::AppState>,
+    api: api::BackendApi,
+    req: Request<axum::body::Body>,
+) -> Response<axum::body::Body> {
+    let path = req.uri().path();
+
+    if path.starts_with("/v1/") {
+        return state::call_kc(api, req).await;
+    }
+
+    if path.starts_with("/api/registration/") {
+        let ctx = context::AuthContext::from_request(&req, &state.config.auth_static_bearer_tokens);
+        return state::call_bff(api, ctx, req).await;
+    }
+
+    if path.starts_with("/api/kyc/staff/") {
+        let ctx = context::AuthContext::from_request(&req, &state.config.auth_static_bearer_tokens);
+        return state::call_staff(api, ctx, req).await;
+    }
+
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(axum::body::Body::from("Not found"))
+        .unwrap_or_else(|e| {
+            error!("failed to build 404 response: {e}");
+            Response::new(axum::body::Body::empty())
+        })
 }
