@@ -7,3 +7,6 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
+gen_oas_server_bff.workspace = true
+gen_oas_server_kc.workspace = true
+gen_oas_server_staff.workspace = true

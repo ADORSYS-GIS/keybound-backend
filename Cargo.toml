@@ -7,7 +7,11 @@ members = [
     "crates/backend-metrics",
     "crates/backend-otlp",
     "crates/backend-server",
-    "crates/gen-kc-server-api",
+
+    "crates/gen_oas_client_cuss_registration",
+    "crates/gen_oas_server_bff",
+    "crates/gen_oas_server_kc",
+    "crates/gen_oas_server_staff",
 ]
 resolver = "3"
 
@@ -18,7 +22,10 @@ backend-metrics = { path = "./crates/backend-metrics" }
 backend-otlp = { path = "./crates/backend-otlp" }
 backend-server = { path = "./crates/backend-server" }
 
-gen-kc-server-api = { path = "./crates/gen-kc-server-api" }
+gen_oas_client_cuss_registration = { path = "./crates/gen_oas_client_cuss_registration" }
+gen_oas_server_bff = { path = "./crates/gen_oas_server_bff" }
+gen_oas_server_kc = { path = "./crates/gen_oas_server_kc" }
+gen_oas_server_staff = { path = "./crates/gen_oas_server_staff" }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"

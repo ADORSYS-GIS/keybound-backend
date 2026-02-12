@@ -7,3 +7,4 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
+backend-cli.workspace = true

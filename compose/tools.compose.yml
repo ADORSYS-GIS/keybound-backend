@@ -1,0 +1,119 @@
+services:
+  download-core-tools:
+    image: alpine/curl
+    environment:
+      KEYCLOAK_PLUGIN_VERSION: "0.1.5"
+      OPENAPI_GENERATOR_VERSION: "7.19.0"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e;
+        rm -rf /data/*
+        mkdir -p /data/bin
+        mkdir -p /data/kc-plugins
+        
+        echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
+        curl -sLo /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
+        
+        echo "Download OpenAPI for Keycloak...";
+        curl -sLo /data/keycloak-interface.openapi.yaml "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
+        echo "Downloaded OpenAPI for Keycloak";
+        
+        echo "Download keybound...";
+        curl -sLo /data/kc-plugins/keycloak-keybound-all.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-authenticator-enrollment.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-authenticator-enrollment-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-credentials-device-key.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-credentials-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-protocol-mapper.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-protocol-mapper-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-theme.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-theme-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        curl -sLo /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        echo "Downloaded keybound";
+
+    volumes:
+      - downloaded_data:/data
+
+  generate-code:
+    image: amazoncorretto:21
+    depends_on:
+      download-core-tools:
+        condition: service_completed_successfully
+    configs:
+      - source: oas_server_kc
+        target: /tmp/oas_server_kc.gson
+        uid: "1001"
+        gid: "1001"
+        mode: 0600
+      - source: oas_server_bff
+        target: /tmp/oas_server_bff.gson
+        uid: "1001"
+        gid: "1001"
+        mode: 0600
+      - source: oas_server_staff
+        target: /tmp/oas_server_staff.gson
+        uid: "1001"
+        gid: "1001"
+        mode: 0600
+      - source: oas_client_cuss_registration
+        target: /tmp/oas_client_cuss_registration.gson
+        uid: "1001"
+        gid: "1001"
+        mode: 0600
+    volumes:
+      - downloaded_data:/data
+      - ../crates:/work
+      - ../openapi:/openapi
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e;
+        
+        export JAR_FILE=/data/bin/openapi-generator-cli.jar
+        
+        generations=('oas_server_kc' 'oas_server_bff' 'oas_server_staff' 'oas_client_cuss_registration')
+        for item in "$${generations[@]}"; do
+            rm -rf "/work/gen_$$item"
+            java -jar $$JAR_FILE generate \
+              -c "/tmp/$$item.gson" \
+              -o "/work/gen_$$item"
+        done
+
+volumes:
+  downloaded_data:
+
+configs:
+  oas_server_kc:
+    content: |
+      {
+        "inputSpec": "/data/keycloak-interface.openapi.yaml",
+        "generatorName": "rust-server",
+        "packageName": "gen_oas_server_kc",
+        "packageVersion": "9.9.9"
+      }
+  oas_server_bff:
+    content: |
+      {
+        "inputSpec": "/openapi/user-storage-bff.json",
+        "generatorName": "rust-server",
+        "packageName": "gen_oas_server_bff",
+        "packageVersion": "9.9.9"
+      }
+  oas_server_staff:
+    content: |
+      {
+        "inputSpec": "/openapi/user-storage-staff.json",
+        "generatorName": "rust-server",
+        "packageName": "gen_oas_server_staff",
+        "packageVersion": "9.9.9"
+      }
+  oas_client_cuss_registration:
+    content: |
+      {
+        "inputSpec": "/openapi/user-storage-registration.json",
+        "generatorName": "rust",
+        "packageName": "gen_oas_client_cuss_registration",
+        "packageVersion": "9.9.9"
+      }
