@@ -27,8 +27,8 @@
         "tags": [
           "KYC Documents"
         ],
-        "summary": "Upload a KYC document",
-        "description": "Authenticated customers can upload ID or selfie documents for manual review.",
+        "summary": "Create a KYC document upload",
+        "description": "Authenticated customers request an S3 presigned URL to upload an ID or selfie document for manual review.",
         "security": [
           {
             "bearerAuth": []
@@ -48,31 +48,16 @@
         "requestBody": {
           "required": true,
           "content": {
-            "multipart/form-data": {
+            "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "documentType",
-                  "file"
-                ],
-                "properties": {
-                  "documentType": {
-                    "type": "string",
-                    "description": "One of id_front, id_back, selfie_with_id."
-                  },
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "Image file in JPEG, PNG, or WebP with max size 10MB."
-                  }
-                }
+                "$ref": "#/components/schemas/KycDocumentUploadRequest"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Document uploaded successfully.",
+            "description": "Upload URL created successfully.",
             "content": {
               "application/json": {
                 "schema": {
@@ -189,6 +174,33 @@
       }
     },
     "schemas": {
+      "KycDocumentUploadRequest": {
+        "type": "object",
+        "required": [
+          "documentType",
+          "fileName",
+          "mimeType",
+          "contentLength"
+        ],
+        "properties": {
+          "documentType": {
+            "type": "string",
+            "description": "One of id_front, id_back, selfie_with_id."
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "File MIME type (e.g., image/jpeg)."
+          },
+          "contentLength": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Expected file size in bytes."
+          }
+        }
+      },
       "KycDocumentUploadResponse": {
         "type": "object",
         "properties": {
@@ -209,6 +221,33 @@
             "type": "string"
           },
           "mimeType": {
+            "type": "string"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Presigned S3 URL for direct upload."
+          },
+          "uploadMethod": {
+            "type": "string",
+            "description": "HTTP method to use when uploading to uploadUrl."
+          },
+          "uploadHeaders": {
+            "type": "object",
+            "description": "Headers that must be sent during upload.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the presigned URL expires."
+          },
+          "s3Bucket": {
+            "type": "string"
+          },
+          "s3Key": {
             "type": "string"
           }
         }

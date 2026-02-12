@@ -8,6 +8,10 @@ server:
     tls:
       cert_path: "./config/tls/api.crt"
       key_path: "./config/tls/api.key"
+    auth:
+      # If empty, BFF/Staff bearer auth is effectively disabled (dev-friendly).
+      static_bearer_tokens:
+        - "dev-bearer-token"
 logging:
   level: "info"
 database:
@@ -15,3 +19,13 @@ database:
   pool_size: 10
 oauth2:
   jwks_url: "http://172.17.0.1:9026/realms/dev/protocol/openid-connect/certs"
+aws:
+  region: "us-east-1"
+  s3:
+    bucket: "user-storage-dev"
+    endpoint: null
+    presign_ttl_seconds: 900
+  sns:
+    region: null
+    max_attempts: 10
+    initial_backoff_seconds: 5
