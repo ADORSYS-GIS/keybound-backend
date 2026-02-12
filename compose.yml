@@ -2,3 +2,4 @@ include:
   - compose/tools.compose.yml
   - compose/keycloak.compose.yml
   - compose/postgres.compose.yml
+  - compose/redis.compose.yml

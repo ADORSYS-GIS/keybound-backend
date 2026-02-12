@@ -144,7 +144,7 @@ impl BffApi<ServiceContext> for BackendApi {
             s3_key: Some(doc_row.s3_key),
         };
 
-        self.state.invalidate_bff_cache(&external_id).await;
+        self.state.invalidate_bff_cache(&external_id);
 
         Ok(ApiRegistrationKycDocumentsPostResponse::UploadURLCreatedSuccessfully(dto.into()))
     }
@@ -161,7 +161,7 @@ impl BffApi<ServiceContext> for BackendApi {
 
         let use_default_cache = page == 1 && limit == 20;
         if use_default_cache {
-            if let Some(cached) = self.state.http_cache.kyc_status.get(&external_id).await {
+            if let Some(cached) = self.state.get_kyc_status_cache(&external_id) {
                 return Ok(ApiRegistrationKycStatusGetResponse::KYCStatusInformation(
                     cached,
                 ));
@@ -208,10 +208,7 @@ impl BffApi<ServiceContext> for BackendApi {
         let response: gen_oas_server_bff::models::KycStatusResponse = dto.into();
         if use_default_cache {
             self.state
-                .http_cache
-                .kyc_status
-                .insert(external_id, response.clone())
-                .await;
+                .put_kyc_status_cache(external_id, response.clone());
         }
         Ok(ApiRegistrationKycStatusGetResponse::KYCStatusInformation(
             response,
@@ -224,7 +221,7 @@ impl BffApi<ServiceContext> for BackendApi {
         _context: &ServiceContext,
     ) -> std::result::Result<ApiRegistrationLimitsGetResponse, ApiError> {
         let external_id = Self::require_external_id(x_external_id)?;
-        if let Some(cached) = self.state.http_cache.limits.get(&external_id).await {
+        if let Some(cached) = self.state.get_limits_cache(&external_id) {
             return Ok(ApiRegistrationLimitsGetResponse::LimitsAndUsageDetails(
                 cached,
             ));
@@ -256,11 +253,7 @@ impl BffApi<ServiceContext> for BackendApi {
         resp.allowed_payment_methods = Some(vec!["CARD".to_owned(), "BANK_TRANSFER".to_owned()]);
         resp.restricted_features = Some(vec![]);
 
-        self.state
-            .http_cache
-            .limits
-            .insert(external_id, resp.clone())
-            .await;
+        self.state.put_limits_cache(external_id, resp.clone());
 
         Ok(ApiRegistrationLimitsGetResponse::LimitsAndUsageDetails(
             resp,
@@ -372,7 +365,7 @@ impl StaffApi<ServiceContext> for BackendApi {
         if !updated {
             return Ok(ApiKycStaffSubmissionsExternalIdApprovePostResponse::ValidationFailed);
         }
-        self.state.invalidate_bff_cache(&external_id).await;
+        self.state.invalidate_bff_cache(&external_id);
         Ok(ApiKycStaffSubmissionsExternalIdApprovePostResponse::KYCApproved)
     }
 
@@ -392,7 +385,7 @@ impl StaffApi<ServiceContext> for BackendApi {
         if !updated {
             return Ok(ApiKycStaffSubmissionsExternalIdRejectPostResponse::ValidationFailed);
         }
-        self.state.invalidate_bff_cache(&external_id).await;
+        self.state.invalidate_bff_cache(&external_id);
         Ok(ApiKycStaffSubmissionsExternalIdRejectPostResponse::KYCRejected)
     }
 
@@ -413,7 +406,7 @@ impl StaffApi<ServiceContext> for BackendApi {
         if !updated {
             return Ok(ApiKycStaffSubmissionsExternalIdRequestInfoPostResponse::ValidationFailed);
         }
-        self.state.invalidate_bff_cache(&external_id).await;
+        self.state.invalidate_bff_cache(&external_id);
         Ok(ApiKycStaffSubmissionsExternalIdRequestInfoPostResponse::AdditionalInfoRequested)
     }
 }

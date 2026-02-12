@@ -8,10 +8,11 @@ use http::{Request, Response, StatusCode};
 use http_body_util::BodyExt as _;
 use http_body_util::combinators::BoxBody;
 use hyper::service::Service as HyperService;
-use moka::future::Cache;
+use lru::LruCache;
 use sqlx::postgres::PgPoolOptions;
 use std::convert::Infallible;
-use std::time::Duration;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 use tracing::error;
 
 use crate::services::BackendService;
@@ -23,8 +24,8 @@ pub struct RuntimeConfig {
 
 #[derive(Clone)]
 pub struct HttpCache {
-    pub kyc_status: Cache<String, KycStatusResponse>,
-    pub limits: Cache<String, LimitsResponse>,
+    pub kyc_status: Arc<Mutex<LruCache<String, KycStatusResponse>>>,
+    pub limits: Arc<Mutex<LruCache<String, LimitsResponse>>>,
 }
 
 #[derive(Clone)]
@@ -78,15 +79,10 @@ impl AppState {
             aws_sdk_sns::Client::from_conf(builder.build())
         };
 
+        let capacity = NonZeroUsize::new(10_000).expect("non-zero LRU capacity");
         let http_cache = HttpCache {
-            kyc_status: Cache::builder()
-                .max_capacity(10_000)
-                .time_to_live(Duration::from_secs(30))
-                .build(),
-            limits: Cache::builder()
-                .max_capacity(10_000)
-                .time_to_live(Duration::from_secs(30))
-                .build(),
+            kyc_status: Arc::new(Mutex::new(LruCache::new(capacity))),
+            limits: Arc::new(Mutex::new(LruCache::new(capacity))),
         };
 
         let repository = PgRepository::new(db.clone());
@@ -104,9 +100,56 @@ impl AppState {
         })
     }
 
-    pub async fn invalidate_bff_cache(&self, external_id: &str) {
-        self.http_cache.kyc_status.invalidate(external_id).await;
-        self.http_cache.limits.invalidate(external_id).await;
+    pub fn get_kyc_status_cache(&self, external_id: &str) -> Option<KycStatusResponse> {
+        let mut cache = self
+            .http_cache
+            .kyc_status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.get(external_id).cloned()
+    }
+
+    pub fn put_kyc_status_cache(&self, external_id: String, value: KycStatusResponse) {
+        let mut cache = self
+            .http_cache
+            .kyc_status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.put(external_id, value);
+    }
+
+    pub fn get_limits_cache(&self, external_id: &str) -> Option<LimitsResponse> {
+        let mut cache = self
+            .http_cache
+            .limits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.get(external_id).cloned()
+    }
+
+    pub fn put_limits_cache(&self, external_id: String, value: LimitsResponse) {
+        let mut cache = self
+            .http_cache
+            .limits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.put(external_id, value);
+    }
+
+    pub fn invalidate_bff_cache(&self, external_id: &str) {
+        let mut kyc_status = self
+            .http_cache
+            .kyc_status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        kyc_status.pop(external_id);
+
+        let mut limits = self
+            .http_cache
+            .limits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        limits.pop(external_id);
     }
 }
 

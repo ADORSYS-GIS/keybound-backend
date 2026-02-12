@@ -1,23 +1,22 @@
 use crate::traits::*;
 use backend_model::db;
 use backend_model::{kc as kc_map, staff as staff_map};
-use moka::future::Cache;
+use lru::LruCache;
 use sqlx::{PgPool, Postgres, QueryBuilder};
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 use sqlx_data::{Pagination, Params, ParamsBuilder, Serial, SerialParams};
-use std::time::Duration;
 
 #[derive(Clone)]
 pub struct PgRepository {
     pool: PgPool,
-    resolve_user_by_phone_cache: Cache<String, Option<db::UserRow>>,
+    resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>,
 }
 
 impl PgRepository {
     pub fn new(pool: PgPool) -> Self {
-        let resolve_user_by_phone_cache = Cache::builder()
-            .max_capacity(50_000)
-            .time_to_live(Duration::from_secs(30))
-            .build();
+        let capacity = NonZeroUsize::new(50_000).expect("non-zero LRU capacity");
+        let resolve_user_by_phone_cache = Arc::new(Mutex::new(LruCache::new(capacity)));
 
         Self {
             pool,
@@ -910,8 +909,14 @@ impl KcRepo for PgRepository {
         phone: &str,
     ) -> RepoResult<Option<db::UserRow>> {
         let cache_key = Self::phone_cache_key(realm, phone);
-        if let Some(cached) = self.resolve_user_by_phone_cache.get(&cache_key).await {
-            return Ok(cached);
+        {
+            let mut cache = self
+                .resolve_user_by_phone_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(cached) = cache.get(&cache_key).cloned() {
+                return Ok(cached);
+            }
         }
 
         let user = sqlx::query_as(
@@ -928,9 +933,13 @@ impl KcRepo for PgRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        self.resolve_user_by_phone_cache
-            .insert(cache_key, user.clone())
-            .await;
+        {
+            let mut cache = self
+                .resolve_user_by_phone_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            cache.put(cache_key, user.clone());
+        }
         Ok(user)
     }
 
@@ -961,9 +970,13 @@ impl KcRepo for PgRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        self.resolve_user_by_phone_cache
-            .insert(Self::phone_cache_key(realm, phone), Some(user.clone()))
-            .await;
+        {
+            let mut cache = self
+                .resolve_user_by_phone_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            cache.put(Self::phone_cache_key(realm, phone), Some(user.clone()));
+        }
 
         Ok((user, true))
     }
