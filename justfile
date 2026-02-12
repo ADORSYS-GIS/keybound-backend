@@ -15,88 +15,67 @@
 #
 # ========================================================================================================
 
-# Variable for passing commands like `just build c="app"`
 c := ""
+compose_file := "compose.yml"
+project := "user-storage-backend"
 
-# ----------------------------------------------------------
+init: # Initialize docker compose services
+	docker compose -p {{project}} -f {{compose_file}} build {{c}}
 
-# Initialize the project
-init:
-	docker compose -p user-storage-backend -f compose.yaml build {{c}}
+help: # Show this help message
+	@printf 'Commands:\n  init          Initialize docker compose services\n  help          Show this help message\n  pull          Pull latest images from registries\n  build         Build all configured compose services\n  up            Start services with rebuild\n  up-single     Start a single service (pass service=...)\n  up-no-build   Start services without rebuilding\n  img           Show stored service images\n  start         Resume stopped services\n  down          Stop and remove containers\n  destroy       Snapshot removal of containers + volumes\n  stop          Stop running containers\n  restart       Restart services (stop + up)\n  logs          Follow all service logs\n  logs-keycloak Follow Keycloak logs\n  ps            List active containers\n  ps-all        List all containers (including exited)\n  stats         Show container stats\n'
 
-# Show this help
-help:
-	@just --summary
+pull: # Pull latest images from registries
+	docker compose -p {{project}} -f {{compose_file}} pull {{c}}
 
-# Pull the image
-pull:
-	docker compose -p user-storage-backend -f compose.yaml pull {{c}}
+build: # Build all configured compose services
+	docker compose -p {{project}} -f {{compose_file}} build {{c}}
 
-# Build the project
-build:
-	docker compose -p user-storage-backend -f compose.yaml build {{c}}
+up: # Start services with rebuild
+	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans --build {{c}}
 
-# Start the project
-up:
-	docker compose -p user-storage-backend -f compose.yaml up -d --remove-orphans --build {{c}}
+up-single service: # Start a single service (pass service=...)
+	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans --build {{service}} {{c}}
 
-# Start a single service
-up-single app:
-	docker compose -p user-storage-backend -f compose.yaml up -d --remove-orphans --build {{app}} {{c}}
+up-no-build: # Start services without rebuilding
+	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans {{c}}
 
-# Start the project (without rebuild)
-up-no-build:
-	docker compose -p user-storage-backend -f compose.yaml up -d --remove-orphans {{c}}
+img: # Show stored service images
+	docker compose -p {{project}} -f {{compose_file}} images {{c}}
 
-# Show images
-img:
-	docker compose -p user-storage-backend -f compose.yaml images {{c}}
+start: # Resume stopped services
+	docker compose -p {{project}} -f {{compose_file}} start {{c}}
 
-# Start the project (without rebuild)
-start:
-	docker compose -p user-storage-backend -f compose.yaml start {{c}}
+down: # Stop and remove containers
+	docker compose -p {{project}} -f {{compose_file}} down {{c}}
 
-# Stop the project
-down:
-	docker compose -p user-storage-backend -f compose.yaml down {{c}}
+destroy: # Snapshot removal of containers + volumes
+	docker compose -p {{project}} -f {{compose_file}} down -v {{c}}
 
-# Destroy the project
-destroy:
-	docker compose -p user-storage-backend -f compose.yaml down -v {{c}}
+stop: # Stop running containers
+	docker compose -p {{project}} -f {{compose_file}} stop {{c}}
 
-# Stop containers
-stop:
-	docker compose -p user-storage-backend -f compose.yaml stop {{c}}
+restart: # Restart services (stop + up)
+	docker compose -p {{project}} -f {{compose_file}} stop {{c}}
+	docker compose -p {{project}} -f {{compose_file}} up -d {{c}}
 
-# Restart the project
-restart:
-	docker compose -p user-storage-backend -f compose.yaml stop {{c}}
-	docker compose -p user-storage-backend -f compose.yaml up -d {{c}}
+logs: # Follow all service logs
+	docker compose -p {{project}} -f {{compose_file}} logs --tail=100 -f {{c}}
 
-# Show logs
-logs:
-	docker compose -p user-storage-backend -f compose.yaml logs --tail=100 -f {{c}}
+logs-keycloak: # Follow Keycloak logs
+	docker compose -p {{project}} -f {{compose_file}} logs --tail=100 -f keycloak-26 {{c}}
 
-# Show API logs
-logs-api:
-	docker compose -p user-storage-backend -f compose.yaml logs --tail=100 -f authz-api {{c}}
+ps: # List active containers
+	docker compose -p {{project}} -f {{compose_file}} ps {{c}}
 
-# Show OPA logs
-logs-opa:
-	docker compose -p user-storage-backend -f compose.yaml logs --tail=100 -f authz-opa {{c}}
+ps-all: # List all containers (including exited)
+	docker compose -p {{project}} -f {{compose_file}} ps --all {{c}}
 
-# Show status
-ps:
-	docker compose -p user-storage-backend -f compose.yaml ps {{c}}
+stats: # Show container stats
+	docker compose -p {{project}} -f {{compose_file}} stats {{c}}
 
-# Show all containers
-ps-all:
-	docker compose -p user-storage-backend -f compose.yaml ps --all {{c}}
+dev command: # Start the backend in dev mode
+    cargo run --color=always --bin backend --profile dev -- {{command}}
 
-# Run migrations once
-migrate:
-	docker compose -p user-storage-backend -f compose.yaml run --rm authz-migrate
-
-# Show stats
-stats:
-	docker compose -p user-storage-backend -f compose.yaml stats {{c}}
+prepare: # Build the backend for prod
+    cargo build --release

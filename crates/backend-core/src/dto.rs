@@ -1,11 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fmt::Display;
 use utoipa::ToSchema;
-
-const ACTIVE: &str = "active";
-const REVOKED: &str = "revoked";
 
 fn default_limits() -> Value {
     serde_json::json!({})
