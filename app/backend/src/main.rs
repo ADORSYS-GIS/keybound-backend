@@ -25,6 +25,8 @@ async fn main() -> Result<()> {
         }
         Some(AppCommands::Migrate { config_path }) => {
             let config = load_from_path(&config_path)?;
+            init_tracing(&config.logging);
+
             backend_migrate::migrate(&config.database.url).await?;
         }
         Some(AppCommands::Config { config_path }) => {
