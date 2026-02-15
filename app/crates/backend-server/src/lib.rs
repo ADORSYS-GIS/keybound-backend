@@ -30,7 +30,7 @@ pub async fn serve(core_config: &Config) -> Result<()> {
 
     let handle = axum_server::Handle::new();
     let shutdown_handle = handle.clone();
-    
+
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
         shutdown_handle.graceful_shutdown(None);
@@ -40,7 +40,7 @@ pub async fn serve(core_config: &Config) -> Result<()> {
         Some((cert_path, key_path)) => {
             let rustls_config =
                 axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
-            
+
             axum_server::bind_rustls(listen_addr, rustls_config)
                 .handle(handle)
                 .serve(make_svc)

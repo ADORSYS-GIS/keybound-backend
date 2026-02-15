@@ -6,9 +6,8 @@ use backend_model::{bff as bff_map, kc as kc_map, staff as staff_map};
 use backend_repository::{ApprovalCreated, KycDocumentInsert, SmsPendingInsert};
 use chrono::Utc;
 use gen_oas_server_bff::{
-    Api as BffApi, ApiKycCasesMineDocumentsPostResponse,
-    ApiKycCasesMinePatchResponse, ApiKycCasesMineGetResponse,
-    ApiLimitsGetResponse,
+    Api as BffApi, ApiKycCasesMineDocumentsPostResponse, ApiKycCasesMineGetResponse,
+    ApiKycCasesMinePatchResponse, ApiLimitsGetResponse,
 };
 use gen_oas_server_kc::{
     Api as KcApi, CancelApprovalResponse, ConfirmSmsResponse, CreateApprovalResponse,
@@ -188,9 +187,7 @@ impl BffApi<ServiceContext> for BackendApi {
         let (page, limit) = (1, 20);
 
         if let Some(cached) = self.state.get_kyc_status_cache(&user_id) {
-            return Ok(ApiKycCasesMineGetResponse::KYCCaseDetails(
-                cached,
-            ));
+            return Ok(ApiKycCasesMineGetResponse::KYCCaseDetails(cached));
         }
 
         let profile = self
@@ -231,15 +228,14 @@ impl BffApi<ServiceContext> for BackendApi {
         let response: gen_oas_server_bff::models::KycCaseResponse = dto.into();
         self.state.put_kyc_status_cache(user_id, response.clone());
 
-        Ok(ApiKycCasesMineGetResponse::KYCCaseDetails(
-            response,
-        ))
+        Ok(ApiKycCasesMineGetResponse::KYCCaseDetails(response))
     }
 
     async fn api_kyc_cases_mine_submission_post(
         &self,
         _context: &ServiceContext,
-    ) -> std::result::Result<gen_oas_server_bff::ApiKycCasesMineSubmissionPostResponse, ApiError> {
+    ) -> std::result::Result<gen_oas_server_bff::ApiKycCasesMineSubmissionPostResponse, ApiError>
+    {
         Err(ApiError("Not implemented".to_owned()))
     }
 
@@ -250,9 +246,7 @@ impl BffApi<ServiceContext> for BackendApi {
         let user_id = Self::require_user_id(context)?;
 
         if let Some(cached) = self.state.get_limits_cache(&user_id) {
-            return Ok(ApiLimitsGetResponse::LimitsAndUsageDetails(
-                cached,
-            ));
+            return Ok(ApiLimitsGetResponse::LimitsAndUsageDetails(cached));
         }
 
         let kyc_tier = self
@@ -281,11 +275,8 @@ impl BffApi<ServiceContext> for BackendApi {
         resp.restricted_features = Some(vec![]);
 
         self.state.put_limits_cache(user_id, resp.clone());
-        Ok(ApiLimitsGetResponse::LimitsAndUsageDetails(
-            resp,
-        ))
+        Ok(ApiLimitsGetResponse::LimitsAndUsageDetails(resp))
     }
-
 }
 
 #[backend_core::async_trait]

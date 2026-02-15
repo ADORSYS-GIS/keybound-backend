@@ -1,7 +1,7 @@
 use backend_model::{db, kc as kc_map, staff as staff_map};
 use backend_repository::{
-    ApprovalCreated, KycDocumentInsert, PgRepository, RepoResult, SmsPendingInsert, SmsQueued,
-    KycRepo, UserRepo, DeviceRepo, ApprovalRepo, SmsRepo,
+    ApprovalCreated, ApprovalRepo, DeviceRepo, KycDocumentInsert, KycRepo, PgRepository,
+    RepoResult, SmsPendingInsert, SmsQueued, SmsRepo, UserRepo,
 };
 use sqlx_data::{ParamsBuilder, Serial};
 
@@ -90,7 +90,10 @@ impl BackendService {
                 .done();
         }
 
-        self.repository.kyc.list_kyc_submissions(builder.build()).await
+        self.repository
+            .kyc
+            .list_kyc_submissions(builder.build())
+            .await
     }
 
     pub async fn get_kyc_submission(
@@ -105,7 +108,10 @@ impl BackendService {
         external_id: &str,
         req: &staff_map::KycApprovalRequest,
     ) -> RepoResult<bool> {
-        self.repository.kyc.update_kyc_approved(external_id, req).await
+        self.repository
+            .kyc
+            .update_kyc_approved(external_id, req)
+            .await
     }
 
     pub async fn update_kyc_rejected(
@@ -113,7 +119,10 @@ impl BackendService {
         external_id: &str,
         req: &staff_map::KycRejectionRequest,
     ) -> RepoResult<bool> {
-        self.repository.kyc.update_kyc_rejected(external_id, req).await
+        self.repository
+            .kyc
+            .update_kyc_rejected(external_id, req)
+            .await
     }
 
     pub async fn update_kyc_request_info(
@@ -174,7 +183,10 @@ impl BackendService {
         user_id: &str,
         device_id: &str,
     ) -> RepoResult<Option<db::DeviceRow>> {
-        self.repository.device.get_user_device(user_id, device_id).await
+        self.repository
+            .device
+            .get_user_device(user_id, device_id)
+            .await
     }
 
     pub async fn update_device_status(
@@ -193,7 +205,10 @@ impl BackendService {
         device_id: &str,
         jkt: &str,
     ) -> RepoResult<Option<(String, String)>> {
-        self.repository.device.find_device_binding(device_id, jkt).await
+        self.repository
+            .device
+            .find_device_binding(device_id, jkt)
+            .await
     }
 
     pub async fn bind_device(&self, req: &kc_map::EnrollmentBindRequest) -> RepoResult<String> {
@@ -205,7 +220,10 @@ impl BackendService {
         req: &kc_map::ApprovalCreateRequest,
         idempotency_key: Option<String>,
     ) -> RepoResult<ApprovalCreated> {
-        self.repository.approval.create_approval(req, idempotency_key).await
+        self.repository
+            .approval
+            .create_approval(req, idempotency_key)
+            .await
     }
 
     pub async fn get_approval(&self, request_id: &str) -> RepoResult<Option<db::ApprovalRow>> {
@@ -217,7 +235,10 @@ impl BackendService {
         user_id: &str,
         statuses: Option<Vec<String>>,
     ) -> RepoResult<Vec<db::ApprovalRow>> {
-        self.repository.approval.list_user_approvals(user_id, statuses).await
+        self.repository
+            .approval
+            .list_user_approvals(user_id, statuses)
+            .await
     }
 
     pub async fn decide_approval(
@@ -225,7 +246,10 @@ impl BackendService {
         request_id: &str,
         req: &kc_map::ApprovalDecisionRequest,
     ) -> RepoResult<Option<db::ApprovalRow>> {
-        self.repository.approval.decide_approval(request_id, req).await
+        self.repository
+            .approval
+            .decide_approval(request_id, req)
+            .await
     }
 
     pub async fn cancel_approval(&self, request_id: &str) -> RepoResult<u64> {
@@ -237,7 +261,10 @@ impl BackendService {
         realm: &str,
         phone: &str,
     ) -> RepoResult<Option<db::UserRow>> {
-        self.repository.user.resolve_user_by_phone(realm, phone).await
+        self.repository
+            .user
+            .resolve_user_by_phone(realm, phone)
+            .await
     }
 
     pub async fn resolve_or_create_user_by_phone(

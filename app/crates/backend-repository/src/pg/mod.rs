@@ -12,8 +12,8 @@ pub mod user;
 pub use approval::{ApprovalRepository, PgApprovalRepo};
 pub use device::{DeviceRepository, PgDeviceRepo};
 pub use kyc::{KycRepository, PgKycRepo};
-pub use sms::{SmsRepository, PgSmsRepo};
-pub use user::{UserRepository, PgUserRepo};
+pub use sms::{PgSmsRepo, SmsRepository};
+pub use user::{PgUserRepo, UserRepository};
 
 #[derive(Clone)]
 pub struct PgRepository {
@@ -43,5 +43,4 @@ impl PgRepository {
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
-
 }

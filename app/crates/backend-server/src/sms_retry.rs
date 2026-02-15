@@ -59,7 +59,11 @@ async fn try_publish(state: &AppState, row: db::SmsMessageRow) -> backend_core::
     {
         Ok(out) => {
             let message_id = out.message_id().map(|s| s.to_owned());
-            state.repository.sms.mark_sms_sent(&row.id, message_id).await?;
+            state
+                .repository
+                .sms
+                .mark_sms_sent(&row.id, message_id)
+                .await?;
         }
         Err(e) => {
             let max_attempts = row.max_attempts.max(1) as u32;

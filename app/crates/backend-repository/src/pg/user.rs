@@ -1,10 +1,10 @@
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
-use serde_json::{Value, json};
-use sqlx_data::{QueryResult, dml, repo};
-use sqlx::PgPool;
-use std::sync::{Arc, Mutex};
 use lru::LruCache;
+use serde_json::{Value, json};
+use sqlx::PgPool;
+use sqlx_data::{QueryResult, dml, repo};
+use std::sync::{Arc, Mutex};
 
 #[repo]
 pub trait PgUserRepo {
@@ -222,7 +222,10 @@ impl UserRepo for UserRepository {
 }
 
 impl UserRepository {
-    pub fn new(pool: PgPool, resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>) -> Self {
+    pub fn new(
+        pool: PgPool,
+        resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>,
+    ) -> Self {
         Self {
             pool,
             resolve_user_by_phone_cache,

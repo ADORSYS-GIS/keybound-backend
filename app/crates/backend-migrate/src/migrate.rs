@@ -36,21 +36,22 @@ impl DbFactory {
                 "DbFactory::build_postgres called on non-postgres factory".to_string(),
             ));
         }
-        
+
         let pool = PgPoolOptions::new()
             .max_connections(self.max_connections)
             .connect(&self.url)
             .await
             .map_err(|e| Error::Database(e.to_string()))?;
 
-        MIGRATOR.run(&pool).await.map_err(|e| Error::Database(e.to_string()))?;
+        MIGRATOR
+            .run(&pool)
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
         Ok(pool)
     }
 }
 
 /// Connect using PgPool and run the provided migrator.
-pub async fn connect_postgres_and_migrate(
-    database_url: &str,
-) -> Result<sqlx::PgPool> {
+pub async fn connect_postgres_and_migrate(database_url: &str) -> Result<sqlx::PgPool> {
     DbFactory::postgres(database_url).build_postgres().await
 }

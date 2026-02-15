@@ -1,8 +1,8 @@
 use crate::traits::*;
 use backend_model::{db, staff as staff_map};
-use sqlx_data::{IntoParams, Serial, dml, repo};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
+use sqlx_data::{IntoParams, Serial, dml, repo};
 
 #[repo]
 pub trait PgKycRepo {
@@ -20,7 +20,10 @@ pub trait PgKycRepo {
     ) -> sqlx_data::Result<Serial<db::KycProfileRow>>;
 
     #[dml(file = "queries/kyc/ensure_profile.sql", unchecked)]
-    async fn ensure_kyc_profile_db(&self, external_id: String) -> sqlx_data::Result<sqlx_data::QueryResult>;
+    async fn ensure_kyc_profile_db(
+        &self,
+        external_id: String,
+    ) -> sqlx_data::Result<sqlx_data::QueryResult>;
 
     #[dml(file = "queries/kyc/insert_document_intent.sql", unchecked)]
     async fn insert_kyc_document_intent_db(
@@ -120,10 +123,7 @@ impl KycRepo for KycRepository {
         Ok(row)
     }
 
-    async fn get_kyc_profile(
-        &self,
-        external_id: &str,
-    ) -> RepoResult<Option<db::KycProfileRow>> {
+    async fn get_kyc_profile(&self, external_id: &str) -> RepoResult<Option<db::KycProfileRow>> {
         let row = self.get_kyc_profile_db(external_id.to_owned()).await?;
         Ok(row)
     }
@@ -150,10 +150,7 @@ impl KycRepo for KycRepository {
         Ok(rows)
     }
 
-    async fn get_kyc_submission(
-        &self,
-        external_id: &str,
-    ) -> RepoResult<Option<db::KycProfileRow>> {
+    async fn get_kyc_submission(&self, external_id: &str) -> RepoResult<Option<db::KycProfileRow>> {
         let row = self.get_kyc_profile_db(external_id.to_owned()).await?;
         Ok(row)
     }

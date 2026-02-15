@@ -1,8 +1,8 @@
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
 use serde_json::Value;
-use sqlx_data::{dml, repo};
 use sqlx::PgPool;
+use sqlx_data::{dml, repo};
 
 #[repo]
 pub trait PgDeviceRepo {

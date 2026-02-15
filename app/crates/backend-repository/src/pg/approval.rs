@@ -2,8 +2,8 @@ use crate::traits::*;
 use backend_model::{db, kc as kc_map};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx_data::{QueryResult, dml, repo};
 use sqlx::PgPool;
+use sqlx_data::{QueryResult, dml, repo};
 
 #[repo]
 pub trait PgApprovalRepo {

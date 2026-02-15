@@ -63,7 +63,7 @@ pub struct ApprovalCreateRequest {
 #[derive(Debug, Clone, o2o)]
 #[from_owned(gen_oas_server_kc::models::ApprovalDecisionRequest)]
 pub struct ApprovalDecisionRequest {
-    pub decision: gen_oas_server_kc::models::ApprovalDecisionRequestDecision,
+    pub decision: gen_oas_server_kc::models::QueryApprovalStatus,
     pub decided_by_device_id: Option<String>,
     pub message: Option<String>,
 }
