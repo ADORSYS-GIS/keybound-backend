@@ -1,0 +1,1 @@
+SELECT COUNT(*)::int8 FROM devices WHERE user_id = $1

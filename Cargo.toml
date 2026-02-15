@@ -1,38 +1,39 @@
 [workspace]
 members = [
-    "app/backend",
-    "crates/backend-auth",
-    "crates/backend-cli",
-    "crates/backend-core",
-    "crates/backend-id",
-    "crates/backend-migrate",
-    "crates/backend-model",
-    "crates/backend-repository",
-    "crates/backend-otlp",
-    "crates/backend-server",
-
-    "crates/gen_oas_client_cuss_registration",
-    "crates/gen_oas_server_bff",
-    "crates/gen_oas_server_kc",
-    "crates/gen_oas_server_staff",
+    "app/bins/backend",
+    "app/crates/backend-auth",
+    "app/crates/backend-cli",
+    "app/crates/backend-core",
+    "app/crates/backend-id",
+    "app/crates/backend-migrate",
+    "app/crates/backend-model",
+    "app/crates/backend-repository",
+    "app/crates/backend-otlp",
+    "app/crates/backend-server",
+    "app/gen/oas_client_cuss_registration",
+    "app/gen/oas_server_bff",
+    "app/gen/oas_server_kc",
+    "app/gen/oas_server_staff",
 ]
 resolver = "3"
 
 [workspace.dependencies]
-backend-auth = { path = "./crates/backend-auth" }
-backend-cli = { path = "./crates/backend-cli" }
-backend-core = { path = "./crates/backend-core" }
-backend-id = { path = "./crates/backend-id" }
-backend-migrate = { path = "./crates/backend-migrate" }
-backend-model = { path = "./crates/backend-model" }
-backend-repository = { path = "./crates/backend-repository" }
-backend-otlp = { path = "./crates/backend-otlp" }
-backend-server = { path = "./crates/backend-server" }
+backend-auth = { path = "app/crates/backend-auth" }
+backend-cli = { path = "app/crates/backend-cli" }
+backend-core = { path = "app/crates/backend-core" }
+backend-id = { path = "app/crates/backend-id" }
+backend-migrate = { path = "app/crates/backend-migrate" }
+backend-model = { path = "app/crates/backend-model" }
+backend-repository = { path = "app/crates/backend-repository" }
+backend-otlp = { path = "app/crates/backend-otlp" }
+backend-server = { path = "app/crates/backend-server" }
 
-gen_oas_client_cuss_registration = { path = "./crates/gen_oas_client_cuss_registration" }
-gen_oas_server_bff = { path = "./crates/gen_oas_server_bff" }
-gen_oas_server_kc = { path = "./crates/gen_oas_server_kc" }
-gen_oas_server_staff = { path = "./crates/gen_oas_server_staff" }
+gen_oas_client_cuss_registration = { path = "app/gen/oas_client_cuss_registration" }
+gen_oas_server_bff = { path = "app/gen/oas_server_bff" }
+gen_oas_server_kc = { path = "app/gen/oas_server_kc" }
+gen_oas_server_staff = { path = "app/gen/oas_server_staff" }
+
+o2o = "0"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
@@ -64,7 +65,7 @@ cuid = { version = "1" }
 getrandom = "0.4"
 goose = "0.18"
 reqwest = { version = "0.13", features = ["json"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "json", "macros"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "json", "macros", "time", "bigdecimal", "uuid"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 utoipa = { version = "5", features = ["macros", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
@@ -73,7 +74,7 @@ bytes = "1"
 
 swagger = "7"
 lru = "0.16"
-sqlx-data = { version = "0.1.5", features = ["postgres", "chrono", "json"] }
+sqlx-data = { version = "0.1.5", features = ["postgres", "chrono", "json", "bigdecimal", "tracing", "uuid", "time"] }
 sqlx-utils = "1.1.3"
 ciborium = "0.2"
 

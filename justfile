@@ -78,4 +78,4 @@ dev *args: # Run the backend binary in dev profile (pass args to the CLI)
 	cargo run --color=always --bin backend --profile dev -- {{args}}
 
 prepare: # Build the backend binary in release mode
-	cargo build --release --bin backend
+	cargo build --release --bins backend

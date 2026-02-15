@@ -1,0 +1,1 @@
+SELECT kyc_tier FROM kyc_profiles WHERE external_id = $1

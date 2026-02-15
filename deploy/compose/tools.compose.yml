@@ -63,7 +63,7 @@ services:
         mode: 0600
     volumes:
       - downloaded_data:/data
-      - ../../crates:/work
+      - ../../app/gen:/work
       - ../../openapi:/openapi
     command:
       - /bin/sh
@@ -75,10 +75,10 @@ services:
         
         generations=('oas_server_kc' 'oas_server_bff' 'oas_server_staff' 'oas_client_cuss_registration')
         for item in "$${generations[@]}"; do
-            rm -rf "/work/gen_$$item"
+            rm -rf "/work/$$item"
             java -jar $$JAR_FILE generate \
               -c "/tmp/$$item.gson" \
-              -o "/work/gen_$$item"
+              -o "/work/$$item"
         done
 
 volumes:

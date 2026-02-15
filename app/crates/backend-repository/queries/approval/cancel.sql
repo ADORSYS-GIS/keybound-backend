@@ -1,0 +1,1 @@
+DELETE FROM approvals WHERE request_id = $1

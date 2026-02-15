@@ -2,7 +2,7 @@
 .idea
 .code
 
-gen_*
+gen*
 
 ### Helm ###
 */charts/*/charts

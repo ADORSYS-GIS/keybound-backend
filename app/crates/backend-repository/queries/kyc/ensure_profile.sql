@@ -1,0 +1,1 @@
+INSERT INTO kyc_profiles (external_id) VALUES ($1) ON CONFLICT (external_id) DO NOTHING
