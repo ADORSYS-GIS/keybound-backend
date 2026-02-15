@@ -1,7 +1,7 @@
 mod branding;
 
 use backend_cli::{AppCli, AppCommands, Parser};
-use backend_core::{Result, load_from_path};
+use backend_core::{load_from_path, Result};
 use backend_otlp::init_tracing;
 use backend_otlp::tracing::info;
 use backend_server::serve;
@@ -13,10 +13,10 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    print!("{}", BANNER);
+
     match AppCli::parse().command {
         Some(AppCommands::Serve { config_path }) => {
-            info!("{}", BANNER);
-
             let config = load_from_path(&config_path)?;
             init_tracing(&config.logging);
 
