@@ -63,8 +63,8 @@ services:
         mode: 0600
     volumes:
       - downloaded_data:/data
-      - ../crates:/work
-      - ../openapi:/openapi
+      - ../../crates:/work
+      - ../../openapi:/openapi
     command:
       - /bin/sh
       - -c

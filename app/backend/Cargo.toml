@@ -14,3 +14,12 @@ backend-otlp.workspace = true
 backend-server.workspace = true
 mimalloc.workspace = true
 tokio.workspace = true
+clap.workspace = true
+
+[[bin]]
+path = "src/health/main.rs"
+name = "health"
+
+[[bin]]
+path = "src/main.rs"
+name = "backend"

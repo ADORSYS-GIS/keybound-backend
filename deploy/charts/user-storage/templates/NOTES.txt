@@ -1,0 +1,7 @@
+----------------------------------------------------------
+You successfully installed [user-storage]:
+
+ 	Application:    {{ .Release.Name }}
+ 	Revision: 		{{ .Release.Revision }}
+ 	Chart:   		{{ .Chart.Name }}
+----------------------------------------------------------

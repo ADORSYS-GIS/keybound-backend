@@ -19,7 +19,7 @@ x-keycloak-common-extra: &keycloak-common-extra
       cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers
       /opt/keycloak/bin/kc.sh start-dev --import-realm
   volumes:
-    - ../.docker/keycloak-config/:/opt/keycloak/data/import/:ro
+    - ../../.docker/keycloak-config/:/opt/keycloak/data/import/:ro
     - downloaded_data:/downloaded
   depends_on:
     download-core-tools:

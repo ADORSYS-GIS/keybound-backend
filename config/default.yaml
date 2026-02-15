@@ -1,41 +1,44 @@
 server:
-  basic_auth:
-    username: "authorino"
-    password: "${SOME_ENV_VAR}"
-  api:
-    address: "0.0.0.0"
-    port: 3000
-    tls:
-      cert_path: "./config/tls/api.crt"
-      key_path: "./config/tls/api.key"
+  address: "0.0.0.0"
+  port: 3000
+  tls:
+    enabled: false
+    port: 3443
+    cert_path: "./config/tls/api.crt"
+    key_path: "./config/tls/api.key"
+
 logging:
   level: "info"
+
 database:
   url: "postgres://postgres:postgres@localhost:5432/user-storage"
   pool_size: 10
-oauth2:
-  jwks_url: "http://172.17.0.1:9026/realms/dev/protocol/openid-connect/certs"
-aws:
+
+s3:
   region: "us-east-1"
-  s3:
-    bucket: "user-storage-dev"
-    endpoint: null
-    presign_ttl_seconds: 900
-  sns:
-    region: null
-    max_attempts: 10
-    initial_backoff_seconds: 5
+  bucket: "user-storage-dev"
+  endpoint: null
+  presign_ttl_seconds: 900
+
+sns:
+  region: "us-east-1"
+  max_attempts: 10
+  initial_backoff_seconds: 5
+
+sms:
+  provider: console # options are 'console' (default) or 'sns'
+
 auth:
+  oauth2:
+    jwks_url: "http://172.17.0.1:9026/realms/dev/protocol/openid-connect/certs"
   kc:
     enabled: false
     signature_secret: "change-me"
     max_clock_skew_seconds: 60
-    max_body_bytes: 262144
   bff:
-    enabled: false
+    base-path: /staff
     require_bearer: true
-    require_signature: true
-    max_clock_skew_seconds: 60
-    external_id_claim: "sub"
   staff:
-    require_bearer: false
+    base-path: /staff
+  cuss:
+    api_url: http://cuss:8080

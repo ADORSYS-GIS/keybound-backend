@@ -1,0 +1,109 @@
+controllers:
+  user-storage:
+    type: deployment
+    strategy: RollingUpdate
+    replicas: 1
+    pod:
+      labels: {}
+    initContainers:
+      install-extensions:
+        image:
+          repository: ghcr.io/adorsys-gis/fineract-keybound-user-storage
+          tag: "latest"
+        args:
+          - migrate
+        env:
+          FLYWAY_URL:
+            valueFrom:
+              secretKeyRef:
+                name: postgres-secret
+                key: url
+          TZ: "Europe/Berlin"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+    containers:
+      user-storage:
+        image:
+          repository: ghcr.io/adorsys-gis/fineract-keybound-user-storage
+          tag: "latest"
+          pullPolicy: IfNotPresent
+
+        resources:
+          requests:
+            cpu: 400m
+            memory: 512Mi
+          limits:
+            cpu: 800m
+            memory: 1Gi
+        args:
+          - serve
+
+        envFrom:
+          - secretRef:
+              name: mcpo-api-key-env
+
+        env:
+          DATASOURCE_URL:
+            valueFrom:
+              secretKeyRef:
+                name: postgres-secret
+                key: uri
+          TZ: "Europe/Berlin"
+        ports:
+          - name: http
+            containerPort: 3000
+
+service:
+  user-storage:
+    enabled: true
+    annotations: { }
+    type: ClusterIP
+    controller: user-storage
+    ports:
+      http:
+        enabled: true
+        port: 3000
+        targetPort: 3000
+
+ingress:
+  user-storage:
+    enabled: true
+    annotations: {}
+    className: ~
+    hosts:
+      - host: chart-example.local
+        paths:
+          - path: /admins
+            pathType: Prefix
+            service:
+              identifier: user-storage
+              port: http
+    tls:
+      - secretName: chart-example.local-tls
+        hosts:
+          - chart-example.local
+
+networkpolicies:
+  user-storage:
+    enabled: false
+    controller: user-storage
+    podSelector: {}
+    policyTypes:
+      - Ingress
+    rules:
+      ingress:
+        - {}
+
+serviceAccount:
+  user-storage:
+    enabled: true
+    annotations: {}
+    labels: {}
+
+rawResources:
+  {}

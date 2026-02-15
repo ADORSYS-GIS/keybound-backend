@@ -3,3 +3,6 @@
 .code
 
 gen_*
+
+### Helm ###
+*/charts/*/charts

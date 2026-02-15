@@ -747,6 +747,7 @@ dependencies = [
  "backend-migrate",
  "backend-otlp",
  "backend-server",
+ "clap",
  "mimalloc",
  "tokio",
 ]
@@ -802,10 +803,6 @@ dependencies = [
  "backend-core",
  "cuid",
 ]
-
-[[package]]
-name = "backend-metrics"
-version = "0.1.0"
 
 [[package]]
 name = "backend-migrate"

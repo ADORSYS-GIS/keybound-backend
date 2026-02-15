@@ -5,7 +5,6 @@ members = [
     "crates/backend-cli",
     "crates/backend-core",
     "crates/backend-id",
-    "crates/backend-metrics",
     "crates/backend-migrate",
     "crates/backend-model",
     "crates/backend-repository",
@@ -24,7 +23,6 @@ backend-auth = { path = "./crates/backend-auth" }
 backend-cli = { path = "./crates/backend-cli" }
 backend-core = { path = "./crates/backend-core" }
 backend-id = { path = "./crates/backend-id" }
-backend-metrics = { path = "./crates/backend-metrics" }
 backend-migrate = { path = "./crates/backend-migrate" }
 backend-model = { path = "./crates/backend-model" }
 backend-repository = { path = "./crates/backend-repository" }
@@ -44,7 +42,7 @@ hex = "0.4"
 base64 = "0.22"
 jsonwebtoken = { version = "10.3" }
 jwks = "0.5"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "tracing", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "tracing", "net", "signal", "time"] }
 thiserror = "2"
 anyhow = "1"
 
@@ -71,6 +69,22 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 utoipa = { version = "5", features = ["macros", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
+bytes = "1"
+
+swagger = "7"
+lru = "0.16"
+sqlx-data = { version = "0.1.5", features = ["postgres", "chrono", "json"] }
+
+tower = "0"
+http = "1"
+http-body-util = "0.1"
+hyper = "1"
+
+aws-config = "1"
+aws-sdk-s3 = "1"
+aws-sdk-sns = "1"
+aws-types = "1"
+
 mimalloc = "0"
 
 [profile.release]
@@ -86,5 +100,6 @@ edition = "2024"
 license = "MIT"
 publish = false
 authors = [
-    "Stephane Segning <sse@adorsys.com>",
+    "Stephane Segning <selastlambou@gmail.com>",
+    "adorsys GIS <gis-udm@adorsys.com>",
 ]
