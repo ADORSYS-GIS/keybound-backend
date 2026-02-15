@@ -53,6 +53,27 @@ Never use UUID for backend IDs.
 - Auth logic/middleware lives in `backend-auth`.
 - `backend-server` composes middleware only; no swagger context types.
 
+### Auth and Error Test Coverage (Mandatory)
+- Global error/exception mapping tests live in `app/crates/backend-core/tests/error_response.rs`.
+- JWT middleware tests (BFF + Staff bearer auth) live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
+- KC signature middleware tests also live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
+
+Required scenarios to keep covered in tests:
+- `backend_core::Error` metadata mapping and `IntoResponse` payload/status behavior.
+- Bearer middleware bypass cases (`enabled = false`, blank base path, path outside protected base path).
+- Bearer middleware enforcement cases (missing token, non-bearer scheme, invalid token, valid token).
+- KC signature middleware enforcement cases:
+  - missing `x-kc-timestamp`
+  - missing `x-kc-signature`
+  - invalid/out-of-skew timestamp
+  - invalid signature
+  - request body larger than `max_body_bytes`
+  - valid signature with body preservation
+
+Suggested verification commands:
+- `cargo test -p backend-core --features axum --test error_response`
+- `cargo test -p backend-auth --test jwt_auth_exclude_paths`
+
 ## Caching
 - In-process cache uses `lru`.
 - Redis is available in compose for distributed/shared cache use.
@@ -96,6 +117,9 @@ Before finalizing:
 2. No runtime use of `swagger` or generated `server::Service`
 3. No direct `sqlx::query*` usage
 4. No manual edits under `crates/gen_*`
+5. Auth and error tests pass:
+   - `cargo test -p backend-core --features axum --test error_response`
+   - `cargo test -p backend-auth --test jwt_auth_exclude_paths`
 
 ## Work flavors
 Let's talk about all the rules we're having to work efficiently:

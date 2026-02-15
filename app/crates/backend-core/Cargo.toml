@@ -27,3 +27,6 @@ aws-sdk-sns = "1"
 [features]
 default = []
 axum = ["dep:axum"]
+
+[dev-dependencies]
+tokio.workspace = true
