@@ -17,6 +17,7 @@ database:
 s3:
   region: "us-east-1"
   bucket: "user-storage-dev"
+  force_path_style: true
   endpoint: null
   presign_ttl_seconds: 900
 
@@ -28,17 +29,20 @@ sns:
 sms:
   provider: console # options are 'console' (default) or 'sns'
 
-auth:
-  oauth2:
-    jwks_url: "http://172.17.0.1:9026/realms/dev/protocol/openid-connect/certs"
-  kc:
-    enabled: false
-    signature_secret: "change-me"
-    max_clock_skew_seconds: 60
-  bff:
-    base-path: /staff
-    require_bearer: true
-  staff:
-    base-path: /staff
-  cuss:
-    api_url: http://cuss:8080
+oauth2:
+  jwks_url: "http://172.17.0.1:9026/realms/dev/protocol/openid-connect/certs"
+
+kc:
+  enabled: false
+  signature_secret: "change-me"
+  max_clock_skew_seconds: 60
+  max_body_bytes: 262144
+
+bff:
+  base-path: /staff
+
+staff:
+  base-path: /staff
+
+cuss:
+  api_url: http://cuss:8080

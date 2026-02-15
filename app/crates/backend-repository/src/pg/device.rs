@@ -1,9 +1,78 @@
-use crate::pg::{PgRepository, PgSqlRepo};
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
+use serde_json::Value;
+use sqlx_data::{dml, repo};
+use sqlx::PgPool;
 
-impl PgRepository {
-    pub async fn lookup_device(
+#[repo]
+pub trait PgDeviceRepo {
+    #[dml(file = "queries/device/lookup.sql", unchecked)]
+    async fn lookup_device_db(
+        &self,
+        device_id: Option<String>,
+        jkt: Option<String>,
+    ) -> sqlx_data::Result<Option<db::DeviceRow>>;
+
+    #[dml(file = "queries/device/list_user_devices.sql", unchecked)]
+    async fn list_user_devices_db(
+        &self,
+        user_id: String,
+        include_revoked: bool,
+    ) -> sqlx_data::Result<Vec<db::DeviceRow>>;
+
+    #[dml(file = "queries/device/get_user_device.sql", unchecked)]
+    async fn get_user_device_db(
+        &self,
+        user_id: String,
+        device_id: String,
+    ) -> sqlx_data::Result<Option<db::DeviceRow>>;
+
+    #[dml(file = "queries/device/update_status.sql", unchecked)]
+    async fn update_device_status_db(
+        &self,
+        record_id: String,
+        status: String,
+    ) -> sqlx_data::Result<db::DeviceRow>;
+
+    #[dml(file = "queries/device/find_binding.sql", unchecked)]
+    async fn find_device_binding_db(
+        &self,
+        device_id: String,
+        jkt: String,
+    ) -> sqlx_data::Result<Option<(String, String)>>;
+
+    #[dml(file = "queries/device/bind.sql", unchecked)]
+    async fn bind_device_db(
+        &self,
+        id: String,
+        realm: String,
+        client_id: String,
+        user_id: String,
+        user_hint: Option<String>,
+        device_id: String,
+        jkt: String,
+        public_jwk: Value,
+        attributes: Option<Value>,
+        proof: Option<Value>,
+    ) -> sqlx_data::Result<String>;
+
+    #[dml(file = "queries/device/count_user_devices.sql", unchecked)]
+    async fn count_user_devices_db(&self, user_id: String) -> sqlx_data::Result<i64>;
+}
+
+#[derive(Clone)]
+pub struct DeviceRepository {
+    pub(crate) pool: PgPool,
+}
+
+impl PgDeviceRepo for DeviceRepository {
+    fn get_pool(&self) -> &sqlx_data::Pool {
+        &self.pool
+    }
+}
+
+impl DeviceRepo for DeviceRepository {
+    async fn lookup_device(
         &self,
         req: &kc_map::DeviceLookupRequest,
     ) -> RepoResult<Option<db::DeviceRow>> {
@@ -13,7 +82,7 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn list_user_devices(
+    async fn list_user_devices(
         &self,
         user_id: &str,
         include_revoked: bool,
@@ -24,7 +93,7 @@ impl PgRepository {
         Ok(rows)
     }
 
-    pub async fn get_user_device(
+    async fn get_user_device(
         &self,
         user_id: &str,
         device_id: &str,
@@ -35,7 +104,7 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn update_device_status(
+    async fn update_device_status(
         &self,
         record_id: &str,
         status: &str,
@@ -46,7 +115,7 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn find_device_binding(
+    async fn find_device_binding(
         &self,
         device_id: &str,
         jkt: &str,
@@ -57,7 +126,7 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn bind_device(&self, req: &kc_map::EnrollmentBindRequest) -> RepoResult<String> {
+    async fn bind_device(&self, req: &kc_map::EnrollmentBindRequest) -> RepoResult<String> {
         let record_id = backend_id::device_id()?;
         let attributes_json = req
             .attributes
@@ -86,8 +155,14 @@ impl PgRepository {
         Ok(id)
     }
 
-    pub async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64> {
+    async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64> {
         let count = self.count_user_devices_db(user_id.to_owned()).await?;
         Ok(count)
+    }
+}
+
+impl DeviceRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }

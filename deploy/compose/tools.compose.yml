@@ -89,7 +89,7 @@ configs:
     content: |
       {
         "inputSpec": "/data/keycloak-interface.openapi.yaml",
-        "generatorName": "rust-server",
+        "generatorName": "rust-axum",
         "packageName": "gen_oas_server_kc",
         "packageVersion": "9.9.9"
       }
@@ -97,7 +97,7 @@ configs:
     content: |
       {
         "inputSpec": "/openapi/user-storage-bff.json",
-        "generatorName": "rust-server",
+        "generatorName": "rust-axum",
         "packageName": "gen_oas_server_bff",
         "packageVersion": "9.9.9"
       }
@@ -105,7 +105,7 @@ configs:
     content: |
       {
         "inputSpec": "/openapi/user-storage-staff.json",
-        "generatorName": "rust-server",
+        "generatorName": "rust-axum",
         "packageName": "gen_oas_server_staff",
         "packageVersion": "9.9.9"
       }

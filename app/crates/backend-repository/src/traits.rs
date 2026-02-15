@@ -47,3 +47,55 @@ pub struct SmsPublishFailure {
     pub error: String,
     pub next_retry_at: Option<DateTime<Utc>>,
 }
+
+pub trait KycRepo: Send + Sync {
+    fn ensure_kyc_profile(&self, external_id: &str) -> impl std::future::Future<Output = RepoResult<()>> + Send;
+    fn insert_kyc_document_intent(&self, input: KycDocumentInsert) -> impl std::future::Future<Output = RepoResult<backend_model::db::KycDocumentRow>> + Send;
+    fn get_kyc_profile(&self, external_id: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycProfileRow>>> + Send;
+    fn list_kyc_documents(&self, external_id: String, params: impl sqlx_data::IntoParams + Send) -> impl std::future::Future<Output = RepoResult<sqlx_data::Serial<backend_model::db::KycDocumentRow>>> + Send;
+    fn get_kyc_tier(&self, external_id: &str) -> impl std::future::Future<Output = RepoResult<Option<i32>>> + Send;
+    fn list_kyc_submissions(&self, params: impl sqlx_data::IntoParams + Send) -> impl std::future::Future<Output = RepoResult<sqlx_data::Serial<backend_model::db::KycProfileRow>>> + Send;
+    fn get_kyc_submission(&self, external_id: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycProfileRow>>> + Send;
+    fn update_kyc_approved(&self, external_id: &str, req: &backend_model::staff::KycApprovalRequest) -> impl std::future::Future<Output = RepoResult<bool>> + Send;
+    fn update_kyc_rejected(&self, external_id: &str, req: &backend_model::staff::KycRejectionRequest) -> impl std::future::Future<Output = RepoResult<bool>> + Send;
+    fn update_kyc_request_info(&self, external_id: &str, req: &backend_model::staff::KycRequestInfoRequest) -> impl std::future::Future<Output = RepoResult<bool>> + Send;
+    fn patch_kyc_information(&self, external_id: &str, req: &backend_model::bff::KycInformationPatchRequest) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycProfileRow>>> + Send;
+}
+
+pub trait UserRepo: Send + Sync {
+    fn create_user(&self, req: &backend_model::kc::UserUpsert) -> impl std::future::Future<Output = RepoResult<backend_model::db::UserRow>> + Send;
+    fn get_user(&self, user_id: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::UserRow>>> + Send;
+    fn update_user(&self, user_id: &str, req: &backend_model::kc::UserUpsert) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::UserRow>>> + Send;
+    fn delete_user(&self, user_id: &str) -> impl std::future::Future<Output = RepoResult<u64>> + Send;
+    fn search_users(&self, req: &backend_model::kc::UserSearch) -> impl std::future::Future<Output = RepoResult<Vec<backend_model::db::UserRow>>> + Send;
+    fn resolve_user_by_phone(&self, realm: &str, phone: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::UserRow>>> + Send;
+    fn resolve_or_create_user_by_phone(&self, realm: &str, phone: &str) -> impl std::future::Future<Output = RepoResult<(backend_model::db::UserRow, bool)>> + Send;
+}
+
+pub trait DeviceRepo: Send + Sync {
+    fn lookup_device(&self, req: &backend_model::kc::DeviceLookupRequest) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::DeviceRow>>> + Send;
+    fn list_user_devices(&self, user_id: &str, include_revoked: bool) -> impl std::future::Future<Output = RepoResult<Vec<backend_model::db::DeviceRow>>> + Send;
+    fn get_user_device(&self, user_id: &str, device_id: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::DeviceRow>>> + Send;
+    fn update_device_status(&self, record_id: &str, status: &str) -> impl std::future::Future<Output = RepoResult<backend_model::db::DeviceRow>> + Send;
+    fn find_device_binding(&self, device_id: &str, jkt: &str) -> impl std::future::Future<Output = RepoResult<Option<(String, String)>>> + Send;
+    fn bind_device(&self, req: &backend_model::kc::EnrollmentBindRequest) -> impl std::future::Future<Output = RepoResult<String>> + Send;
+    fn count_user_devices(&self, user_id: &str) -> impl std::future::Future<Output = RepoResult<i64>> + Send;
+}
+
+pub trait ApprovalRepo: Send + Sync {
+    fn create_approval(&self, req: &backend_model::kc::ApprovalCreateRequest, idempotency_key: Option<String>) -> impl std::future::Future<Output = RepoResult<ApprovalCreated>> + Send;
+    fn get_approval(&self, request_id: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::ApprovalRow>>> + Send;
+    fn list_user_approvals(&self, user_id: &str, statuses: Option<Vec<String>>) -> impl std::future::Future<Output = RepoResult<Vec<backend_model::db::ApprovalRow>>> + Send;
+    fn decide_approval(&self, request_id: &str, req: &backend_model::kc::ApprovalDecisionRequest) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::ApprovalRow>>> + Send;
+    fn cancel_approval(&self, request_id: &str) -> impl std::future::Future<Output = RepoResult<u64>> + Send;
+}
+
+pub trait SmsRepo: Send + Sync {
+    fn queue_sms(&self, sms: SmsPendingInsert) -> impl std::future::Future<Output = RepoResult<SmsQueued>> + Send;
+    fn get_sms_by_hash(&self, hash: &str) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::SmsMessageRow>>> + Send;
+    fn mark_sms_confirmed(&self, hash: &str) -> impl std::future::Future<Output = RepoResult<()>> + Send;
+    fn list_retryable_sms(&self, limit: i64) -> impl std::future::Future<Output = RepoResult<Vec<backend_model::db::SmsMessageRow>>> + Send;
+    fn mark_sms_sent(&self, id: &str, sns_message_id: Option<String>) -> impl std::future::Future<Output = RepoResult<()>> + Send;
+    fn mark_sms_failed(&self, update: SmsPublishFailure) -> impl std::future::Future<Output = RepoResult<()>> + Send;
+    fn mark_sms_gave_up(&self, id: &str, reason: &str) -> impl std::future::Future<Output = RepoResult<()>> + Send;
+}

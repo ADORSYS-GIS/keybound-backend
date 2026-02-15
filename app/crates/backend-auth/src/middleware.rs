@@ -1,11 +1,11 @@
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header::AUTHORIZATION};
+use axum::body::{to_bytes, Body};
+use axum::http::{header::AUTHORIZATION, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use backend_core::{BffAuth, KcAuth, StaffAuth};
-use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use ring::hmac;
-use ring::signature::{ECDSA_P256_SHA256_FIXED, UnparsedPublicKey};
+use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -58,63 +58,14 @@ pub async fn require_bff_auth(
         return Ok(req);
     }
 
-    let token = if cfg.require_bearer {
-        match bearer_token(req.headers()) {
-            Some(value) => value,
-            None => return Err(unauthorized("missing bearer token")),
-        }
-    } else {
-        bearer_token(req.headers()).unwrap_or_default()
+    let token = match bearer_token(req.headers()) {
+        Some(value) => value,
+        None => return Err(unauthorized("missing bearer token")),
     };
 
-    let claims = if token.is_empty() {
-        None
-    } else {
-        match decode_jwt_claims(&token) {
-            Some(value) => Some(value),
-            None => return Err(unauthorized("invalid bearer token")),
-        }
-    };
-
-    if cfg.require_signature {
-        let signature_header = match header_value(req.headers(), "x-signature") {
-            Some(value) => value,
-            None => return Err(unauthorized("missing x-signature")),
-        };
-        let timestamp_header = match header_value(req.headers(), "x-signature-timestamp") {
-            Some(value) => value,
-            None => return Err(unauthorized("missing x-signature-timestamp")),
-        };
-        let public_key_header = match header_value(req.headers(), "x-public-key") {
-            Some(value) => value,
-            None => return Err(unauthorized("missing x-public-key")),
-        };
-        if is_timestamp_invalid(&timestamp_header, cfg.max_clock_skew_seconds) {
-            return Err(unauthorized("invalid x-signature-timestamp"));
-        }
-
-        let Some(claims) = claims.as_ref() else {
-            return Err(unauthorized("missing bearer token claims"));
-        };
-        let Some(expected_jkt) = claims.jkt.as_ref() else {
-            return Err(unauthorized("missing cnf.jkt"));
-        };
-
-        let public_jwk: Value = match serde_json::from_str(&public_key_header) {
-            Ok(value) => value,
-            Err(_) => return Err(unauthorized("invalid x-public-key")),
-        };
-
-        let computed_jkt = match compute_jkt_thumbprint(&public_jwk) {
-            Some(value) => value,
-            None => return Err(unauthorized("invalid x-public-key thumbprint")),
-        };
-        if &computed_jkt != expected_jkt {
-            return Err(unauthorized("x-public-key does not match cnf.jkt"));
-        }
-        if !verify_bff_signature(&req, &timestamp_header, &signature_header, &public_jwk) {
-            return Err(unauthorized("invalid x-signature"));
-        }
+    match decode_jwt_claims(&token) {
+        Some(_) => {}, // no validation required for BFF
+        None => return Err(unauthorized("invalid bearer token")),
     }
 
     Ok(req)
@@ -124,7 +75,7 @@ pub async fn require_staff_bearer(
     cfg: &StaffAuth,
     req: Request<Body>,
 ) -> std::result::Result<Request<Body>, Response> {
-    if cfg.require_bearer && bearer_token(req.headers()).is_none() {
+    if bearer_token(req.headers()).is_none() {
         return Err(unauthorized("missing bearer token"));
     }
     Ok(req)

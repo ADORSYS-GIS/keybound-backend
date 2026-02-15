@@ -7,7 +7,7 @@ services:
   migration:
     build:
       context: ../..
-      dockerfile: deploy/docker/migrations/Dockerfile
+      dockerfile: deploy/docker/user-storage/Dockerfile
     environment:
       FLYWAY_URL: jdbc:postgresql://postgres:5432/user-storage
       FLYWAY_USER: postgres

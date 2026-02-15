@@ -1,9 +1,70 @@
-use crate::pg::{PgRepository, PgSqlRepo};
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+use sqlx_data::{QueryResult, dml, repo};
+use sqlx::PgPool;
 
-impl PgRepository {
-    pub async fn create_approval(
+#[repo]
+pub trait PgApprovalRepo {
+    #[dml(file = "queries/approval/create.sql", unchecked)]
+    async fn create_approval_db(
+        &self,
+        request_id: String,
+        realm: String,
+        client_id: String,
+        user_id: String,
+        device_id: String,
+        jkt: String,
+        public_jwk: Option<Value>,
+        platform: Option<String>,
+        model: Option<String>,
+        app_version: Option<String>,
+        reason: Option<String>,
+        expires_at: Option<DateTime<Utc>>,
+        context: Option<Value>,
+        idempotency_key: Option<String>,
+    ) -> sqlx_data::Result<(String, String, Option<DateTime<Utc>>)>;
+
+    #[dml(file = "queries/approval/get.sql", unchecked)]
+    async fn get_approval_db(
+        &self,
+        request_id: String,
+    ) -> sqlx_data::Result<Option<db::ApprovalRow>>;
+
+    #[dml(file = "queries/approval/list_user_approvals.sql", unchecked)]
+    async fn list_user_approvals_db(
+        &self,
+        user_id: String,
+        statuses: Option<Vec<String>>,
+    ) -> sqlx_data::Result<Vec<db::ApprovalRow>>;
+
+    #[dml(file = "queries/approval/decide.sql", unchecked)]
+    async fn decide_approval_db(
+        &self,
+        request_id: String,
+        status: String,
+        decided_by_device_id: Option<String>,
+        message: Option<String>,
+    ) -> sqlx_data::Result<Option<db::ApprovalRow>>;
+
+    #[dml(file = "queries/approval/cancel.sql", unchecked)]
+    async fn cancel_approval_db(&self, request_id: String) -> sqlx_data::Result<QueryResult>;
+}
+
+#[derive(Clone)]
+pub struct ApprovalRepository {
+    pub(crate) pool: PgPool,
+}
+
+impl PgApprovalRepo for ApprovalRepository {
+    fn get_pool(&self) -> &sqlx_data::Pool {
+        &self.pool
+    }
+}
+
+impl ApprovalRepo for ApprovalRepository {
+    async fn create_approval(
         &self,
         req: &kc_map::ApprovalCreateRequest,
         idempotency_key: Option<String>,
@@ -45,12 +106,12 @@ impl PgRepository {
         })
     }
 
-    pub async fn get_approval(&self, request_id: &str) -> RepoResult<Option<db::ApprovalRow>> {
+    async fn get_approval(&self, request_id: &str) -> RepoResult<Option<db::ApprovalRow>> {
         let row = self.get_approval_db(request_id.to_owned()).await?;
         Ok(row)
     }
 
-    pub async fn list_user_approvals(
+    async fn list_user_approvals(
         &self,
         user_id: &str,
         statuses: Option<Vec<String>>,
@@ -61,7 +122,7 @@ impl PgRepository {
         Ok(rows)
     }
 
-    pub async fn decide_approval(
+    async fn decide_approval(
         &self,
         request_id: &str,
         req: &kc_map::ApprovalDecisionRequest,
@@ -83,8 +144,14 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn cancel_approval(&self, request_id: &str) -> RepoResult<u64> {
+    async fn cancel_approval(&self, request_id: &str) -> RepoResult<u64> {
         let res = self.cancel_approval_db(request_id.to_owned()).await?;
         Ok(res.rows_affected())
+    }
+}
+
+impl ApprovalRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }

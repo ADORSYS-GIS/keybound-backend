@@ -6,9 +6,9 @@ use backend_model::{bff as bff_map, kc as kc_map, staff as staff_map};
 use backend_repository::{ApprovalCreated, KycDocumentInsert, SmsPendingInsert};
 use chrono::Utc;
 use gen_oas_server_bff::{
-    Api as BffApi, ApiRegistrationKycDocumentsPostResponse,
-    ApiRegistrationKycInformationsPatchResponse, ApiRegistrationKycStatusGetResponse,
-    ApiRegistrationLimitsGetResponse, HealthGetResponse,
+    Api as BffApi, ApiKycCasesMineDocumentsPostResponse,
+    ApiKycCasesMinePatchResponse, ApiKycCasesMineGetResponse,
+    ApiLimitsGetResponse,
 };
 use gen_oas_server_kc::{
     Api as KcApi, CancelApprovalResponse, ConfirmSmsResponse, CreateApprovalResponse,
@@ -70,11 +70,11 @@ fn is_unique_violation(err: &Error) -> bool {
 
 #[backend_core::async_trait]
 impl BffApi<ServiceContext> for BackendApi {
-    async fn api_registration_kyc_documents_post(
+    async fn api_kyc_cases_mine_documents_post(
         &self,
         kyc_document_upload_request: gen_oas_server_bff::models::KycDocumentUploadRequest,
         context: &ServiceContext,
-    ) -> std::result::Result<ApiRegistrationKycDocumentsPostResponse, ApiError> {
+    ) -> std::result::Result<ApiKycCasesMineDocumentsPostResponse, ApiError> {
         let user_id = Self::require_user_id(context)?;
         let req: bff_map::KycDocumentUploadRequest = kyc_document_upload_request.into();
 
@@ -144,16 +144,16 @@ impl BffApi<ServiceContext> for BackendApi {
         };
 
         self.state.invalidate_bff_cache(&user_id);
-        Ok(ApiRegistrationKycDocumentsPostResponse::UploadURLCreatedSuccessfully(dto.into()))
+        Ok(ApiKycCasesMineDocumentsPostResponse::UploadURLCreatedSuccessfully(dto.into()))
     }
 
-    async fn api_registration_kyc_informations_patch(
+    async fn api_kyc_cases_mine_patch(
         &self,
-        kyc_information_patch_request: gen_oas_server_bff::models::KycInformationPatchRequest,
+        kyc_case_patch_request: gen_oas_server_bff::models::KycCasePatchRequest,
         context: &ServiceContext,
-    ) -> std::result::Result<ApiRegistrationKycInformationsPatchResponse, ApiError> {
+    ) -> std::result::Result<ApiKycCasesMinePatchResponse, ApiError> {
         let user_id = Self::require_user_id(context)?;
-        let req: bff_map::KycInformationPatchRequest = kyc_information_patch_request.into();
+        let req: bff_map::KycInformationPatchRequest = kyc_case_patch_request.into();
 
         let profile = self
             .state
@@ -162,7 +162,7 @@ impl BffApi<ServiceContext> for BackendApi {
             .await
             .map_err(repo_err)?;
         let Some(profile) = profile else {
-            return Ok(ApiRegistrationKycInformationsPatchResponse::CustomerNotFound);
+            return Ok(ApiKycCasesMinePatchResponse::KYCCaseNotFound);
         };
 
         let dto = bff_map::KycInformationResponseDto {
@@ -177,25 +177,20 @@ impl BffApi<ServiceContext> for BackendApi {
         };
 
         self.state.invalidate_bff_cache(&user_id);
-        Ok(ApiRegistrationKycInformationsPatchResponse::KYCInformationUpdated(dto.into()))
+        Ok(ApiKycCasesMinePatchResponse::KYCCaseUpdated(dto.into()))
     }
 
-    async fn api_registration_kyc_status_get(
+    async fn api_kyc_cases_mine_get(
         &self,
-        page: Option<i32>,
-        limit: Option<i32>,
         context: &ServiceContext,
-    ) -> std::result::Result<ApiRegistrationKycStatusGetResponse, ApiError> {
+    ) -> std::result::Result<ApiKycCasesMineGetResponse, ApiError> {
         let user_id = Self::require_user_id(context)?;
-        let (page, limit) = Self::normalize_page_limit(page, limit);
+        let (page, limit) = (1, 20);
 
-        let use_default_cache = page == 1 && limit == 20;
-        if use_default_cache {
-            if let Some(cached) = self.state.get_kyc_status_cache(&user_id) {
-                return Ok(ApiRegistrationKycStatusGetResponse::KYCStatusInformation(
-                    cached,
-                ));
-            }
+        if let Some(cached) = self.state.get_kyc_status_cache(&user_id) {
+            return Ok(ApiKycCasesMineGetResponse::KYCCaseDetails(
+                cached,
+            ));
         }
 
         let profile = self
@@ -205,7 +200,7 @@ impl BffApi<ServiceContext> for BackendApi {
             .await
             .map_err(repo_err)?;
         let Some(profile) = profile else {
-            return Ok(ApiRegistrationKycStatusGetResponse::CustomerNotFound);
+            return Ok(ApiKycCasesMineGetResponse::KYCCaseNotFound);
         };
 
         let docs = self
@@ -233,24 +228,29 @@ impl BffApi<ServiceContext> for BackendApi {
             total_documents: Some(docs.total_items as i32),
         };
 
-        let response: gen_oas_server_bff::models::KycStatusResponse = dto.into();
-        if use_default_cache {
-            self.state.put_kyc_status_cache(user_id, response.clone());
-        }
+        let response: gen_oas_server_bff::models::KycCaseResponse = dto.into();
+        self.state.put_kyc_status_cache(user_id, response.clone());
 
-        Ok(ApiRegistrationKycStatusGetResponse::KYCStatusInformation(
+        Ok(ApiKycCasesMineGetResponse::KYCCaseDetails(
             response,
         ))
     }
 
-    async fn api_registration_limits_get(
+    async fn api_kyc_cases_mine_submission_post(
+        &self,
+        _context: &ServiceContext,
+    ) -> std::result::Result<gen_oas_server_bff::ApiKycCasesMineSubmissionPostResponse, ApiError> {
+        Err(ApiError("Not implemented".to_owned()))
+    }
+
+    async fn api_limits_get(
         &self,
         context: &ServiceContext,
-    ) -> std::result::Result<ApiRegistrationLimitsGetResponse, ApiError> {
+    ) -> std::result::Result<ApiLimitsGetResponse, ApiError> {
         let user_id = Self::require_user_id(context)?;
 
         if let Some(cached) = self.state.get_limits_cache(&user_id) {
-            return Ok(ApiRegistrationLimitsGetResponse::LimitsAndUsageDetails(
+            return Ok(ApiLimitsGetResponse::LimitsAndUsageDetails(
                 cached,
             ));
         }
@@ -262,7 +262,7 @@ impl BffApi<ServiceContext> for BackendApi {
             .await
             .map_err(repo_err)?;
         let Some(kyc_tier) = kyc_tier else {
-            return Ok(ApiRegistrationLimitsGetResponse::CustomerNotFound);
+            return Ok(ApiLimitsGetResponse::CustomerNotFound);
         };
 
         let mut resp = gen_oas_server_bff::models::LimitsResponse::new();
@@ -281,17 +281,11 @@ impl BffApi<ServiceContext> for BackendApi {
         resp.restricted_features = Some(vec![]);
 
         self.state.put_limits_cache(user_id, resp.clone());
-        Ok(ApiRegistrationLimitsGetResponse::LimitsAndUsageDetails(
+        Ok(ApiLimitsGetResponse::LimitsAndUsageDetails(
             resp,
         ))
     }
 
-    async fn health_get(
-        &self,
-        _context: &ServiceContext,
-    ) -> std::result::Result<HealthGetResponse, ApiError> {
-        Ok(HealthGetResponse::OK)
-    }
 }
 
 #[backend_core::async_trait]

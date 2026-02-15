@@ -30,6 +30,7 @@ pub async fn serve(core_config: &Config) -> Result<()> {
 
     let handle = axum_server::Handle::new();
     let shutdown_handle = handle.clone();
+    
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
         shutdown_handle.graceful_shutdown(None);
@@ -39,6 +40,7 @@ pub async fn serve(core_config: &Config) -> Result<()> {
         Some((cert_path, key_path)) => {
             let rustls_config =
                 axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
+            
             axum_server::bind_rustls(listen_addr, rustls_config)
                 .handle(handle)
                 .serve(make_svc)
@@ -64,15 +66,15 @@ async fn dispatch(
     let path = req.uri().path().to_owned();
 
     if path.starts_with("/v1/") {
-        let req = match require_kc_signature(&state.config.auth.kc, req).await {
+        let req = match require_kc_signature(&state.config.kc, req).await {
             Ok(req) => req,
             Err(resp) => return resp,
         };
         return state::call_kc(api, req).await;
     }
 
-    if path == "/health" || path.starts_with("/api/registration/") {
-        let req = match require_bff_auth(&state.config.auth.bff, req).await {
+    if path.starts_with("/api/registration/") {
+        let req = match require_bff_auth(&state.config.bff, req).await {
             Ok(req) => req,
             Err(resp) => return resp,
         };
@@ -80,7 +82,7 @@ async fn dispatch(
     }
 
     if path.starts_with("/api/kyc/staff/") {
-        let req = match require_staff_bearer(&state.config.auth.staff, req).await {
+        let req = match require_staff_bearer(&state.config.staff, req).await {
             Ok(req) => req,
             Err(resp) => return resp,
         };

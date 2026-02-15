@@ -6,38 +6,10 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Config {
-    pub server: Server,
-    pub logging: Logging,
-    pub database: Database,
-    pub oauth2: Oauth2,
-    pub aws: Aws,
-    pub auth: Auth,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct Server {
-    pub api: ApiServer,
-    pub basic_auth: BasicAuth,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ApiServer {
     pub address: String,
     pub port: u16,
     pub tls: Tls,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Tls {
-    pub cert_path: String,
-    pub key_path: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BasicAuth {
-    pub username: String,
-    pub password: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,43 +32,11 @@ pub struct Oauth2 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Auth {
-    pub kc: KcAuth,
-    pub bff: BffAuth,
-    pub staff: StaffAuth,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct KcAuth {
-    pub enabled: bool,
-    pub signature_secret: String,
-    pub max_clock_skew_seconds: i64,
-    pub max_body_bytes: usize,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BffAuth {
-    pub enabled: bool,
-    pub require_bearer: bool,
-    pub require_signature: bool,
-    pub max_clock_skew_seconds: i64,
-    pub external_id_claim: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct StaffAuth {
-    pub require_bearer: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Aws {
-    pub region: String,
-    pub s3: AwsS3,
-    pub sns: AwsSns,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct AwsS3 {
+    /// Optional region override for S3.
+    pub region: Option<String>,
+    /// Optional region override for S3.
+    pub force_path_style: Option<bool>,
     pub bucket: String,
     /// Optional custom S3 endpoint (e.g., LocalStack).
     pub endpoint: Option<String>,
@@ -114,6 +54,51 @@ pub struct AwsSns {
     pub initial_backoff_seconds: u64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config {
+    pub server: Server,
+    pub logging: Logging,
+    pub database: Database,
+    pub oauth2: Oauth2,
+    pub s3: Option<AwsS3>,
+    pub sns: Option<AwsSns>,
+
+    pub kc: KcAuth,
+    pub bff: BffAuth,
+    pub staff: StaffAuth,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Tls {
+    pub cert_path: String,
+    pub key_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KcAuth {
+    pub enabled: bool,
+    pub signature_secret: String,
+    pub max_clock_skew_seconds: i64,
+    pub max_body_bytes: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BffAuth {
+    pub enabled: bool,
+    pub base_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StaffAuth {
+    pub enabled: bool,
+    pub base_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Cuss {
+    pub api_url: String,
+}
+
 pub fn load_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<Config> {
     let content = read_to_string(path)?;
     let cfg: Config = from_str(&content)?;
@@ -122,12 +107,12 @@ pub fn load_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<Config> {
 
 impl Config {
     pub fn api_listen_addr(&self) -> Result<SocketAddr> {
-        Ok(format!("{}:{}", self.server.api.address, self.server.api.port).parse()?)
+        Ok(format!("{}:{}", self.server.address, self.server.port).parse()?)
     }
 
     pub fn api_tls_files(&self) -> Option<(PathBuf, PathBuf)> {
-        let cert_path: PathBuf = self.server.api.tls.cert_path.clone().into();
-        let key_path: PathBuf = self.server.api.tls.key_path.clone().into();
+        let cert_path: PathBuf = self.server.tls.cert_path.clone().into();
+        let key_path: PathBuf = self.server.tls.key_path.clone().into();
 
         if Path::new(&cert_path).exists() && Path::new(&key_path).exists() {
             Some((cert_path, key_path))

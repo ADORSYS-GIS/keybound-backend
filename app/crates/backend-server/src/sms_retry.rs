@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use backend_model::db;
-use backend_repository::SmsPublishFailure;
+use backend_repository::{SmsPublishFailure, SmsRepo};
 use chrono::Utc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +19,7 @@ pub fn spawn(state: Arc<AppState>) -> JoinHandle<()> {
 }
 
 async fn tick(state: &AppState) -> backend_core::Result<()> {
-    let rows = state.repository.list_retryable_sms(25).await?;
+    let rows = state.repository.sms.list_retryable_sms(25).await?;
 
     for row in rows {
         if let Err(e) = try_publish(state, row).await {
@@ -41,6 +41,7 @@ async fn try_publish(state: &AppState, row: db::SmsMessageRow) -> backend_core::
     if message.is_empty() {
         state
             .repository
+            .sms
             .mark_sms_gave_up(&row.id, "missing message body")
             .await?;
         return Ok(());
@@ -58,7 +59,7 @@ async fn try_publish(state: &AppState, row: db::SmsMessageRow) -> backend_core::
     {
         Ok(out) => {
             let message_id = out.message_id().map(|s| s.to_owned());
-            state.repository.mark_sms_sent(&row.id, message_id).await?;
+            state.repository.sms.mark_sms_sent(&row.id, message_id).await?;
         }
         Err(e) => {
             let max_attempts = row.max_attempts.max(1) as u32;
@@ -77,6 +78,7 @@ async fn try_publish(state: &AppState, row: db::SmsMessageRow) -> backend_core::
 
             state
                 .repository
+                .sms
                 .mark_sms_failed(SmsPublishFailure {
                     id: row.id.clone(),
                     gave_up,

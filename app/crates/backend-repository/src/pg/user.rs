@@ -1,10 +1,91 @@
-use crate::pg::{PgRepository, PgSqlRepo};
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
-use serde_json::json;
+use serde_json::{Value, json};
+use sqlx_data::{QueryResult, dml, repo};
+use sqlx::PgPool;
+use std::sync::{Arc, Mutex};
+use lru::LruCache;
 
-impl PgRepository {
-    pub async fn create_user(&self, req: &kc_map::UserUpsert) -> RepoResult<db::UserRow> {
+#[repo]
+pub trait PgUserRepo {
+    #[dml(file = "queries/user/create.sql", unchecked)]
+    async fn create_user_db(
+        &self,
+        user_id: String,
+        realm: String,
+        username: String,
+        first_name: Option<String>,
+        last_name: Option<String>,
+        email: Option<String>,
+        enabled: bool,
+        email_verified: bool,
+        attributes: Option<Value>,
+    ) -> sqlx_data::Result<db::UserRow>;
+
+    #[dml(file = "queries/user/get.sql", unchecked)]
+    async fn get_user_db(&self, user_id: String) -> sqlx_data::Result<Option<db::UserRow>>;
+
+    #[dml(file = "queries/user/update.sql", unchecked)]
+    async fn update_user_db(
+        &self,
+        user_id: String,
+        realm: String,
+        username: String,
+        first_name: Option<String>,
+        last_name: Option<String>,
+        email: Option<String>,
+        enabled: bool,
+        email_verified: bool,
+        attributes: Option<Value>,
+    ) -> sqlx_data::Result<Option<db::UserRow>>;
+
+    #[dml(file = "queries/user/delete.sql", unchecked)]
+    async fn delete_user_db(&self, user_id: String) -> sqlx_data::Result<QueryResult>;
+
+    #[dml(file = "queries/user/search.sql", unchecked)]
+    async fn search_users_db(
+        &self,
+        realm: String,
+        search: Option<String>,
+        username: Option<String>,
+        email: Option<String>,
+        enabled: Option<bool>,
+        email_verified: Option<bool>,
+        limit: i32,
+        offset: i32,
+    ) -> sqlx_data::Result<Vec<db::UserRow>>;
+
+    #[dml(file = "queries/user/resolve_by_phone.sql", unchecked)]
+    async fn resolve_user_by_phone_db(
+        &self,
+        realm: String,
+        phone: String,
+    ) -> sqlx_data::Result<Option<db::UserRow>>;
+
+    #[dml(file = "queries/user/create_by_phone.sql", unchecked)]
+    async fn create_user_by_phone_db(
+        &self,
+        user_id: String,
+        realm: String,
+        phone: String,
+        attributes: Value,
+    ) -> sqlx_data::Result<db::UserRow>;
+}
+
+#[derive(Clone)]
+pub struct UserRepository {
+    pub(crate) pool: PgPool,
+    pub(crate) resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>,
+}
+
+impl PgUserRepo for UserRepository {
+    fn get_pool(&self) -> &sqlx_data::Pool {
+        &self.pool
+    }
+}
+
+impl UserRepo for UserRepository {
+    async fn create_user(&self, req: &kc_map::UserUpsert) -> RepoResult<db::UserRow> {
         let user_id = backend_id::user_id()?;
         let attributes_json = req
             .attributes
@@ -27,12 +108,12 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn get_user(&self, user_id: &str) -> RepoResult<Option<db::UserRow>> {
+    async fn get_user(&self, user_id: &str) -> RepoResult<Option<db::UserRow>> {
         let row = self.get_user_db(user_id.to_owned()).await?;
         Ok(row)
     }
 
-    pub async fn update_user(
+    async fn update_user(
         &self,
         user_id: &str,
         req: &kc_map::UserUpsert,
@@ -58,12 +139,12 @@ impl PgRepository {
         Ok(row)
     }
 
-    pub async fn delete_user(&self, user_id: &str) -> RepoResult<u64> {
+    async fn delete_user(&self, user_id: &str) -> RepoResult<u64> {
         let res = self.delete_user_db(user_id.to_owned()).await?;
         Ok(res.rows_affected())
     }
 
-    pub async fn search_users(&self, req: &kc_map::UserSearch) -> RepoResult<Vec<db::UserRow>> {
+    async fn search_users(&self, req: &kc_map::UserSearch) -> RepoResult<Vec<db::UserRow>> {
         let max_results = req.max_results.unwrap_or(50).clamp(1, 200);
         let first_result = req.first_result.unwrap_or(0).max(0);
 
@@ -82,7 +163,7 @@ impl PgRepository {
         Ok(rows)
     }
 
-    pub async fn resolve_user_by_phone(
+    async fn resolve_user_by_phone(
         &self,
         realm: &str,
         phone: &str,
@@ -113,7 +194,7 @@ impl PgRepository {
         Ok(user)
     }
 
-    pub async fn resolve_or_create_user_by_phone(
+    async fn resolve_or_create_user_by_phone(
         &self,
         realm: &str,
         phone: &str,
@@ -137,5 +218,18 @@ impl PgRepository {
         }
 
         Ok((user, true))
+    }
+}
+
+impl UserRepository {
+    pub fn new(pool: PgPool, resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>) -> Self {
+        Self {
+            pool,
+            resolve_user_by_phone_cache,
+        }
+    }
+
+    pub(crate) fn phone_cache_key(realm: &str, phone: &str) -> String {
+        format!("{realm}:{phone}")
     }
 }

@@ -3,7 +3,7 @@ use backend_auth::{KcContext, ServiceContext};
 use backend_core::Config;
 use backend_repository::PgRepository;
 use bytes::Bytes;
-use gen_oas_server_bff::models::{KycStatusResponse, LimitsResponse};
+use gen_oas_server_bff::models::{KycCaseResponse, LimitsResponse};
 use http::{Request, Response, StatusCode};
 use http_body_util::BodyExt as _;
 use http_body_util::combinators::BoxBody;
@@ -19,7 +19,7 @@ use crate::services::BackendService;
 
 #[derive(Clone)]
 pub struct HttpCache {
-    pub kyc_status: Arc<Mutex<LruCache<String, KycStatusResponse>>>,
+    pub kyc_status: Arc<Mutex<LruCache<String, KycCaseResponse>>>,
     pub limits: Arc<Mutex<LruCache<String, LimitsResponse>>>,
 }
 
@@ -54,13 +54,13 @@ impl AppState {
             .await?;
 
         let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_types::region::Region::new(cfg.aws.region.clone()))
+            .region(aws_types::region::Region::new(cfg.region.clone()))
             .load()
             .await;
 
         let s3 = {
             let mut builder = aws_sdk_s3::config::Builder::from(&shared_config);
-            if let Some(endpoint) = &cfg.aws.s3.endpoint {
+            if let Some(endpoint) = &cfg.s3.endpoint {
                 builder = builder.endpoint_url(endpoint).force_path_style(true);
             }
             aws_sdk_s3::Client::from_conf(builder.build())
@@ -68,7 +68,7 @@ impl AppState {
 
         let sns = {
             let mut builder = aws_sdk_sns::config::Builder::from(&shared_config);
-            if let Some(region) = &cfg.aws.sns.region {
+            if let Some(region) = &cfg.sns.region {
                 builder = builder.region(aws_types::region::Region::new(region.clone()));
             }
             aws_sdk_sns::Client::from_conf(builder.build())
@@ -93,7 +93,7 @@ impl AppState {
         })
     }
 
-    pub fn get_kyc_status_cache(&self, external_id: &str) -> Option<KycStatusResponse> {
+    pub fn get_kyc_status_cache(&self, external_id: &str) -> Option<KycCaseResponse> {
         let mut cache = self
             .http_cache
             .kyc_status
@@ -102,7 +102,7 @@ impl AppState {
         cache.get(external_id).cloned()
     }
 
-    pub fn put_kyc_status_cache(&self, external_id: String, value: KycStatusResponse) {
+    pub fn put_kyc_status_cache(&self, external_id: String, value: KycCaseResponse) {
         let mut cache = self
             .http_cache
             .kyc_status
