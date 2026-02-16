@@ -137,6 +137,14 @@ Before finalizing:
    - `cargo test -p backend-core --features axum --test error_response`
    - `cargo test -p backend-auth --test jwt_auth_exclude_paths`
 
+## CI/CD (GitHub Actions)
+- Main workflow: `.github/workflows/ci.yaml`
+- Reusable actions:
+  - `.github/actions/setup-rust/action.yaml`
+  - `.github/actions/login-ghcr/action.yaml`
+  - `.github/actions/check-cargo-change/action.yaml`
+- Docker build context is repository root; Dockerfile at `deploy/docker/user-storage/Dockerfile`.
+
 ## Work flavors
 Let's talk about all the rules we're having to work efficiently:
 - To work here, you should take the habit of first checking the web if there's a newer version of a framework or tool, before using the "known" version

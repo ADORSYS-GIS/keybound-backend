@@ -1,0 +1,89 @@
+name: Main CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TARGET_DIR: target
+
+jobs:
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+      - name: Run cargo test
+        run: cargo test --workspace --locked
+
+  release-build:
+    name: Release Build
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+      - name: Run cargo build --release
+        run: cargo build --release --workspace --locked
+
+  cargo-version:
+    name: Cargo Version Change Detector
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.detection.outputs.changed }}
+      version: ${{ steps.detection.outputs.version }}
+    steps:
+      - uses: ./.github/actions/check-cargo-change
+        id: detection
+        with:
+          before-sha: ${{ github.event.before }}
+          after-sha: ${{ github.sha }}
+
+  container-build-dev:
+    name: Container Build (Dev)
+    needs:
+      - release-build
+      - tests
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/login-ghcr
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/user-storage/Dockerfile
+          push: true
+          no-cache: false
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository_owner }}/user-storage:dev-${{ github.sha }}
+
+  container-build-prod:
+    name: Container Build (Prod)
+    needs:
+      - cargo-version
+      - release-build
+      - tests
+    if: github.ref == 'refs/heads/main' && needs.cargo-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/login-ghcr
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push prod image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/user-storage/Dockerfile
+          push: true
+          no-cache: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository_owner }}/user-storage:${{ needs.cargo-version.outputs.version }}

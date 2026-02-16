@@ -74,7 +74,7 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
         move || build_staff_router(api.clone(), cfg.clone())
     });
 
-    if config.logging.request_logging.enabled {
+    if config.logging.request_logging.enabled || config.logging.log_requests_enabled {
         router.layer(TraceLayer::new_for_http().make_span_with(|req: &HttpRequest<_>| {
             tracing::info_span!(
                 "http-request",
@@ -88,61 +88,50 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
 }
 
 fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth) -> Router {
+    let layer = kc_signature_layer(cfg);
     Router::new()
         .fallback_service(service_fn(move |req| {
             let api = api.clone();
             async move { Ok(state::call_kc(api, req).await) }
         }))
-        .layer(kc_signature_layer(cfg))
+        .layer(layer)
 }
 
 fn build_bff_router(api: api::BackendApi, cfg: backend_core::BffAuth) -> Router {
+    let layer = bff_bearer_layer(cfg);
     Router::new()
         .fallback_service(service_fn(move |req| {
             let api = api.clone();
             async move { Ok(state::call_bff(api, req).await) }
         }))
-        .layer(bff_bearer_layer(cfg))
+        .layer(layer)
 }
 
 fn build_staff_router(api: api::BackendApi, cfg: backend_core::StaffAuth) -> Router {
+    let layer = staff_bearer_layer(cfg);
     Router::new()
         .fallback_service(service_fn(move |req| {
             let api = api.clone();
             async move { Ok(state::call_staff(api, req).await) }
         }))
-        .layer(staff_bearer_layer(cfg))
+        .layer(layer)
 }
+
 
 fn nest_surface_router<F>(router: Router, base_path: &str, build_child: F) -> Router
 where
     F: FnOnce() -> Router,
 {
-    if let Some(normalized) = normalize_base_path(base_path) {
-        router.nest(&normalized, build_child())
-    } else {
-        router
-    }
-}
-
-fn normalize_base_path(base_path: &str) -> Option<String> {
     let trimmed = base_path.trim();
     if trimmed.is_empty() {
-        return None;
+        return router;
     }
 
-    let mut normalized = trimmed.to_string();
-    if !normalized.starts_with('/') {
-        normalized.insert(0, '/');
+    if trimmed == "/" {
+        return router;
     }
-    while normalized.len() > 1 && normalized.ends_with('/') {
-        normalized.pop();
-    }
-    if normalized == "/" {
-        None
-    } else {
-        Some(normalized)
-    }
+
+    router.nest(trimmed, build_child())
 }
 
 fn request_path(req: &HttpRequest<Body>) -> String {
@@ -160,6 +149,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::get;
     use tower::ServiceExt;
+    use axum::http::Request;
 
     #[tokio::test]
     async fn non_blank_base_path_mounts_service() {
@@ -212,5 +202,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_requires_token_on_prefixed_path() {
+        use backend_core::BffAuth;
+        use backend_auth::bff_bearer_layer;
+        use tower::service_fn;
+        use axum::response::Response;
+
+        let cfg = BffAuth {
+            enabled: true,
+            base_path: "/bff".to_string(),
+        };
+
+        let router = nest_surface_router(Router::new(), &cfg.base_path, || {
+            Router::new()
+                .fallback_service(service_fn(|_req| async {
+                     Ok::<_, std::convert::Infallible>(Response::new(Body::from("fallback")))
+                }))
+                .layer(bff_bearer_layer(cfg.clone()))
+        });
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/bff/api/kyc/cases/mine")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

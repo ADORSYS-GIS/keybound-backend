@@ -9,6 +9,7 @@ server:
 
 logging:
   level: "info"
+  log_requests_enabled: false
   request_logging:
     enabled: false
 

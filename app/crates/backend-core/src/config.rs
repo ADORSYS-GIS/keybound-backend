@@ -60,6 +60,8 @@ pub struct Logging {
     pub json: Option<bool>,
     pub flame: Option<bool>,
     #[serde(default)]
+    pub log_requests_enabled: bool,
+    #[serde(default)]
     pub request_logging: RequestLogging,
 }
 

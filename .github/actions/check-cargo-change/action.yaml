@@ -1,0 +1,40 @@
+name: Detect Cargo Version Change
+description: Detects whether Cargo.toml changed between commits and exposes the workspace version.
+inputs:
+  before-sha:
+    description: SHA to compare from (may be empty for initial push).
+    required: false
+  after-sha:
+    description: SHA to compare to (typically github.sha).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Determine Cargo changes and version
+      id: detect
+      shell: bash
+      run: |
+        set -euo pipefail
+        before='${{ inputs.before-sha }}'
+        after='${{ inputs.after-sha }}'
+        changed=false
+        if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+          changed=true
+        else
+          git fetch origin "$before" --depth=1 || true
+          if git diff --name-only "$before" "$after" | grep -q '^Cargo.toml$'; then
+            changed=true
+          fi
+        fi
+        echo "changed=$changed" >> "$GITHUB_OUTPUT"
+        version=$(awk 'BEGIN {in_section=0} /^\[workspace\.package\]/ {in_section=1; next} /^\[/ {if (!/^\[workspace\.package\]/) in_section=0} in_section && $1 == "version" {gsub(/"/, "", $3); print $3; exit}' Cargo.toml)
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+outputs:
+  changed:
+    description: "true if Cargo.toml differs between before-sha and after-sha"
+  version:
+    description: Workspace version from Cargo.toml

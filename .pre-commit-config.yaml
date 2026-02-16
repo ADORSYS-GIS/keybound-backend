@@ -9,24 +9,28 @@ repos:
     -   id: trailing-whitespace
 -   repo: local
     hooks:
-    -   id: cargo-check
-        name: cargo check
-        description: Check the package for errors.
-        entry: cargo check --all-targets --all-features
+    -   id: cargo-fmt-check
+        name: cargo fmt --check
+        description: Ensure Rust code is formatted.
+        entry: cargo fmt -- --check
         language: rust
         types: [rust]
         pass_filenames: false
-    -   id: cargo-fmt
-        name: cargo fmt
-        description: Format files with rustfmt.
-        entry: cargo fmt
+    -   id: cargo-check-workspace
+        name: cargo check --workspace
+        description: Run cargo check across the workspace for static analysis.
+        entry: cargo check --workspace
         language: rust
-        types: [rust]
         pass_filenames: false
-    -   id: cargo-clippy
-        name: cargo clippy
-        description: Lint files with clippy.
-        entry: cargo clippy --all-targets --all-features -- -D warnings
+    -   id: cargo-build-workspace
+        name: cargo build --workspace
+        description: Ensure the workspace builds in debug mode.
+        entry: cargo build --workspace
         language: rust
-        types: [rust]
+        pass_filenames: false
+    -   id: cargo-test-workspace
+        name: cargo test --workspace
+        description: Execute all workspace tests.
+        entry: cargo test --workspace
+        language: rust
         pass_filenames: false

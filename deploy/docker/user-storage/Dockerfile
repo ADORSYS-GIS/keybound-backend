@@ -1,64 +1,41 @@
-# Multi-stage build for optimized production image
-FROM rust:1 as builder
+syntax = "docker/dockerfile:1.5"
 
-# Install system dependencies
-RUN apt update && apt install -y \
-    pkg-config \
-    libssl-dev \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM --platform=$BUILDPLATFORM rust:1-bullseye as builder
 
-# Create app directory
 WORKDIR /app
 
-# Copy manifests
+# Cache dependencies
 COPY Cargo.toml Cargo.lock ./
-COPY crates/ ./crates/
-COPY app/ ./app/
-COPY migrations/ ./migrations/
+COPY app app/
+COPY crates crates/
+COPY config config/
+COPY deploy deploy/
+COPY openapi openapi/
+COPY .cargo .cargo
 
-# Build dependencies (this is cached if dependencies don't change)
-RUN cargo build --profile prod --locked
+RUN cargo fetch --workspace
 
-FROM debian:12 as dep
+# Build release binaries
+RUN cargo build --release --workspace --locked
 
-RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
-
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt update \
-  && apt install -y ca-certificates libssl3 --no-install-recommends
-
-RUN \
-  --mount=type=cache,target=/usr/lib/*-linux-gnu \
-  mkdir /deps && \
-  cp /usr/lib/*-linux-gnu/*.so* /deps
-
-# Runtime stage
 FROM gcr.io/distroless/base-debian12:nonroot
 
 LABEL maintainer="stephane-segning <selastlambou@gmail.com>"
 LABEL org.opencontainers.image.description="Backend for Keycloak Keybound x Fineract"
 
-
-# Set working directory
 WORKDIR /app
 
-# Copy binary from builder stage
-COPY --from=builder /app/target/prod/backend /usr/local/bin/backend
-COPY --from=builder /app/target/prod/health /usr/local/bin/health
-COPY --from=dep /deps /usr/lib/
+COPY --from=builder /app/target/release/backend /usr/local/bin/backend
+COPY --from=builder /app/target/release/health /usr/local/bin/health
 
-# Expose port
+RUN mkdir -p /etc/ssl/certs
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
 EXPOSE 3000 3443
 
-# Health check (API server)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=1s --retries=3 \
     CMD ["/usr/local/bin/health", "-r", "3000"]
 
-# Set environment variables
 ENV RUST_LOG=info
 
-# Run the binary
 ENTRYPOINT ["backend"]

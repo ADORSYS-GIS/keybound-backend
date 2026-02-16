@@ -153,10 +153,22 @@ impl Error {
                 message: self.to_string(),
                 context: None,
             },
-            Self::Database(_) | Self::SqlxError(_) | Self::SqlxDataParser(_) => ErrorMeta {
+            Self::Database(t) => ErrorMeta {
                 error_key: "DATABASE_ERROR",
                 status_code: 500,
-                message: "Database operation failed".to_owned(),
+                message: format!("Database operation failed: {t}"),
+                context: None,
+            },
+            Self::SqlxError(t) => ErrorMeta {
+                error_key: "DATABASE_ERROR",
+                status_code: 500,
+                message: format!("Database operation failed: {t}"),
+                context: None,
+            },
+            Self::SqlxDataParser(e) => ErrorMeta {
+                error_key: "DATABASE_ERROR",
+                status_code: 500,
+                message: format!("Database operation failed: {e}"),
                 context: None,
             },
             Self::Http {
@@ -184,9 +196,9 @@ impl Error {
 mod axum_impl {
     use super::Error;
     use axum::{
-        Json,
         http::StatusCode,
         response::{IntoResponse, Response},
+        Json,
     };
 
     impl IntoResponse for Error {
