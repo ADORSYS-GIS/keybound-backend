@@ -1,14 +1,17 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
-use axum::middleware::{Next, from_fn};
 use axum::response::{IntoResponse, Response};
 use backend_core::{BffAuth, KcAuth, StaffAuth};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ring::hmac;
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tower::{Layer, Service};
 
 pub async fn require_kc_signature(
     cfg: &KcAuth,
@@ -64,43 +67,175 @@ pub async fn require_staff_bearer(
     require_user_bearer_auth(cfg.enabled, &cfg.base_path, req).await
 }
 
-pub fn kc_signature_layer(cfg: KcAuth) -> impl Clone {
-    let cfg = Arc::new(cfg);
-    from_fn(move |req: Request<Body>, next: Next<Body>| {
-        let cfg = Arc::clone(&cfg);
-        async move {
+pub fn kc_signature_layer(cfg: KcAuth) -> KcSignatureLayer {
+    KcSignatureLayer::new(cfg)
+}
+
+pub fn bff_bearer_layer(cfg: BffAuth) -> BffBearerLayer {
+    BffBearerLayer::new(cfg)
+}
+
+pub fn staff_bearer_layer(cfg: StaffAuth) -> StaffBearerLayer {
+    StaffBearerLayer::new(cfg)
+}
+
+#[derive(Clone)]
+pub struct KcSignatureLayer {
+    cfg: Arc<KcAuth>,
+}
+
+impl KcSignatureLayer {
+    fn new(cfg: KcAuth) -> Self {
+        Self { cfg: Arc::new(cfg) }
+    }
+}
+
+impl<S> Layer<S> for KcSignatureLayer {
+    type Service = KcSignatureService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        KcSignatureService {
+            inner,
+            cfg: Arc::clone(&self.cfg),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct KcSignatureService<S> {
+    inner: S,
+    cfg: Arc<KcAuth>,
+}
+
+impl<S> Service<Request<Body>> for KcSignatureService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let cfg = Arc::clone(&self.cfg);
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
             match require_kc_signature(&cfg, req).await {
-                Ok(req) => next.run(req).await,
-                Err(resp) => resp,
+                Ok(req) => inner.call(req).await,
+                Err(resp) => Ok(resp),
             }
-        }
-    })
+        })
+    }
 }
 
-pub fn bff_bearer_layer(cfg: BffAuth) -> impl Clone {
-    let cfg = Arc::new(cfg);
-    from_fn(move |req: Request<Body>, next: Next<Body>| {
-        let cfg = Arc::clone(&cfg);
-        async move {
+#[derive(Clone)]
+pub struct BffBearerLayer {
+    cfg: Arc<BffAuth>,
+}
+
+impl BffBearerLayer {
+    fn new(cfg: BffAuth) -> Self {
+        Self { cfg: Arc::new(cfg) }
+    }
+}
+
+impl<S> Layer<S> for BffBearerLayer {
+    type Service = BffBearerService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        BffBearerService {
+            inner,
+            cfg: Arc::clone(&self.cfg),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct BffBearerService<S> {
+    inner: S,
+    cfg: Arc<BffAuth>,
+}
+
+impl<S> Service<Request<Body>> for BffBearerService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let cfg = Arc::clone(&self.cfg);
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
             match require_bff_auth(&cfg, req).await {
-                Ok(req) => next.run(req).await,
-                Err(resp) => resp,
+                Ok(req) => inner.call(req).await,
+                Err(resp) => Ok(resp),
             }
-        }
-    })
+        })
+    }
 }
 
-pub fn staff_bearer_layer(cfg: StaffAuth) -> impl Clone {
-    let cfg = Arc::new(cfg);
-    from_fn(move |req: Request<Body>, next: Next<Body>| {
-        let cfg = Arc::clone(&cfg);
-        async move {
-            match require_staff_bearer(&cfg, req).await {
-                Ok(req) => next.run(req).await,
-                Err(resp) => resp,
-            }
+#[derive(Clone)]
+pub struct StaffBearerLayer {
+    cfg: Arc<StaffAuth>,
+}
+
+impl StaffBearerLayer {
+    fn new(cfg: StaffAuth) -> Self {
+        Self { cfg: Arc::new(cfg) }
+    }
+}
+
+impl<S> Layer<S> for StaffBearerLayer {
+    type Service = StaffBearerService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        StaffBearerService {
+            inner,
+            cfg: Arc::clone(&self.cfg),
         }
-    })
+    }
+}
+
+#[derive(Clone)]
+pub struct StaffBearerService<S> {
+    inner: S,
+    cfg: Arc<StaffAuth>,
+}
+
+impl<S> Service<Request<Body>> for StaffBearerService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let cfg = Arc::clone(&self.cfg);
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
+            match require_staff_bearer(&cfg, req).await {
+                Ok(req) => inner.call(req).await,
+                Err(resp) => Ok(resp),
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

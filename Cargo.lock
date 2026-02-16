@@ -872,6 +872,7 @@ dependencies = [
  "sha2",
  "swagger",
  "tokio",
+ "tower",
 ]
 
 [[package]]

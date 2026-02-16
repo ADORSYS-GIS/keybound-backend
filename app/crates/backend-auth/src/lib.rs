@@ -6,7 +6,10 @@ use std::collections::BTreeSet;
 use swagger::auth::{Authorization, Scopes};
 use swagger::{Has, XSpanIdString};
 
-pub use middleware::{require_bff_auth, require_kc_signature, require_staff_bearer};
+pub use middleware::{
+    bff_bearer_layer, kc_signature_layer, require_bff_auth, require_kc_signature,
+    require_staff_bearer, staff_bearer_layer,
+};
 
 #[derive(Debug, Clone)]
 pub struct KcContext {

@@ -71,7 +71,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /api/kyc/submissions/{submissionId}:submit:
+  /api/kyc/submissions/{submissionId}/submit:
     post:
       tags: [ KYC ]
       summary: Submit a KYC submission
@@ -93,7 +93,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /api/kyc/submissions/{submissionId}/documents:init:
+  /api/kyc/submissions/{submissionId}/documents/init:
     post:
       tags: [ KYC ]
       summary: Initialize a document upload
@@ -119,7 +119,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /api/kyc/documents/{documentId}:confirm:
+  /api/kyc/documents/{documentId}/confirm:
     post:
       tags: [ KYC ]
       summary: Confirm an uploaded document

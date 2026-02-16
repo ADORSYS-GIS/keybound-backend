@@ -3,12 +3,16 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Request, StatusCode, header::AUTHORIZATION};
 use axum::routing::get;
 use axum::{body::to_bytes, response::Response};
-use backend_auth::{require_bff_auth, require_kc_signature, require_staff_bearer};
+use backend_auth::{
+    bff_bearer_layer, kc_signature_layer, require_bff_auth, require_kc_signature,
+    require_staff_bearer, staff_bearer_layer,
+};
 use backend_core::{BffAuth, KcAuth, StaffAuth};
 use base64::Engine;
 use ring::hmac;
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tower::ServiceExt;
 
 fn build_bff_auth() -> BffAuth {
     BffAuth {

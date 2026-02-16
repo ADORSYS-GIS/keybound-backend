@@ -8,34 +8,17 @@ use axum::body::Body;
 use backend_auth::{bff_bearer_layer, kc_signature_layer, staff_bearer_layer};
 use backend_core::{Config, Result};
 use http::uri::PathAndQuery;
-use http::{Request, Response, StatusCode, Uri};
+use http::{Request, Uri};
 use std::sync::Arc;
-use tower::make::Shared;
 use tower::service_fn;
-use tracing::{error, info};
+use tracing::info;
 
 pub async fn serve(core_config: &Config) -> Result<()> {
     let listen_addr = core_config.api_listen_addr()?;
     let state = Arc::new(state::AppState::from_config(core_config).await?);
 
     let api = api::BackendApi::new(state.clone());
-    let router = build_router(&api, &state.config);
-    let make_svc = Shared::new(service_fn(move |req: Request<hyper::body::Incoming>| {
-        let router = router.clone();
-        async move {
-            let req = req.map(Body::new);
-            match router.oneshot(req).await {
-                Ok(resp) => Ok::<Response<Body>, std::convert::Infallible>(resp),
-                Err(err) => {
-                    error!(error = %err, "router request failed");
-                    Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from("Internal server error"))
-                        .unwrap_or_else(|_| Response::new(Body::empty())))
-                }
-            }
-        }
-    }));
+    let app = build_router(&api, &state.config);
 
     info!("Listening on {}", listen_addr);
 
@@ -54,13 +37,13 @@ pub async fn serve(core_config: &Config) -> Result<()> {
 
             axum_server::bind_rustls(listen_addr, rustls_config)
                 .handle(handle)
-                .serve(make_svc)
+                .serve(app.into_make_service())
                 .await?;
         }
         None => {
             axum_server::bind(listen_addr)
                 .handle(handle)
-                .serve(make_svc)
+                .serve(app.into_make_service())
                 .await?;
         }
     }
@@ -94,28 +77,20 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
 
 fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth, base_path: String) -> Router {
     let base_path = Arc::new(base_path);
-    Router::new()
-        .fallback(service_fn(move |req| {
+    Router::new().fallback_service(service_fn(move |req| {
             let api = api.clone();
             let base_path = base_path.clone();
-            async move {
-                let req = add_base_path(req, base_path.as_str());
-                state::call_kc(api, req).await
-            }
+            async move { Ok(state::call_kc(api, add_base_path(req, base_path.as_str())).await) }
         }))
         .layer(kc_signature_layer(cfg))
 }
 
 fn build_bff_router(api: api::BackendApi, cfg: backend_core::BffAuth, base_path: String) -> Router {
     let base_path = Arc::new(base_path);
-    Router::new()
-        .fallback(service_fn(move |req| {
+    Router::new().fallback_service(service_fn(move |req| {
             let api = api.clone();
             let base_path = base_path.clone();
-            async move {
-                let req = add_base_path(req, base_path.as_str());
-                state::call_bff(api, req).await
-            }
+            async move { Ok(state::call_bff(api, add_base_path(req, base_path.as_str())).await) }
         }))
         .layer(bff_bearer_layer(cfg))
 }
@@ -126,13 +101,11 @@ fn build_staff_router(
     base_path: String,
 ) -> Router {
     let base_path = Arc::new(base_path);
-    Router::new()
-        .fallback(service_fn(move |req| {
+    Router::new().fallback_service(service_fn(move |req| {
             let api = api.clone();
             let base_path = base_path.clone();
             async move {
-                let req = add_base_path(req, base_path.as_str());
-                state::call_staff(api, req).await
+                Ok(state::call_staff(api, add_base_path(req, base_path.as_str())).await)
             }
         }))
         .layer(staff_bearer_layer(cfg))
@@ -143,7 +116,7 @@ where
     F: FnOnce(String) -> Router,
 {
     if let Some(normalized) = normalize_base_path(base_path) {
-        router.nest(&normalized, build_child(normalized))
+        router.nest(&normalized, build_child(normalized.clone()))
     } else {
         router
     }
