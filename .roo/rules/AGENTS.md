@@ -143,6 +143,7 @@ Before finalizing:
 ## Work flavors
 Let's talk about all the rules we're having to work efficiently:
 - To work here, you should take the habit of first checking the web if there's a newer version of a framework or tool, before using the "known" version
+- When searching for code, use `grep` only in `{app,config,deploy,docs,openapi}` directories to avoid noise from `target/` or other ignored directories.
 
 ### Rust (Cargo workspace)
 
