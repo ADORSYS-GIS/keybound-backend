@@ -131,29 +131,35 @@
         "name": "backend-user-storage",
         "providerId": "backend-user-storage",
         "config": {
-          "enabled": ["true"],
-          "priority": ["0"],
-          "cachePolicy": ["DEFAULT"]
+          "enabled": [
+            "true"
+          ],
+          "priority": [
+            "0"
+          ],
+          "cachePolicy": [
+            "DEFAULT"
+          ]
         }
       }
     ]
   },
   "clients": [
-  {
-    "clientId": "web-vite",
-    "name": "Keybound Vite Web",
-    "enabled": true,
-    "protocol": "openid-connect",
-    "protocolMappers": [
-      {
-        "name": "device-binding",
-        "protocol": "openid-connect",
-        "protocolMapper": "device-binding-mapper",
-        "consentRequired": false,
-        "config": {}
-      }
-    ],
-    "publicClient": true,
+    {
+      "clientId": "web-vite",
+      "name": "Keybound Vite Web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "device-binding",
+          "protocol": "openid-connect",
+          "protocolMapper": "device-binding-mapper",
+          "consentRequired": false,
+          "config": {}
+        }
+      ],
+      "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
@@ -165,27 +171,40 @@
       ],
       "baseUrl": "http://localhost:5173"
     },
-  {
-    "clientId": "resource-server",
-    "name": "Keybound Resource Server",
-    "enabled": true,
-    "protocol": "openid-connect",
-    "protocolMappers": [
-      {
-        "name": "device-binding",
-        "protocol": "openid-connect",
-        "protocolMapper": "device-binding-mapper",
-        "consentRequired": false,
-        "config": {}
-      }
-    ],
-    "publicClient": false,
+    {
+      "clientId": "resource-server",
+      "name": "Keybound Resource Server",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "device-binding",
+          "protocol": "openid-connect",
+          "protocolMapper": "device-binding-mapper",
+          "consentRequired": false,
+          "config": {}
+        }
+      ],
+      "publicClient": false,
       "serviceAccountsEnabled": true,
       "authorizationServicesEnabled": true,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [],
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "test-client",
+      "name": "Postman Client Credential",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "some-secret",
+      "bearerOnly": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "authorizationServicesEnabled": true
     }
   ]
 }

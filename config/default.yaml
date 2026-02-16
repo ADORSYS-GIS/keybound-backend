@@ -38,7 +38,7 @@ sms:
   provider: console # options are 'console' (default) or 'sns'
 
 oauth2:
-  jwks_url: "http://172.17.0.1:9026/realms/e2e-testing/protocol/openid-connect/certs"
+  jwks_url: "http://localhost:9026/realms/e2e-testing/protocol/openid-connect/certs"
 
 kc:
   enabled: true
