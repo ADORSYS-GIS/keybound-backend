@@ -1,10 +1,8 @@
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
-use lru::LruCache;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sqlx::PgPool;
-use sqlx_data::{QueryResult, dml, repo};
-use std::sync::{Arc, Mutex};
+use sqlx_data::{dml, repo, QueryResult};
 
 #[repo]
 pub trait PgUserRepo {
@@ -75,7 +73,6 @@ pub trait PgUserRepo {
 #[derive(Clone)]
 pub struct UserRepository {
     pub(crate) pool: PgPool,
-    pub(crate) resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>,
 }
 
 impl PgUserRepo for UserRepository {
@@ -168,28 +165,9 @@ impl UserRepo for UserRepository {
         realm: &str,
         phone: &str,
     ) -> RepoResult<Option<db::UserRow>> {
-        let cache_key = Self::phone_cache_key(realm, phone);
-        {
-            let mut cache = self
-                .resolve_user_by_phone_cache
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(cached) = cache.get(&cache_key).cloned() {
-                return Ok(cached);
-            }
-        }
-
         let user = self
             .resolve_user_by_phone_db(realm.to_owned(), phone.to_owned())
             .await?;
-
-        {
-            let mut cache = self
-                .resolve_user_by_phone_cache
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            cache.put(cache_key, user.clone());
-        }
 
         Ok(user)
     }
@@ -209,30 +187,12 @@ impl UserRepo for UserRepository {
             .create_user_by_phone_db(user_id, realm.to_owned(), phone.to_owned(), attributes_json)
             .await?;
 
-        {
-            let mut cache = self
-                .resolve_user_by_phone_cache
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            cache.put(Self::phone_cache_key(realm, phone), Some(user.clone()));
-        }
-
         Ok((user, true))
     }
 }
 
 impl UserRepository {
-    pub fn new(
-        pool: PgPool,
-        resolve_user_by_phone_cache: Arc<Mutex<LruCache<String, Option<db::UserRow>>>>,
-    ) -> Self {
-        Self {
-            pool,
-            resolve_user_by_phone_cache,
-        }
-    }
-
-    pub(crate) fn phone_cache_key(realm: &str, phone: &str) -> String {
-        format!("{realm}:{phone}")
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }

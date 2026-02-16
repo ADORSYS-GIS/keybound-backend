@@ -11,7 +11,7 @@
 			"alwaysAllow": [
 				"fetch"
 			],
-			"disabled": false
+			"disabled": true
 		},
 		"context7": {
 			"command": "npx",

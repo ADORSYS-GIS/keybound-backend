@@ -15,10 +15,8 @@ backend-model.workspace = true
 axum.workspace = true
 axum-extra = { workspace = true, features = ["cookie"] }
 axum-server.workspace = true
-bytes.workspace = true
 chrono.workspace = true
 http.workspace = true
-http-body-util.workspace = true
 hyper.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
@@ -33,8 +31,6 @@ serde.workspace = true
 redis.workspace = true
 apalis.workspace = true
 apalis-redis.workspace = true
-o2o.workspace = true
-swagger.workspace = true
 lru.workspace = true
 sqlx-data.workspace = true
 

@@ -17,6 +17,10 @@ serde_json.workspace = true
 sha2.workspace = true
 tower.workspace = true
 swagger.workspace = true
+authkestra.workspace = true
+authkestra-core.workspace = true
+jsonwebtoken.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

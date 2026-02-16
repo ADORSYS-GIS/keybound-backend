@@ -3,11 +3,14 @@ pub(crate) mod sms_retry;
 pub(crate) mod state;
 pub(crate) mod worker;
 
-use axum::Router;
 use axum::body::Body;
 use axum::http::Request as HttpRequest;
+use axum::response::Response;
+use axum::Router;
 use backend_auth::{bff_bearer_layer, kc_signature_layer, staff_bearer_layer};
 use backend_core::{Config, Result};
+use hyper::StatusCode;
+use std::convert::Infallible;
 use std::sync::Arc;
 use tower::service_fn;
 use tower_http::trace::TraceLayer;
@@ -57,31 +60,49 @@ pub async fn run_worker(core_config: &Config) -> Result<()> {
 }
 
 fn build_router(api: &api::BackendApi, config: &Config) -> Router {
-    let router = Router::new();
-    let router = nest_surface_router(router, &config.kc.base_path, {
-        let api = api.clone();
-        let cfg = config.kc.clone();
-        move || build_kc_router(api.clone(), cfg.clone())
-    });
-    let router = nest_surface_router(router, &config.bff.base_path, {
-        let api = api.clone();
-        let cfg = config.bff.clone();
-        move || build_bff_router(api.clone(), cfg.clone())
-    });
-    let router = nest_surface_router(router, &config.staff.base_path, {
-        let api = api.clone();
-        let cfg = config.staff.clone();
-        move || build_staff_router(api.clone(), cfg.clone())
-    });
+    // Mount sub-routers onto a fresh root router
+    let mut router = Router::new();
+
+    // Mount KC router if base path is provided
+    let kc_base = config.kc.base_path.trim();
+    if !kc_base.is_empty() && kc_base != "/" {
+        let kc_router = build_kc_router(api.clone(), config.kc.clone());
+        router = router.nest(kc_base, kc_router);
+    }
+
+    // Mount BFF router if base path is provided
+    let bff_base = config.bff.base_path.trim();
+    if !bff_base.is_empty() && bff_base != "/" {
+        let bff_router = build_bff_router(api.clone(), config.bff.clone());
+        router = router.nest(bff_base, bff_router);
+    }
+
+    // Mount Staff router if base path is provided
+    let staff_base = config.staff.base_path.trim();
+    if !staff_base.is_empty() && staff_base != "/" {
+        let staff_router = build_staff_router(api.clone(), config.staff.clone());
+        router = router.nest(staff_base, staff_router);
+    }
+
+    // 404 fallback for unmatched routes
+    router = router.fallback_service(service_fn(|req| async {
+        let res = Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("Not Found"))
+            .unwrap();
+        Ok::<_, Infallible>(res)
+    }));
 
     if config.logging.request_logging.enabled || config.logging.log_requests_enabled {
-        router.layer(TraceLayer::new_for_http().make_span_with(|req: &HttpRequest<_>| {
-            tracing::info_span!(
-                "http-request",
-                method = %req.method(),
-                path = %request_path(req)
-            )
-        }))
+        router.layer(
+            TraceLayer::new_for_http().make_span_with(|req: &HttpRequest<_>| {
+                tracing::info_span!(
+                    "http-request",
+                    method = %req.method(),
+                    path = %request_path(req)
+                )
+            }),
+        )
     } else {
         router
     }
@@ -89,34 +110,21 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
 
 fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth) -> Router {
     let layer = kc_signature_layer(cfg);
-    Router::new()
-        .fallback_service(service_fn(move |req| {
-            let api = api.clone();
-            async move { Ok(state::call_kc(api, req).await) }
-        }))
-        .layer(layer)
+    let router = gen_oas_server_kc::server::new(api);
+    router.layer(layer)
 }
 
 fn build_bff_router(api: api::BackendApi, cfg: backend_core::BffAuth) -> Router {
     let layer = bff_bearer_layer(cfg);
-    Router::new()
-        .fallback_service(service_fn(move |req| {
-            let api = api.clone();
-            async move { Ok(state::call_bff(api, req).await) }
-        }))
-        .layer(layer)
+    let router = gen_oas_server_bff::server::new(api);
+    router.layer(layer)
 }
 
 fn build_staff_router(api: api::BackendApi, cfg: backend_core::StaffAuth) -> Router {
     let layer = staff_bearer_layer(cfg);
-    Router::new()
-        .fallback_service(service_fn(move |req| {
-            let api = api.clone();
-            async move { Ok(state::call_staff(api, req).await) }
-        }))
-        .layer(layer)
+    let router = gen_oas_server_staff::server::new(api);
+    router.layer(layer)
 }
-
 
 fn nest_surface_router<F>(router: Router, base_path: &str, build_child: F) -> Router
 where
@@ -144,12 +152,12 @@ fn request_path(req: &HttpRequest<Body>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::Router;
     use axum::body::Body;
+    use axum::http::Request;
     use axum::http::StatusCode;
     use axum::routing::get;
+    use axum::Router;
     use tower::ServiceExt;
-    use axum::http::Request;
 
     #[tokio::test]
     async fn non_blank_base_path_mounts_service() {
@@ -206,10 +214,10 @@ mod tests {
 
     #[tokio::test]
     async fn auth_middleware_requires_token_on_prefixed_path() {
-        use backend_core::BffAuth;
-        use backend_auth::bff_bearer_layer;
-        use tower::service_fn;
         use axum::response::Response;
+        use backend_auth::bff_bearer_layer;
+        use backend_core::BffAuth;
+        use tower::service_fn;
 
         let cfg = BffAuth {
             enabled: true,
@@ -219,7 +227,7 @@ mod tests {
         let router = nest_surface_router(Router::new(), &cfg.base_path, || {
             Router::new()
                 .fallback_service(service_fn(|_req| async {
-                     Ok::<_, std::convert::Infallible>(Response::new(Body::from("fallback")))
+                    Ok::<_, std::convert::Infallible>(Response::new(Body::from("fallback")))
                 }))
                 .layer(bff_bearer_layer(cfg.clone()))
         });
