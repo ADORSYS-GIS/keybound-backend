@@ -1,1 +1,0 @@
-UPDATE sms_messages SET status = 'GAVE_UP', last_error = $2 WHERE id = $1

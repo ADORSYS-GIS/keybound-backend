@@ -1,1 +1,0 @@
-SELECT id, user_id FROM devices WHERE device_id = $1 OR jkt = $2 LIMIT 1

@@ -1,1 +1,0 @@
-UPDATE sms_messages SET confirmed_at = now() WHERE hash = $1

@@ -1,5 +1,3 @@
-// @generated automatically by Diesel CLI.
-
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "kyc_case_status"))]
