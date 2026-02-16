@@ -37,6 +37,9 @@ up: # Start services with rebuild
 up-single service: # Start a single service (pass service=...)
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans --build {{service}} {{c}}
 
+generate: # Start a single service (pass service=...)
+	docker compose -p {{project}} -f {{compose_file}} up generate-code {{c}}
+
 up-no-build: # Start services without rebuilding
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans {{c}}
 
