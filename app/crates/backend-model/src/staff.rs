@@ -42,11 +42,11 @@ impl From<db::KycDocumentRow> for KycDocumentDto {
     fn from(row: db::KycDocumentRow) -> Self {
         Self {
             id: Some(row.id),
-            document_type: Some(row.document_type),
+            document_type: Some(row.doc_type),
             file_name: Some(row.file_name),
             mime_type: Some(row.mime_type),
             url: None,
-            uploaded_at: row.uploaded_at.map(|v| v.to_rfc3339()),
+            uploaded_at: Some(row.uploaded_at.to_rfc3339()),
         }
     }
 }
@@ -64,17 +64,17 @@ pub struct KycSubmissionSummaryDto {
     pub submitted_at: Option<String>,
 }
 
-impl From<db::KycProfileRow> for KycSubmissionSummaryDto {
-    fn from(row: db::KycProfileRow) -> Self {
+impl From<db::KycSubmissionRow> for KycSubmissionSummaryDto {
+    fn from(row: db::KycSubmissionRow) -> Self {
         Self {
-            external_id: Some(row.external_id),
+            external_id: Some(row.id),
             first_name: row.first_name,
             last_name: row.last_name,
             email: row.email,
             phone_number: row.phone_number,
-            kyc_tier: Some(row.kyc_tier),
-            kyc_status: Some(row.kyc_status),
-            submitted_at: row.submitted_at.map(|v| v.to_rfc3339()),
+            kyc_tier: Some(row.requested_tier),
+            kyc_status: Some(row.status),
+            submitted_at: row.submitted_at.map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
         }
     }
 }
@@ -112,21 +112,21 @@ pub struct KycSubmissionDetailResponseDto {
 }
 
 impl KycSubmissionDetailResponseDto {
-    pub fn from_profile(profile: db::KycProfileRow) -> Self {
+    pub fn from_submission(profile: db::KycSubmissionRow) -> Self {
         Self {
-            external_id: Some(profile.external_id),
+            external_id: Some(profile.id),
             first_name: profile.first_name,
             last_name: profile.last_name,
             email: profile.email,
             phone_number: profile.phone_number,
             date_of_birth: profile.date_of_birth,
             nationality: profile.nationality,
-            kyc_tier: Some(profile.kyc_tier),
-            kyc_status: Some(profile.kyc_status),
+            kyc_tier: Some(profile.requested_tier),
+            kyc_status: Some(profile.status),
             documents: Some(vec![]),
-            submitted_at: profile.submitted_at.map(|v| v.to_rfc3339()),
-            reviewed_at: profile.reviewed_at.map(|v| v.to_rfc3339()),
-            reviewed_by: profile.reviewed_by,
+            submitted_at: profile.submitted_at.map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
+            reviewed_at: profile.decided_at.map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
+            reviewed_by: profile.decided_by,
             rejection_reason: profile.rejection_reason,
             review_notes: profile.review_notes,
             page: None,

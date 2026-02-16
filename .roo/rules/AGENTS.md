@@ -19,8 +19,8 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - `backend-core`: config + shared `Error`/`Result`
 - `backend-auth`: axum middleware layers for authentication and authorization.
 - `backend-server`: router/controllers/state/retry worker
-- `backend-repository`: SQLx-Data repository layer. SQL queries are externalized in `queries/`.
-- `backend-model`: `FromRow` DB structs + `o2o` DTO mapping
+- `backend-repository`: Diesel-async repository layer.
+- `backend-model`: Diesel models (`Queryable`, `Selectable`, `Insertable`, `Identifiable`) + `o2o` DTO mapping. Contains `schema.rs`.
 - `backend-id`: prefixed CUID ID generation
 - `backend-migrate`: migration runner and database factory (Postgres only)
 - `gen_oas_*`: generated OA3 models/interfaces (never edit manually)
@@ -28,9 +28,9 @@ Tokenization/user-storage backend with three HTTP surfaces:
 ## Hard Rules
 1. Never hand-edit `crates/gen_*`.
 2. OpenAPI changes happen in `openapi/*` then regenerate.
-3. Keep SQL in repository crate only, externalized in `.sql` files under `queries/`.
-4. Do not use `sqlx::query*` directly; use SQLx-Data `#[repo]` + `#[dml]`.
-5. Use one macro trait (`PgSqlRepo`) and one concrete API (`PgRepository` inherent methods).
+3. Use Diesel DSL for database operations; avoid raw SQL strings where possible.
+4. Use `diesel-async` for all database interactions in the repository layer.
+5. Map Diesel errors to `backend_core::Error` using `Into::into`.
 6. Use `backend_core::Error` only; avoid scattered custom error mapping.
 7. Keep server config source in `backend-core::Config` only.
 8. Keep `backend-server` as library; app binary wires and starts it.
@@ -79,7 +79,7 @@ Suggested verification commands:
 - Redis is available in compose for distributed/shared cache use.
 
 ## Migrations & Database Factory
-Migrations are located in `app/crates/backend-migrate/migrations/postgresql`.
+Migrations are located in `app/crates/backend-migrate/migrations`.
 Naming convention: `YYYYMMDDHHMMSS_description.sql`.
 
 Database indices and schema constraints must be defined within these migration files to ensure consistency across environments.
@@ -91,19 +91,27 @@ The `backend-migrate` crate provides a `DbFactory` for constructing database poo
 - `DbFactory::postgres(url)`: Creates a factory for Postgres.
 - `connect_postgres_and_migrate(url)`: Helper to connect and run migrations in one step.
 
-## Repository Layer (SQLx-Data)
-The repository layer uses `sqlx-data` to generate type-safe database access code.
-- **Traits**: Define database operations in a trait annotated with `#[repo]`.
-- **Queries**: Use `#[dml]` to link methods to SQL queries. Queries should be externalized in `.sql` files under `queries/`.
-- **Parameters**: `sqlx-data` handles parameter binding. Use `impl IntoParams` for flexible parameter passing.
-- **Return Types**: Use `sqlx_data::Result<T>` for return types. `Serial<T>` is used for streaming results.
+## Repository Layer (Diesel-Async)
+The repository layer uses `diesel-async` for type-safe database access.
+- **Traits**: Define domain-specific operations in traits (e.g., `UserRepo`).
+- **Implementation**: Implement traits using Diesel DSL and `diesel-async`.
+- **Pool**: Use `deadpool_diesel::Pool<diesel_async::AsyncPgConnection>`.
+- **Error Handling**: Map Diesel errors to `backend_core::Error`.
 
 Example:
 ```rust
-#[repo]
-pub(crate) trait PgSqlRepo {
-    #[dml(file = "queries/user/get.sql", unchecked)]
-    async fn get_user_db(&self, user_id: String) -> sqlx_data::Result<Option<db::UserRow>>;
+impl UserRepo for UserRepository {
+    async fn get_user(&self, user_id_val: &str) -> RepoResult<Option<db::UserRow>> {
+        use backend_model::schema::app_user::dsl::*;
+        let mut conn = self.get_conn().await?;
+
+        app_user
+            .filter(id.eq(user_id_val))
+            .first::<db::UserRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)
+    }
 }
 ```
 
@@ -118,7 +126,7 @@ The repository implementation is split into domain-specific modules under `src/p
 Before finalizing:
 1. `cargo check --workspace`
 2. No runtime use of `swagger` or generated `server::Service`
-3. No direct `sqlx::query*` usage
+3. No direct `sqlx::query*` or `sqlx-data` usage for migrated modules (currently `user`).
 4. No manual edits under `crates/gen_*`
 5. Auth and error tests pass:
    - `cargo test -p backend-core --features axum --test error_response`

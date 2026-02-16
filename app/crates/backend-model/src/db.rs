@@ -5,13 +5,19 @@ use sqlx::FromRow;
 
 #[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::app_user)]
+#[diesel(primary_key(user_id))]
 pub struct UserRow {
-    pub id: String,
+    pub user_id: String,
+    pub realm: String,
+    pub username: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
     pub email: Option<String>,
     pub email_verified: bool,
     pub phone_number: Option<String>,
     pub fineract_customer_id: Option<String>,
     pub disabled: bool,
+    pub attributes: Option<Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -68,7 +74,7 @@ pub struct KycCaseRow {
     pub id: String,
     pub user_id: String,
     pub current_tier: i32,
-    pub case_status: String, // Note: Diesel might need custom mapping for Enums
+    pub case_status: String,
     pub active_submission_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

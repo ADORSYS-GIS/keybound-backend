@@ -177,7 +177,7 @@ impl From<db::UserRow> for UserRecordDto {
             first_name: row.first_name,
             last_name: row.last_name,
             email: row.email,
-            enabled: row.enabled,
+            enabled: !row.disabled,
             email_verified: row.email_verified,
             created_at: Some(row.created_at),
             attributes: Self::parse_attributes(row.attributes),
@@ -271,7 +271,7 @@ impl From<db::ApprovalRow> for UserApprovalRecordDto {
         Self {
             request_id: row.request_id,
             user_id: row.user_id,
-            device_id: row.device_id,
+            device_id: row.new_device_id,
             status: Self::parse_status(&row.status),
             created_at: row.created_at,
             decided_at: row.decided_at,

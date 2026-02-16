@@ -1,10 +1,15 @@
 CREATE TABLE app_user (
-  id varchar(40) PRIMARY KEY,
+  user_id varchar(40) PRIMARY KEY,
+  realm varchar(255) NOT NULL,
+  username varchar(255) NOT NULL,
+  first_name varchar(255),
+  last_name varchar(255),
   email varchar(320),
   email_verified boolean NOT NULL DEFAULT false,
   phone_number varchar(64),
   fineract_customer_id varchar(128),
   disabled boolean NOT NULL DEFAULT false,
+  attributes jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

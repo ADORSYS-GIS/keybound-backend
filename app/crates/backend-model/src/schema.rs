@@ -23,9 +23,17 @@ pub mod sql_types {
 }
 
 diesel::table! {
-    app_user (id) {
+    app_user (user_id) {
         #[max_length = 40]
-        id -> Varchar,
+        user_id -> Varchar,
+        #[max_length = 255]
+        realm -> Varchar,
+        #[max_length = 255]
+        username -> Varchar,
+        #[max_length = 255]
+        first_name -> Nullable<Varchar>,
+        #[max_length = 255]
+        last_name -> Nullable<Varchar>,
         #[max_length = 320]
         email -> Nullable<Varchar>,
         email_verified -> Bool,
@@ -34,6 +42,7 @@ diesel::table! {
         #[max_length = 128]
         fineract_customer_id -> Nullable<Varchar>,
         disabled -> Bool,
+        attributes -> Nullable<Jsonb>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -49,7 +58,7 @@ diesel::table! {
         #[max_length = 40]
         user_id -> Varchar,
         current_tier -> Int4,
-        case_status -> KycCaseStatus,
+        case_status -> Varchar,
         #[max_length = 40]
         active_submission_id -> Nullable<Varchar>,
         created_at -> Timestamptz,
@@ -68,14 +77,14 @@ diesel::table! {
         #[max_length = 40]
         kyc_case_id -> Varchar,
         version -> Int4,
-        status -> KycSubmissionStatus,
+        status -> Varchar,
         requested_tier -> Int4,
         decided_tier -> Nullable<Int4>,
         submitted_at -> Nullable<Timestamptz>,
         decided_at -> Nullable<Timestamptz>,
         #[max_length = 40]
         decided_by -> Nullable<Varchar>,
-        provisioning_status -> KycProvisioningStatus,
+        provisioning_status -> Varchar,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         #[max_length = 255]
@@ -117,14 +126,13 @@ diesel::table! {
         size_bytes -> Int8,
         #[max_length = 64]
         sha256 -> Bpchar,
-        status -> KycDocumentStatus,
+        status -> Varchar,
         uploaded_at -> Timestamptz,
     }
 }
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::ProvisioningStatus;
 
     fineract_provisioning (id) {
         #[max_length = 40]
@@ -133,7 +141,7 @@ diesel::table! {
         kyc_case_id -> Varchar,
         #[max_length = 40]
         submission_id -> Varchar,
-        status -> ProvisioningStatus,
+        status -> Varchar,
         #[max_length = 128]
         fineract_customer_id -> Nullable<Varchar>,
         #[max_length = 64]
@@ -207,10 +215,6 @@ diesel::table! {
 }
 
 diesel::joinable!(kyc_case -> app_user (user_id));
-diesel::joinable!(kyc_submission -> kyc_case (kyc_case_id));
-diesel::joinable!(kyc_document -> kyc_submission (submission_id));
-diesel::joinable!(fineract_provisioning -> kyc_case (kyc_case_id));
-diesel::joinable!(fineract_provisioning -> kyc_submission (submission_id));
 diesel::joinable!(device -> app_user (user_id));
 diesel::joinable!(approval -> app_user (user_id));
 
