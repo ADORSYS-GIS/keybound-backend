@@ -60,7 +60,7 @@ pub trait KycRepo: Send + Sync {
     fn get_kyc_profile(
         &self,
         external_id: &str,
-    ) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycProfileRow>>> + Send;
+    ) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycSubmissionRow>>> + Send;
     fn list_kyc_documents(
         &self,
         external_id: String,
@@ -81,12 +81,12 @@ pub trait KycRepo: Send + Sync {
         &self,
         params: impl sqlx_data::IntoParams + Send,
     ) -> impl std::future::Future<
-        Output = RepoResult<sqlx_data::Serial<backend_model::db::KycProfileRow>>,
+        Output = RepoResult<sqlx_data::Serial<backend_model::db::KycSubmissionRow>>,
     > + Send;
     fn get_kyc_submission(
         &self,
         external_id: &str,
-    ) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycProfileRow>>> + Send;
+    ) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycSubmissionRow>>> + Send;
     fn update_kyc_approved(
         &self,
         external_id: &str,
@@ -112,7 +112,7 @@ pub trait KycRepo: Send + Sync {
         external_id: &str,
         expected_version: Option<i32>,
         req: &backend_model::bff::KycInformationPatchRequest,
-    ) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycProfileRow>>> + Send;
+    ) -> impl std::future::Future<Output = RepoResult<Option<backend_model::db::KycSubmissionRow>>> + Send;
 }
 
 pub trait UserRepo: Send + Sync {

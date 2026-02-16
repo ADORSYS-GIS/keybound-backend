@@ -1,118 +1,78 @@
 use crate::traits::*;
 use backend_model::{db, staff as staff_map};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use diesel::prelude::*;
+use diesel_async::{AsyncConnection, RunQueryDsl};
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::AsyncPgConnection;
 use sqlx::PgPool;
-use sqlx_data::{IntoParams, Serial, dml, repo};
-
-#[repo]
-pub trait PgKycRepo {
-    #[dml(file = "queries/bff/list_kyc_documents.sql", unchecked)]
-    async fn list_kyc_documents_db(
-        &self,
-        external_id: String,
-        params: impl IntoParams,
-    ) -> sqlx_data::Result<Serial<db::KycDocumentRow>>;
-
-    #[dml(file = "queries/kyc/get_document.sql", unchecked)]
-    async fn get_kyc_document_db(
-        &self,
-        external_id: String,
-        id: String,
-    ) -> sqlx_data::Result<Option<db::KycDocumentRow>>;
-
-    #[dml(file = "queries/staff/list_kyc_submissions.sql", unchecked)]
-    async fn list_kyc_submissions_db(
-        &self,
-        params: impl IntoParams,
-    ) -> sqlx_data::Result<Serial<db::KycProfileRow>>;
-
-    #[dml(file = "queries/kyc/ensure_profile.sql", unchecked)]
-    async fn ensure_kyc_profile_db(
-        &self,
-        external_id: String,
-    ) -> sqlx_data::Result<sqlx_data::QueryResult>;
-
-    #[dml(file = "queries/kyc/insert_document_intent.sql", unchecked)]
-    async fn insert_kyc_document_intent_db(
-        &self,
-        id: String,
-        external_id: String,
-        document_type: String,
-        file_name: String,
-        mime_type: String,
-        content_length: i64,
-        s3_bucket: String,
-        s3_key: String,
-        presigned_expires_at: DateTime<Utc>,
-    ) -> sqlx_data::Result<db::KycDocumentRow>;
-
-    #[dml(file = "queries/kyc/get_profile.sql", unchecked)]
-    async fn get_kyc_profile_db(
-        &self,
-        external_id: String,
-    ) -> sqlx_data::Result<Option<db::KycProfileRow>>;
-
-    #[dml(file = "queries/kyc/get_tier.sql", unchecked)]
-    async fn get_kyc_tier_db(&self, external_id: String) -> sqlx_data::Result<Option<i32>>;
-
-    #[dml(file = "queries/kyc/update_approved.sql", unchecked)]
-    async fn update_kyc_approved_db(
-        &self,
-        external_id: String,
-        new_tier: i32,
-        notes: Option<String>,
-    ) -> sqlx_data::Result<sqlx_data::QueryResult>;
-
-    #[dml(file = "queries/kyc/update_rejected.sql", unchecked)]
-    async fn update_kyc_rejected_db(
-        &self,
-        external_id: String,
-        reason: String,
-        notes: Option<String>,
-    ) -> sqlx_data::Result<sqlx_data::QueryResult>;
-
-    #[dml(file = "queries/kyc/update_request_info.sql", unchecked)]
-    async fn update_kyc_request_info_db(
-        &self,
-        external_id: String,
-        message: String,
-    ) -> sqlx_data::Result<sqlx_data::QueryResult>;
-
-    #[dml(file = "queries/kyc/patch_information.sql", unchecked)]
-    async fn patch_kyc_information_db(
-        &self,
-        external_id: String,
-        expected_version: Option<i32>,
-        first_name: Option<String>,
-        last_name: Option<String>,
-        email: Option<String>,
-        phone_number: Option<String>,
-        date_of_birth: Option<String>,
-        nationality: Option<String>,
-    ) -> sqlx_data::Result<Option<db::KycProfileRow>>;
-
-    #[dml(file = "queries/kyc/submit_profile.sql", unchecked)]
-    async fn submit_kyc_profile_db(
-        &self,
-        submission_id: String,
-        external_id: String,
-    ) -> sqlx_data::Result<sqlx_data::QueryResult>;
-}
 
 #[derive(Clone)]
 pub struct KycRepository {
     pub(crate) pool: PgPool,
+    pub(crate) diesel_pool: Pool<AsyncPgConnection>,
 }
 
-impl PgKycRepo for KycRepository {
-    fn get_pool(&self) -> &sqlx_data::Pool {
-        &self.pool
+impl KycRepository {
+    pub fn new(pool: PgPool, diesel_pool: Pool<AsyncPgConnection>) -> Self {
+        Self { pool, diesel_pool }
+    }
+
+    async fn get_conn(
+        &self,
+    ) -> RepoResult<diesel_async::pooled_connection::deadpool::Object<AsyncPgConnection>> {
+        self.diesel_pool
+            .get()
+            .await
+            .map_err(|e| backend_core::Error::DieselPool(e.to_string()))
     }
 }
 
 impl KycRepo for KycRepository {
-    async fn ensure_kyc_profile(&self, external_id: &str) -> RepoResult<()> {
-        self.ensure_kyc_profile_db(external_id.to_owned()).await?;
+    async fn ensure_kyc_profile(&self, external_id_val: &str) -> RepoResult<()> {
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        conn.transaction::<_, backend_core::Error, _>(|conn| {
+            Box::pin(async move {
+                let case_id: Option<String> = kyc_case::table
+                    .filter(kyc_case::user_id.eq(external_id_val))
+                    .select(kyc_case::id)
+                    .first::<String>(conn)
+                    .await
+                    .optional()?;
+
+                if let Some(cid) = case_id {
+                    let exists = kyc_submission::table
+                        .filter(kyc_submission::kyc_case_id.eq(&cid))
+                        .select(diesel::dsl::count_star())
+                        .get_result::<i64>(conn)
+                        .await?
+                        > 0;
+
+                    if !exists {
+                        let sub_id = backend_id::kyc_submission_id()?;
+                        diesel::insert_into(kyc_submission::table)
+                            .values((
+                                kyc_submission::id.eq(sub_id),
+                                kyc_submission::kyc_case_id.eq(cid),
+                                kyc_submission::version.eq(1),
+                                kyc_submission::status.eq("DRAFT"),
+                                kyc_submission::requested_tier.eq(1),
+                                kyc_submission::provisioning_status.eq("PENDING"),
+                                kyc_submission::created_at.eq(Utc::now()),
+                                kyc_submission::updated_at.eq(Utc::now()),
+                            ))
+                            .execute(conn)
+                            .await?;
+                    }
+                }
+                Ok(())
+            })
+        })
+        .await?;
+
         Ok(())
     }
 
@@ -120,139 +80,361 @@ impl KycRepo for KycRepository {
         &self,
         input: KycDocumentInsert,
     ) -> RepoResult<db::KycDocumentRow> {
-        let id = backend_id::kyc_document_id()?;
+        use backend_model::schema::{kyc_case, kyc_document, kyc_submission};
 
-        let row = self
-            .insert_kyc_document_intent_db(
-                id,
-                input.external_id,
-                input.document_type,
-                input.file_name,
-                input.mime_type,
-                input.content_length,
-                input.s3_bucket,
-                input.s3_key,
-                input.presigned_expires_at,
-            )
+        let mut conn = self.get_conn().await?;
+        let doc_id = backend_id::kyc_document_id()?;
+
+        let row = conn
+            .transaction::<_, backend_core::Error, _>(|conn| {
+                Box::pin(async move {
+                    let sub_id: String = kyc_submission::table
+                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .filter(kyc_case::user_id.eq(&input.external_id))
+                        .filter(kyc_submission::status.eq("DRAFT"))
+                        .select(kyc_submission::id)
+                        .first::<String>(conn)
+                        .await?;
+
+                    diesel::insert_into(kyc_document::table)
+                        .values((
+                            kyc_document::id.eq(doc_id),
+                            kyc_document::submission_id.eq(sub_id),
+                            kyc_document::doc_type.eq(input.document_type),
+                            kyc_document::s3_bucket.eq(input.s3_bucket),
+                            kyc_document::s3_key.eq(input.s3_key),
+                            kyc_document::file_name.eq(input.file_name),
+                            kyc_document::mime_type.eq(input.mime_type),
+                            kyc_document::size_bytes.eq(input.content_length),
+                            kyc_document::sha256.eq(""), // Placeholder as per original intent
+                            kyc_document::status.eq("PENDING"),
+                            kyc_document::uploaded_at.eq(Utc::now()),
+                        ))
+                        .get_result::<db::KycDocumentRow>(conn)
+                        .await
+                        .map_err(Into::into)
+                })
+            })
             .await?;
+
         Ok(row)
     }
 
-    async fn get_kyc_profile(&self, external_id: &str) -> RepoResult<Option<db::KycProfileRow>> {
-        let row = self.get_kyc_profile_db(external_id.to_owned()).await?;
-        Ok(row)
+    async fn get_kyc_profile(&self, external_id_val: &str) -> RepoResult<Option<db::KycSubmissionRow>> {
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        kyc_submission::table
+            .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+            .filter(kyc_case::user_id.eq(external_id_val))
+            .filter(kyc_submission::status.eq("DRAFT"))
+            .select(db::KycSubmissionRow::as_select())
+            .first::<db::KycSubmissionRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)
     }
 
     async fn list_kyc_documents(
         &self,
-        external_id: String,
-        params: impl IntoParams + Send,
-    ) -> RepoResult<Serial<db::KycDocumentRow>> {
-        let rows = self.list_kyc_documents_db(external_id, params).await?;
-        Ok(rows)
+        external_id_val: String,
+        _params: impl sqlx_data::IntoParams + Send,
+    ) -> RepoResult<sqlx_data::Serial<db::KycDocumentRow>> {
+        use backend_model::schema::{kyc_case, kyc_document, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        let rows = kyc_document::table
+            .inner_join(kyc_submission::table.on(kyc_submission::id.eq(kyc_document::submission_id)))
+            .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+            .filter(kyc_case::user_id.eq(external_id_val))
+            .select(db::KycDocumentRow::as_select())
+            .load::<db::KycDocumentRow>(&mut conn)
+            .await
+            .map_err(|e| backend_core::Error::Diesel(e))?;
+
+        Ok(sqlx_data::Serial {
+            data: rows,
+            page: 0,
+            size: 0,
+            total_items: 0,
+            total_pages: 0,
+        })
     }
 
     async fn get_kyc_document(
         &self,
-        external_id: &str,
-        document_id: &str,
+        external_id_val: &str,
+        document_id_val: &str,
     ) -> RepoResult<Option<db::KycDocumentRow>> {
-        let row = self
-            .get_kyc_document_db(external_id.to_owned(), document_id.to_owned())
-            .await?;
-        Ok(row)
+        use backend_model::schema::{kyc_case, kyc_document, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        kyc_document::table
+            .inner_join(kyc_submission::table.on(kyc_submission::id.eq(kyc_document::submission_id)))
+            .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+            .filter(kyc_case::user_id.eq(external_id_val))
+            .filter(kyc_document::id.eq(document_id_val))
+            .select(db::KycDocumentRow::as_select())
+            .first::<db::KycDocumentRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)
     }
 
-    async fn get_kyc_tier(&self, external_id: &str) -> RepoResult<Option<i32>> {
-        let tier = self.get_kyc_tier_db(external_id.to_owned()).await?;
-        Ok(tier)
+    async fn get_kyc_tier(&self, external_id_val: &str) -> RepoResult<Option<i32>> {
+        use backend_model::schema::kyc_case;
+
+        let mut conn = self.get_conn().await?;
+
+        kyc_case::table
+            .filter(kyc_case::user_id.eq(external_id_val))
+            .select(kyc_case::current_tier)
+            .first::<i32>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)
     }
 
     async fn list_kyc_submissions(
         &self,
-        params: impl IntoParams + Send,
-    ) -> RepoResult<Serial<db::KycProfileRow>> {
-        let rows = self.list_kyc_submissions_db(params).await?;
-        Ok(rows)
+        _params: impl sqlx_data::IntoParams + Send,
+    ) -> RepoResult<sqlx_data::Serial<db::KycSubmissionRow>> {
+        use backend_model::schema::kyc_submission;
+
+        let mut conn = self.get_conn().await?;
+
+        let rows = kyc_submission::table
+            .select(db::KycSubmissionRow::as_select())
+            .load::<db::KycSubmissionRow>(&mut conn)
+            .await
+            .map_err(|e| backend_core::Error::Diesel(e))?;
+
+        Ok(sqlx_data::Serial {
+            data: rows,
+            page: 0,
+            size: 0,
+            total_items: 0,
+            total_pages: 0,
+        })
     }
 
-    async fn get_kyc_submission(&self, external_id: &str) -> RepoResult<Option<db::KycProfileRow>> {
-        let row = self.get_kyc_profile_db(external_id.to_owned()).await?;
-        Ok(row)
+    async fn get_kyc_submission(&self, external_id_val: &str) -> RepoResult<Option<db::KycSubmissionRow>> {
+        self.get_kyc_profile(external_id_val).await
     }
 
     async fn update_kyc_approved(
         &self,
-        external_id: &str,
+        external_id_val: &str,
         req: &staff_map::KycApprovalRequest,
     ) -> RepoResult<bool> {
-        let res = self
-            .update_kyc_approved_db(
-                external_id.to_owned(),
-                req.new_tier as i32,
-                req.notes.clone(),
-            )
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        let res = conn
+            .transaction::<_, backend_core::Error, _>(|conn| {
+                Box::pin(async move {
+                    let sub_id: Option<String> = kyc_submission::table
+                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .filter(kyc_case::user_id.eq(external_id_val))
+                        .filter(kyc_submission::status.eq("SUBMITTED"))
+                        .select(kyc_submission::id)
+                        .first::<String>(conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(sid) = sub_id {
+                        diesel::update(kyc_submission::table.filter(kyc_submission::id.eq(&sid)))
+                            .set((
+                                kyc_submission::status.eq("APPROVED"),
+                                kyc_submission::decided_tier.eq(req.new_tier as i32),
+                                kyc_submission::decided_at.eq(Utc::now()),
+                                kyc_submission::review_notes.eq(req.notes.clone()),
+                                kyc_submission::updated_at.eq(Utc::now()),
+                            ))
+                            .execute(conn)
+                            .await?;
+
+                        diesel::update(kyc_case::table.filter(kyc_case::user_id.eq(external_id_val)))
+                            .set((
+                                kyc_case::current_tier.eq(req.new_tier as i32),
+                                kyc_case::updated_at.eq(Utc::now()),
+                            ))
+                            .execute(conn)
+                            .await?;
+
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                })
+            })
             .await?;
-        Ok(res.rows_affected() > 0)
+
+        Ok(res)
     }
 
     async fn update_kyc_rejected(
         &self,
-        external_id: &str,
+        external_id_val: &str,
         req: &staff_map::KycRejectionRequest,
     ) -> RepoResult<bool> {
-        let res = self
-            .update_kyc_rejected_db(
-                external_id.to_owned(),
-                req.reason.clone(),
-                req.notes.clone(),
-            )
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        let res = conn
+            .transaction::<_, backend_core::Error, _>(|conn| {
+                Box::pin(async move {
+                    let sub_id: Option<String> = kyc_submission::table
+                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .filter(kyc_case::user_id.eq(external_id_val))
+                        .filter(kyc_submission::status.eq("SUBMITTED"))
+                        .select(kyc_submission::id)
+                        .first::<String>(conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(sid) = sub_id {
+                        diesel::update(kyc_submission::table.filter(kyc_submission::id.eq(&sid)))
+                            .set((
+                                kyc_submission::status.eq("REJECTED"),
+                                kyc_submission::decided_at.eq(Utc::now()),
+                                kyc_submission::rejection_reason.eq(req.reason.clone()),
+                                kyc_submission::review_notes.eq(req.notes.clone()),
+                                kyc_submission::updated_at.eq(Utc::now()),
+                            ))
+                            .execute(conn)
+                            .await?;
+
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                })
+            })
             .await?;
-        Ok(res.rows_affected() > 0)
+
+        Ok(res)
     }
 
     async fn update_kyc_request_info(
         &self,
-        external_id: &str,
+        external_id_val: &str,
         req: &staff_map::KycRequestInfoRequest,
     ) -> RepoResult<bool> {
-        let res = self
-            .update_kyc_request_info_db(external_id.to_owned(), req.message.clone())
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        let res = conn
+            .transaction::<_, backend_core::Error, _>(|conn| {
+                Box::pin(async move {
+                    let sub_id: Option<String> = kyc_submission::table
+                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .filter(kyc_case::user_id.eq(external_id_val))
+                        .filter(kyc_submission::status.eq("SUBMITTED"))
+                        .select(kyc_submission::id)
+                        .first::<String>(conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(sid) = sub_id {
+                        diesel::update(kyc_submission::table.filter(kyc_submission::id.eq(&sid)))
+                            .set((
+                                kyc_submission::status.eq("DRAFT"),
+                                kyc_submission::review_notes.eq(req.message.clone()),
+                                kyc_submission::updated_at.eq(Utc::now()),
+                            ))
+                            .execute(conn)
+                            .await?;
+
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                })
+            })
             .await?;
-        Ok(res.rows_affected() > 0)
+
+        Ok(res)
     }
 
     async fn patch_kyc_profile(
         &self,
-        external_id: &str,
-        expected_version: Option<i32>,
+        external_id_val: &str,
+        expected_version_val: Option<i32>,
         req: &backend_model::bff::KycInformationPatchRequest,
-    ) -> RepoResult<Option<db::KycProfileRow>> {
-        let row = self
-            .patch_kyc_information_db(
-                external_id.to_owned(),
-                expected_version,
-                req.first_name.clone(),
-                req.last_name.clone(),
-                req.email.clone(),
-                req.phone_number.clone(),
-                req.date_of_birth.clone(),
-                req.nationality.clone(),
+    ) -> RepoResult<Option<db::KycSubmissionRow>> {
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        let mut query = diesel::update(kyc_submission::table)
+            .filter(kyc_submission::status.eq("DRAFT"))
+            .filter(
+                kyc_submission::kyc_case_id.eq_any(
+                    kyc_case::table
+                        .filter(kyc_case::user_id.eq(external_id_val))
+                        .select(kyc_case::id),
+                ),
             )
-            .await?;
-        Ok(row)
+            .into_boxed();
+
+        if let Some(v) = expected_version_val {
+            query = query.filter(kyc_submission::version.eq(v));
+        }
+
+        let first_name_val = req.first_name.clone();
+        let last_name_val = req.last_name.clone();
+        let email_val = req.email.clone();
+        let phone_number_val = req.phone_number.clone();
+        let date_of_birth_val = req.date_of_birth.clone();
+        let nationality_val = req.nationality.clone();
+
+        query
+            .set((
+                kyc_submission::first_name.eq(first_name_val.map(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>).unwrap_or(diesel::dsl::sql("first_name"))),
+                kyc_submission::last_name.eq(last_name_val.map(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>).unwrap_or(diesel::dsl::sql("last_name"))),
+                kyc_submission::email.eq(email_val.map(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>).unwrap_or(diesel::dsl::sql("email"))),
+                kyc_submission::phone_number.eq(phone_number_val.map(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>).unwrap_or(diesel::dsl::sql("phone_number"))),
+                kyc_submission::date_of_birth.eq(date_of_birth_val.map(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>).unwrap_or(diesel::dsl::sql("date_of_birth"))),
+                kyc_submission::nationality.eq(nationality_val.map(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>).unwrap_or(diesel::dsl::sql("nationality"))),
+                kyc_submission::updated_at.eq(Utc::now()),
+            ))
+            .get_result::<db::KycSubmissionRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)
     }
 
-    async fn submit_kyc_profile(&self, submission_id: &str, external_id: &str) -> RepoResult<bool> {
-        let res = self
-            .submit_kyc_profile_db(submission_id.to_owned(), external_id.to_owned())
-            .await?;
-        Ok(res.rows_affected() > 0)
-    }
-}
+    async fn submit_kyc_profile(&self, submission_id_val: &str, external_id_val: &str) -> RepoResult<bool> {
+        use backend_model::schema::{kyc_case, kyc_submission};
 
-impl KycRepository {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        let mut conn = self.get_conn().await?;
+
+        let rows_affected = diesel::update(kyc_submission::table)
+            .filter(kyc_submission::id.eq(submission_id_val))
+            .filter(kyc_submission::status.eq("DRAFT"))
+            .filter(
+                kyc_submission::kyc_case_id.eq_any(
+                    kyc_case::table
+                        .filter(kyc_case::user_id.eq(external_id_val))
+                        .select(kyc_case::id),
+                ),
+            )
+            .set((
+                kyc_submission::status.eq("SUBMITTED"),
+                kyc_submission::submitted_at.eq(Utc::now()),
+                kyc_submission::updated_at.eq(Utc::now()),
+            ))
+            .execute(&mut conn)
+            .await
+            .map_err(|e| backend_core::Error::Diesel(e))?;
+
+        Ok(rows_affected > 0)
     }
 }
