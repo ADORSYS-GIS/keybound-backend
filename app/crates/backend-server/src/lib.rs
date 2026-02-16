@@ -7,7 +7,7 @@ use axum::body::Body;
 use axum::http::Request as HttpRequest;
 use axum::response::Response;
 use axum::Router;
-use backend_auth::{bff_bearer_layer, kc_signature_layer, staff_bearer_layer};
+use backend_auth::{jwks_auth_layer, kc_signature_layer};
 use backend_core::{Config, Result};
 use hyper::StatusCode;
 use std::convert::Infallible;
@@ -93,6 +93,14 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
         Ok::<_, Infallible>(res)
     }));
 
+    // Apply JWKS auth layer if base paths are configured
+    if !config.oauth2.base_paths.is_empty() {
+        router = router.layer(jwks_auth_layer(
+            config.oauth2.jwks_url.clone(),
+            config.oauth2.base_paths.clone(),
+        ));
+    }
+
     if config.logging.request_logging.enabled || config.logging.log_requests_enabled {
         router.layer(
             TraceLayer::new_for_http().make_span_with(|req: &HttpRequest<_>| {
@@ -114,33 +122,14 @@ fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth) -> Router {
     router.layer(layer)
 }
 
-fn build_bff_router(api: api::BackendApi, cfg: backend_core::BffAuth) -> Router {
-    let layer = bff_bearer_layer(cfg);
-    let router = gen_oas_server_bff::server::new(api);
-    router.layer(layer)
+fn build_bff_router(api: api::BackendApi, _cfg: backend_core::BffAuth) -> Router {
+    gen_oas_server_bff::server::new(api)
 }
 
-fn build_staff_router(api: api::BackendApi, cfg: backend_core::StaffAuth) -> Router {
-    let layer = staff_bearer_layer(cfg);
-    let router = gen_oas_server_staff::server::new(api);
-    router.layer(layer)
+fn build_staff_router(api: api::BackendApi, _cfg: backend_core::StaffAuth) -> Router {
+    gen_oas_server_staff::server::new(api)
 }
 
-fn nest_surface_router<F>(router: Router, base_path: &str, build_child: F) -> Router
-where
-    F: FnOnce() -> Router,
-{
-    let trimmed = base_path.trim();
-    if trimmed.is_empty() {
-        return router;
-    }
-
-    if trimmed == "/" {
-        return router;
-    }
-
-    router.nest(trimmed, build_child())
-}
 
 fn request_path(req: &HttpRequest<Body>) -> String {
     req.extensions()
@@ -149,99 +138,3 @@ fn request_path(req: &HttpRequest<Body>) -> String {
         .unwrap_or_else(|| req.uri().path().to_owned())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
-    use axum::http::StatusCode;
-    use axum::routing::get;
-    use axum::Router;
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn non_blank_base_path_mounts_service() {
-        let router = nest_surface_router(Router::new(), "/api/test", || {
-            Router::new().route("/", get(|| async { "mounted" }))
-        });
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/test")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn blank_base_path_does_not_mount_service() {
-        let router = Router::new().route("/ping", get(|| async { "pong" }));
-        let router = nest_surface_router(router, "   ", || {
-            panic!("should not nest when base path is blank");
-        });
-
-        let response = router
-            .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn base_path_mounts_nested_routes() {
-        let router = nest_surface_router(Router::new(), "/bff", || {
-            Router::new().route("/api/kyc/cases/mine", get(|| async { "ok" }))
-        });
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/bff/api/kyc/cases/mine")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn auth_middleware_requires_token_on_prefixed_path() {
-        use axum::response::Response;
-        use backend_auth::bff_bearer_layer;
-        use backend_core::BffAuth;
-        use tower::service_fn;
-
-        let cfg = BffAuth {
-            enabled: true,
-            base_path: "/bff".to_string(),
-        };
-
-        let router = nest_surface_router(Router::new(), &cfg.base_path, || {
-            Router::new()
-                .fallback_service(service_fn(|_req| async {
-                    Ok::<_, std::convert::Infallible>(Response::new(Body::from("fallback")))
-                }))
-                .layer(bff_bearer_layer(cfg.clone()))
-        });
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/bff/api/kyc/cases/mine")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-}

@@ -9,18 +9,18 @@ authors.workspace = true
 [dependencies]
 axum.workspace = true
 backend-core.workspace = true
-backend-id.workspace = true
 base64.workspace = true
 http.workspace = true
 ring.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 sha2.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 tower.workspace = true
 swagger.workspace = true
-authkestra.workspace = true
-authkestra-core.workspace = true
 jsonwebtoken.workspace = true
-reqwest.workspace = true
+jwks.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

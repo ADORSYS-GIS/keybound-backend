@@ -1,33 +1,17 @@
 use axum::Router;
 use axum::body::Body;
-use axum::extract::OriginalUri;
-use axum::http::{HeaderValue, Request, StatusCode, header::AUTHORIZATION};
+use axum::http::{HeaderValue, Request, StatusCode};
 use axum::routing::get;
 use axum::{body::to_bytes, response::Response};
 use backend_auth::{
-    bff_bearer_layer, kc_signature_layer, require_bff_auth, require_kc_signature,
-    require_staff_bearer, staff_bearer_layer,
+    jwks_auth_layer, kc_signature_layer, require_kc_signature,
 };
-use backend_core::{BffAuth, KcAuth, StaffAuth};
+use backend_core::KcAuth;
 use base64::Engine;
 use ring::hmac;
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
-
-fn build_bff_auth() -> BffAuth {
-    BffAuth {
-        enabled: true,
-        base_path: "/api/registration".to_owned(),
-    }
-}
-
-fn build_staff_auth() -> StaffAuth {
-    StaffAuth {
-        enabled: true,
-        base_path: "/api/kyc/staff".to_owned(),
-    }
-}
 
 fn build_kc_auth() -> KcAuth {
     KcAuth {
@@ -39,15 +23,6 @@ fn build_kc_auth() -> KcAuth {
     }
 }
 
-fn valid_bearer_token() -> String {
-    let payload =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"usr_test"}"#.as_bytes());
-    format!("Bearer header.{payload}.signature")
-}
-
-fn invalid_bearer_token() -> String {
-    "Bearer this-is-not-a-jwt".to_owned()
-}
 
 async fn read_error_body(response: Response) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -68,216 +43,6 @@ fn kc_signature(secret: &str, timestamp: i64, method: &str, path: &str, body: &s
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest.as_ref())
 }
 
-#[tokio::test]
-async fn bypasses_validation_for_path_outside_bff_base_path() {
-    let cfg = build_bff_auth();
-    let request = Request::builder()
-        .uri("/kc/users")
-        .body(Body::empty())
-        .unwrap();
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn enforces_validation_for_bff_base_path_without_token() {
-    let cfg = build_bff_auth();
-    let request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_err());
-
-    let response = result.err().unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let payload = read_error_body(response).await;
-    assert_eq!(payload["error"], "unauthorized");
-    assert_eq!(payload["message"], "missing bearer token");
-}
-
-#[tokio::test]
-async fn accepts_bearer_token_for_bff_base_path() {
-    let cfg = build_bff_auth();
-    let mut request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-    request.headers_mut().insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&valid_bearer_token()).unwrap(),
-    );
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn bypasses_bff_auth_when_disabled() {
-    let cfg = BffAuth {
-        enabled: false,
-        base_path: "/api/registration".to_owned(),
-    };
-    let request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn bypasses_bff_auth_when_base_path_is_blank() {
-    let cfg = BffAuth {
-        enabled: true,
-        base_path: "   ".to_owned(),
-    };
-    let request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn rejects_bff_auth_with_non_bearer_authorization_scheme() {
-    let cfg = build_bff_auth();
-    let mut request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-    request
-        .headers_mut()
-        .insert(AUTHORIZATION, HeaderValue::from_static("Basic abc123"));
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_err());
-    let response = result.err().unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let payload = read_error_body(response).await;
-    assert_eq!(payload["message"], "missing bearer token");
-}
-
-#[tokio::test]
-async fn rejects_bff_auth_with_invalid_bearer_token_payload() {
-    let cfg = build_bff_auth();
-    let mut request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-    request.headers_mut().insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&invalid_bearer_token()).unwrap(),
-    );
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_err());
-    let response = result.err().unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let payload = read_error_body(response).await;
-    assert_eq!(payload["message"], "invalid bearer token");
-}
-
-#[tokio::test]
-async fn accepts_case_insensitive_bearer_scheme_for_bff_auth() {
-    let cfg = build_bff_auth();
-    let payload =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"usr_test"}"#.as_bytes());
-    let mut request = Request::builder()
-        .uri("/api/registration/users")
-        .body(Body::empty())
-        .unwrap();
-    request.headers_mut().insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("bEaReR header.{payload}.signature")).unwrap(),
-    );
-
-    let result = require_bff_auth(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn staff_auth_bypasses_when_path_is_outside_staff_base_path() {
-    let cfg = build_staff_auth();
-    let request = Request::builder()
-        .uri("/kc/realm")
-        .body(Body::empty())
-        .unwrap();
-
-    let result = require_staff_bearer(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn staff_auth_enforces_token_for_staff_base_path() {
-    let cfg = build_staff_auth();
-    let request = Request::builder()
-        .uri("/api/kyc/staff/submissions")
-        .body(Body::empty())
-        .unwrap();
-
-    let result = require_staff_bearer(&cfg, request).await;
-
-    assert!(result.is_err());
-
-    let response = result.err().unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let payload = read_error_body(response).await;
-    assert_eq!(payload["error"], "unauthorized");
-    assert_eq!(payload["message"], "missing bearer token");
-}
-
-#[tokio::test]
-async fn staff_auth_accepts_valid_bearer_token_for_staff_base_path() {
-    let cfg = build_staff_auth();
-    let mut request = Request::builder()
-        .uri("/api/kyc/staff/submissions")
-        .body(Body::empty())
-        .unwrap();
-    request.headers_mut().insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&valid_bearer_token()).unwrap(),
-    );
-
-    let result = require_staff_bearer(&cfg, request).await;
-
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn staff_auth_rejects_invalid_bearer_token_payload() {
-    let cfg = build_staff_auth();
-    let mut request = Request::builder()
-        .uri("/api/kyc/staff/submissions")
-        .body(Body::empty())
-        .unwrap();
-    request.headers_mut().insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&invalid_bearer_token()).unwrap(),
-    );
-
-    let result = require_staff_bearer(&cfg, request).await;
-
-    assert!(result.is_err());
-    let response = result.err().unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let payload = read_error_body(response).await;
-    assert_eq!(payload["message"], "invalid bearer token");
-}
 
 #[tokio::test]
 async fn kc_signature_bypasses_when_disabled() {
@@ -469,62 +234,38 @@ async fn kc_signature_layer_rejects_requests_without_headers() {
 }
 
 #[tokio::test]
-async fn bff_bearer_layer_enforces_when_original_uri_matches_base_path() {
-    let cfg = build_bff_auth();
+async fn jwks_auth_layer_enforces_when_path_matches_base_path() {
+    let jwks_url = "http://localhost/jwks".to_string();
+    let base_paths = vec!["/api/registration".to_string()];
     let router = Router::new()
         .route("/api/registration/users", get(|| async { "ok" }))
-        .layer(bff_bearer_layer(cfg));
+        .layer(jwks_auth_layer(jwks_url, base_paths));
 
-    let mut request = Request::builder()
-        .uri("/users")
+    let request = Request::builder()
+        .uri("/api/registration/users")
         .body(Body::empty())
         .unwrap();
-    request
-        .extensions_mut()
-        .insert(OriginalUri("/api/registration/users".parse().unwrap()));
 
     let response = router.oneshot(request).await.unwrap();
 
+    // Should be unauthorized because no token provided and path matches base-paths
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn bff_bearer_layer_allows_requests_with_token() {
-    let cfg = build_bff_auth();
+async fn jwks_auth_layer_bypasses_when_path_does_not_match_base_path() {
+    let jwks_url = "http://localhost/jwks".to_string();
+    let base_paths = vec!["/api/registration".to_string()];
     let router = Router::new()
-        .route("/api/registration/users", get(|| async { "ok" }))
-        .layer(bff_bearer_layer(cfg.clone()));
+        .route("/public/info", get(|| async { "ok" }))
+        .layer(jwks_auth_layer(jwks_url, base_paths));
 
-    let mut request = Request::builder()
-        .uri("/api/registration/users")
+    let request = Request::builder()
+        .uri("/public/info")
         .body(Body::empty())
         .unwrap();
-    request.headers_mut().insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&valid_bearer_token()).unwrap(),
-    );
 
     let response = router.oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn staff_bearer_layer_requires_token_for_protected_path() {
-    let cfg = build_staff_auth();
-    let router = Router::new()
-        .route("/api/kyc/staff/submissions", get(|| async { "ok" }))
-        .layer(staff_bearer_layer(cfg));
-
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/api/kyc/staff/submissions")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }

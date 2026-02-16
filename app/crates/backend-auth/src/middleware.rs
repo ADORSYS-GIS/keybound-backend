@@ -1,12 +1,15 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
+use tokio::sync::OnceCell;
 use axum::extract::OriginalUri;
 use axum::response::{IntoResponse, Response};
-use backend_core::{BffAuth, KcAuth, StaffAuth};
+use backend_core::KcAuth;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use jsonwebtoken::{Algorithm, Validation, decode, decode_header};
+use jwks::Jwks;
 use ring::hmac;
-use serde_json::Value;
+use serde::Deserialize;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -54,30 +57,127 @@ pub async fn require_kc_signature(
     Ok(Request::from_parts(parts, Body::from(body_bytes)))
 }
 
-pub async fn require_bff_auth(
-    cfg: &BffAuth,
-    req: Request<Body>,
-) -> std::result::Result<Request<Body>, Response> {
-    require_user_bearer_auth(cfg.enabled, &cfg.base_path, req).await
-}
-
-pub async fn require_staff_bearer(
-    cfg: &StaffAuth,
-    req: Request<Body>,
-) -> std::result::Result<Request<Body>, Response> {
-    require_user_bearer_auth(cfg.enabled, &cfg.base_path, req).await
-}
-
 pub fn kc_signature_layer(cfg: KcAuth) -> KcSignatureLayer {
     KcSignatureLayer::new(cfg)
 }
 
-pub fn bff_bearer_layer(cfg: BffAuth) -> BffBearerLayer {
-    BffBearerLayer::new(cfg)
+pub fn jwks_auth_layer(jwks_url: String, base_paths: Vec<String>) -> JwksAuthLayer {
+    JwksAuthLayer::new(jwks_url, base_paths)
 }
 
-pub fn staff_bearer_layer(cfg: StaffAuth) -> StaffBearerLayer {
-    StaffBearerLayer::new(cfg)
+#[derive(Clone)]
+pub struct JwksAuthLayer {
+    jwks_url: String,
+    base_paths: Vec<String>,
+    jwks: Arc<OnceCell<Jwks>>,
+}
+
+impl JwksAuthLayer {
+    pub fn new(jwks_url: String, base_paths: Vec<String>) -> Self {
+        Self {
+            jwks_url,
+            base_paths,
+            jwks: Arc::new(OnceCell::new()),
+        }
+    }
+}
+
+impl<S> Layer<S> for JwksAuthLayer {
+    type Service = JwksAuthService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        JwksAuthService {
+            inner,
+            jwks_url: self.jwks_url.clone(),
+            base_paths: self.base_paths.clone(),
+            jwks: Arc::clone(&self.jwks),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct JwksAuthService<S> {
+    inner: S,
+    jwks_url: String,
+    base_paths: Vec<String>,
+    jwks: Arc<OnceCell<Jwks>>,
+}
+
+impl<S> Service<Request<Body>> for JwksAuthService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let jwks_url = self.jwks_url.clone();
+        let base_paths = self.base_paths.clone();
+        let jwks_cell = Arc::clone(&self.jwks);
+
+        Box::pin(async move {
+            let path = req
+                .extensions()
+                .get::<OriginalUri>()
+                .map(|uri| uri.0.path())
+                .unwrap_or_else(|| req.uri().path());
+
+            let is_protected = base_paths.iter().any(|p| path.starts_with(p));
+
+            if !is_protected {
+                return inner.call(req).await;
+            }
+
+            let token = match bearer_token(req.headers()) {
+                Some(value) => value,
+                None => return Ok(unauthorized("missing bearer token")),
+            };
+
+            let jwks = match jwks_cell
+                .get_or_try_init(|| async { Jwks::from_jwks_url(&jwks_url).await })
+                .await
+            {
+                Ok(jwks) => jwks,
+                Err(e) => {
+                    tracing::error!("failed to load JWKS: {}", e);
+                    return Ok(unauthorized("failed to load JWKS"));
+                }
+            };
+
+            if validate_token(&token, jwks) {
+                inner.call(req).await
+            } else {
+                Ok(unauthorized("invalid bearer token"))
+            }
+        })
+    }
+}
+
+fn validate_token(token: &str, jwks: &Jwks) -> bool {
+    let header = match decode_header(token) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+
+    let kid = match header.kid {
+        Some(k) => k,
+        None => return false,
+    };
+
+    let jwk = match jwks.keys.get(&kid) {
+        Some(j) => j,
+        None => return false,
+    };
+
+    let validation = default_jwt_validation();
+    decode::<JwtClaims>(token, &jwk.decoding_key, &validation).is_ok()
 }
 
 #[derive(Clone)]
@@ -133,130 +233,19 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct BffBearerLayer {
-    cfg: Arc<BffAuth>,
-}
 
-impl BffBearerLayer {
-    fn new(cfg: BffAuth) -> Self {
-        Self { cfg: Arc::new(cfg) }
-    }
-}
-
-impl<S> Layer<S> for BffBearerLayer {
-    type Service = BffBearerService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        BffBearerService {
-            inner,
-            cfg: Arc::clone(&self.cfg),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct BffBearerService<S> {
-    inner: S,
-    cfg: Arc<BffAuth>,
-}
-
-impl<S> Service<Request<Body>> for BffBearerService<S>
-where
-    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-{
-    type Response = Response;
-    type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let cfg = Arc::clone(&self.cfg);
-        let mut inner = self.inner.clone();
-        Box::pin(async move {
-            match require_bff_auth(&cfg, req).await {
-                Ok(req) => inner.call(req).await,
-                Err(resp) => Ok(resp),
-            }
-        })
-    }
-}
-
-#[derive(Clone)]
-pub struct StaffBearerLayer {
-    cfg: Arc<StaffAuth>,
-}
-
-impl StaffBearerLayer {
-    fn new(cfg: StaffAuth) -> Self {
-        Self { cfg: Arc::new(cfg) }
-    }
-}
-
-impl<S> Layer<S> for StaffBearerLayer {
-    type Service = StaffBearerService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        StaffBearerService {
-            inner,
-            cfg: Arc::clone(&self.cfg),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct StaffBearerService<S> {
-    inner: S,
-    cfg: Arc<StaffAuth>,
-}
-
-impl<S> Service<Request<Body>> for StaffBearerService<S>
-where
-    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-{
-    type Response = Response;
-    type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let cfg = Arc::clone(&self.cfg);
-        let mut inner = self.inner.clone();
-        Box::pin(async move {
-            match require_staff_bearer(&cfg, req).await {
-                Ok(req) => inner.call(req).await,
-                Err(resp) => Ok(resp),
-            }
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 struct JwtClaims {
-    jkt: Option<String>,
+    #[allow(dead_code)]
+    sub: Option<String>,
 }
 
-fn decode_jwt_claims(token: &str) -> Option<JwtClaims> {
-    let mut parts = token.split('.');
-    let _header = parts.next()?;
-    let payload = parts.next()?;
-    let payload = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let payload: Value = serde_json::from_slice(&payload).ok()?;
-    let jkt = payload
-        .get("cnf")
-        .and_then(|value| value.get("jkt"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
-    Some(JwtClaims { jkt })
+fn default_jwt_validation() -> Validation {
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.algorithms = vec![Algorithm::RS256];
+    validation
 }
+
 
 fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
     let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
@@ -298,36 +287,3 @@ fn unauthorized(message: &str) -> Response {
         .into_response()
 }
 
-async fn require_user_bearer_auth(
-    enabled: bool,
-    protected_base_path: &str,
-    req: Request<Body>,
-) -> std::result::Result<Request<Body>, Response> {
-    if !enabled {
-        return Ok(req);
-    }
-
-    if protected_base_path.trim().is_empty() {
-        return Ok(req);
-    }
-
-    let path = req
-        .extensions()
-        .get::<OriginalUri>()
-        .map(|uri| uri.0.path())
-        .unwrap_or_else(|| req.uri().path());
-
-    if !path.starts_with(protected_base_path) {
-        return Ok(req);
-    }
-
-    let token = match bearer_token(req.headers()) {
-        Some(value) => value,
-        None => return Err(unauthorized("missing bearer token")),
-    };
-
-    match decode_jwt_claims(&token) {
-        Some(_) => Ok(req),
-        None => Err(unauthorized("invalid bearer token")),
-    }
-}
