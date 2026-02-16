@@ -1006,6 +1006,7 @@ dependencies = [
  "swagger",
  "tokio",
  "tower",
+ "tower-http",
  "tracing",
 ]
 
@@ -5004,6 +5005,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

@@ -9,6 +9,8 @@ server:
 
 logging:
   level: "info"
+  request_logging:
+    enabled: false
 
 database:
   url: "postgres://postgres:postgres@localhost:5432/user-storage"
@@ -36,10 +38,10 @@ sms:
   provider: console # options are 'console' (default) or 'sns'
 
 oauth2:
-  jwks_url: "http://172.17.0.1:9026/realms/dev/protocol/openid-connect/certs"
+  jwks_url: "http://172.17.0.1:9026/realms/e2e-testing/protocol/openid-connect/certs"
 
 kc:
-  enabled: false
+  enabled: true
   base-path: /kc
   signature_secret: "change-me"
   max_clock_skew_seconds: 60
@@ -51,7 +53,7 @@ bff:
 
 staff:
   enabled: true
-  base-path: /api/kyc/staff
+  base-path: /staff
 
 cuss:
   api_url: http://cuss:8080

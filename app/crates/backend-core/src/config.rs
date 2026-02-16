@@ -59,6 +59,19 @@ pub struct Logging {
     pub data_dir: Option<String>,
     pub json: Option<bool>,
     pub flame: Option<bool>,
+    #[serde(default)]
+    pub request_logging: RequestLogging,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RequestLogging {
+    pub enabled: bool,
+}
+
+impl Default for RequestLogging {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

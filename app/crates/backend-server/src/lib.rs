@@ -5,12 +5,12 @@ pub(crate) mod worker;
 
 use axum::Router;
 use axum::body::Body;
+use axum::http::Request as HttpRequest;
 use backend_auth::{bff_bearer_layer, kc_signature_layer, staff_bearer_layer};
 use backend_core::{Config, Result};
-use http::uri::PathAndQuery;
-use http::{Request, Uri};
 use std::sync::Arc;
 use tower::service_fn;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 pub async fn serve(core_config: &Config) -> Result<()> {
@@ -61,62 +61,65 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
     let router = nest_surface_router(router, &config.kc.base_path, {
         let api = api.clone();
         let cfg = config.kc.clone();
-        move |normalized| build_kc_router(api.clone(), cfg.clone(), normalized)
+        move || build_kc_router(api.clone(), cfg.clone())
     });
     let router = nest_surface_router(router, &config.bff.base_path, {
         let api = api.clone();
         let cfg = config.bff.clone();
-        move |normalized| build_bff_router(api.clone(), cfg.clone(), normalized)
+        move || build_bff_router(api.clone(), cfg.clone())
     });
-    nest_surface_router(router, &config.staff.base_path, {
+    let router = nest_surface_router(router, &config.staff.base_path, {
         let api = api.clone();
         let cfg = config.staff.clone();
-        move |normalized| build_staff_router(api.clone(), cfg.clone(), normalized)
-    })
+        move || build_staff_router(api.clone(), cfg.clone())
+    });
+
+    if config.logging.request_logging.enabled {
+        router.layer(TraceLayer::new_for_http().make_span_with(|req: &HttpRequest<_>| {
+            tracing::info_span!(
+                "http-request",
+                method = %req.method(),
+                path = %request_path(req)
+            )
+        }))
+    } else {
+        router
+    }
 }
 
-fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth, base_path: String) -> Router {
-    let base_path = Arc::new(base_path);
-    Router::new().fallback_service(service_fn(move |req| {
+fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth) -> Router {
+    Router::new()
+        .fallback_service(service_fn(move |req| {
             let api = api.clone();
-            let base_path = base_path.clone();
-            async move { Ok(state::call_kc(api, add_base_path(req, base_path.as_str())).await) }
+            async move { Ok(state::call_kc(api, req).await) }
         }))
         .layer(kc_signature_layer(cfg))
 }
 
-fn build_bff_router(api: api::BackendApi, cfg: backend_core::BffAuth, base_path: String) -> Router {
-    let base_path = Arc::new(base_path);
-    Router::new().fallback_service(service_fn(move |req| {
+fn build_bff_router(api: api::BackendApi, cfg: backend_core::BffAuth) -> Router {
+    Router::new()
+        .fallback_service(service_fn(move |req| {
             let api = api.clone();
-            let base_path = base_path.clone();
-            async move { Ok(state::call_bff(api, add_base_path(req, base_path.as_str())).await) }
+            async move { Ok(state::call_bff(api, req).await) }
         }))
         .layer(bff_bearer_layer(cfg))
 }
 
-fn build_staff_router(
-    api: api::BackendApi,
-    cfg: backend_core::StaffAuth,
-    base_path: String,
-) -> Router {
-    let base_path = Arc::new(base_path);
-    Router::new().fallback_service(service_fn(move |req| {
+fn build_staff_router(api: api::BackendApi, cfg: backend_core::StaffAuth) -> Router {
+    Router::new()
+        .fallback_service(service_fn(move |req| {
             let api = api.clone();
-            let base_path = base_path.clone();
-            async move {
-                Ok(state::call_staff(api, add_base_path(req, base_path.as_str())).await)
-            }
+            async move { Ok(state::call_staff(api, req).await) }
         }))
         .layer(staff_bearer_layer(cfg))
 }
 
 fn nest_surface_router<F>(router: Router, base_path: &str, build_child: F) -> Router
 where
-    F: FnOnce(String) -> Router,
+    F: FnOnce() -> Router,
 {
     if let Some(normalized) = normalize_base_path(base_path) {
-        router.nest(&normalized, build_child(normalized.clone()))
+        router.nest(&normalized, build_child())
     } else {
         router
     }
@@ -142,30 +145,11 @@ fn normalize_base_path(base_path: &str) -> Option<String> {
     }
 }
 
-fn add_base_path(mut req: Request<Body>, base_path: &str) -> Request<Body> {
-    if base_path.is_empty() {
-        return req;
-    }
-
-    let path = req.uri().path();
-    let query = req.uri().query();
-    let base = base_path;
-    let normalized_path = if path == "/" {
-        base.to_string()
-    } else {
-        format!("{base}{path}")
-    };
-    let path_with_query = if let Some(query) = query {
-        format!("{normalized_path}?{query}")
-    } else {
-        normalized_path
-    };
-
-    let mut parts = req.uri().clone().into_parts();
-    parts.path_and_query =
-        Some(PathAndQuery::from_maybe_shared(path_with_query).expect("valid path and query"));
-    *req.uri_mut() = Uri::from_parts(parts).expect("valid uri");
-    req
+fn request_path(req: &HttpRequest<Body>) -> String {
+    req.extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|uri| uri.0.path().to_owned())
+        .unwrap_or_else(|| req.uri().path().to_owned())
 }
 
 #[cfg(test)]
@@ -179,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_blank_base_path_mounts_service() {
-        let router = nest_surface_router(Router::new(), "/api/test", |_normalized| {
+        let router = nest_surface_router(Router::new(), "/api/test", || {
             Router::new().route("/", get(|| async { "mounted" }))
         });
 
@@ -199,12 +183,31 @@ mod tests {
     #[tokio::test]
     async fn blank_base_path_does_not_mount_service() {
         let router = Router::new().route("/ping", get(|| async { "pong" }));
-        let router = nest_surface_router(router, "   ", |_normalized| {
+        let router = nest_surface_router(router, "   ", || {
             panic!("should not nest when base path is blank");
         });
 
         let response = router
             .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn base_path_mounts_nested_routes() {
+        let router = nest_surface_router(Router::new(), "/bff", || {
+            Router::new().route("/api/kyc/cases/mine", get(|| async { "ok" }))
+        });
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/bff/api/kyc/cases/mine")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 

@@ -1,5 +1,6 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
+use axum::extract::OriginalUri;
 use axum::response::{IntoResponse, Response};
 use backend_core::{BffAuth, KcAuth, StaffAuth};
 use base64::Engine;
@@ -310,7 +311,13 @@ async fn require_user_bearer_auth(
         return Ok(req);
     }
 
-    if !req.uri().path().starts_with(protected_base_path) {
+    let path = req
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|uri| uri.0.path())
+        .unwrap_or_else(|| req.uri().path());
+
+    if !path.starts_with(protected_base_path) {
         return Ok(req);
     }
 

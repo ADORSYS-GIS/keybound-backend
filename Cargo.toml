@@ -96,6 +96,7 @@ aws-types = "1"
 mimalloc = "0"
 axum-extra = "0.12"
 headers = "0.4"
+tower-http = { version = "0.6.8", features = ["trace"] }
 
 [profile.release]
 lto = true

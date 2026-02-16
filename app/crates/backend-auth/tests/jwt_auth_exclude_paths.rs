@@ -1,5 +1,6 @@
 use axum::Router;
 use axum::body::Body;
+use axum::extract::OriginalUri;
 use axum::http::{HeaderValue, Request, StatusCode, header::AUTHORIZATION};
 use axum::routing::get;
 use axum::{body::to_bytes, response::Response};
@@ -463,6 +464,26 @@ async fn kc_signature_layer_rejects_requests_without_headers() {
         )
         .await
         .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn bff_bearer_layer_enforces_when_original_uri_matches_base_path() {
+    let cfg = build_bff_auth();
+    let router = Router::new()
+        .route("/api/registration/users", get(|| async { "ok" }))
+        .layer(bff_bearer_layer(cfg));
+
+    let mut request = Request::builder()
+        .uri("/users")
+        .body(Body::empty())
+        .unwrap();
+    request
+        .extensions_mut()
+        .insert(OriginalUri("/api/registration/users".parse().unwrap()));
+
+    let response = router.oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
