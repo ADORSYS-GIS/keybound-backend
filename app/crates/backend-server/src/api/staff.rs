@@ -49,7 +49,6 @@ impl KycReview<Error> for BackendApi {
             .map(|search| search.to_lowercase());
 
         let filtered_rows = rows
-            .data
             .into_iter()
             .filter(|row| {
                 let status_matches = status_filter
@@ -59,15 +58,15 @@ impl KycReview<Error> for BackendApi {
                 let search_matches = search_filter.as_ref().is_none_or(|search| {
                     row.first_name
                         .as_deref()
-                        .is_some_and(|value| value.to_lowercase().contains(search))
+                        .is_some_and(|value: &str| value.to_lowercase().contains(search))
                         || row
                             .last_name
                             .as_deref()
-                            .is_some_and(|value| value.to_lowercase().contains(search))
+                            .is_some_and(|value: &str| value.to_lowercase().contains(search))
                         || row
                             .email
                             .as_deref()
-                            .is_some_and(|value| value.to_lowercase().contains(search))
+                            .is_some_and(|value: &str| value.to_lowercase().contains(search))
                 });
 
                 status_matches && search_matches

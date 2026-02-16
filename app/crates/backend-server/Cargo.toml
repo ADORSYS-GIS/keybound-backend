@@ -33,7 +33,6 @@ serde.workspace = true
 redis.workspace = true
 apalis.workspace = true
 apalis-redis.workspace = true
-lru.workspace = true
 
 aws-config.workspace = true
 aws-sdk-s3.workspace = true

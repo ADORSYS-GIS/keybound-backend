@@ -77,8 +77,6 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 bytes = "1"
 
 swagger = "7"
-lru = "0.16"
-ciborium = "0.2"
 
 diesel = { version = "2.3", features = ["postgres", "chrono", "serde_json", "r2d2"] }
 diesel-async = { version = "0.7", features = ["postgres", "deadpool"] }

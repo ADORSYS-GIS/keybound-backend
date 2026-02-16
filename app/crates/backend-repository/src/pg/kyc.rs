@@ -365,6 +365,37 @@ impl KycRepo for KycRepository {
         Ok(res)
     }
 
+    async fn submit_kyc_profile(
+        &self,
+        submission_id_val: &str,
+        external_id_val: &str,
+    ) -> RepoResult<bool> {
+        use backend_model::schema::{kyc_case, kyc_submission};
+
+        let mut conn = self.get_conn().await?;
+
+        let rows_affected = diesel::update(kyc_submission::table)
+            .filter(kyc_submission::id.eq(submission_id_val))
+            .filter(kyc_submission::status.eq("DRAFT"))
+            .filter(
+                kyc_submission::kyc_case_id.eq_any(
+                    kyc_case::table
+                        .filter(kyc_case::user_id.eq(external_id_val))
+                        .select(kyc_case::id),
+                ),
+            )
+            .set((
+                kyc_submission::status.eq("SUBMITTED"),
+                kyc_submission::submitted_at.eq(Utc::now()),
+                kyc_submission::updated_at.eq(Utc::now()),
+            ))
+            .execute(&mut conn)
+            .await
+            .map_err(|e| backend_core::Error::Diesel(e))?;
+
+        Ok(rows_affected > 0)
+    }
+
     async fn patch_kyc_profile(
         &self,
         external_id_val: &str,
@@ -418,36 +449,5 @@ impl KycRepo for KycRepository {
             .await
             .optional()
             .map_err(|e| backend_core::Error::Diesel(e))
-    }
-
-    async fn submit_kyc_profile(
-        &self,
-        submission_id_val: &str,
-        external_id_val: &str,
-    ) -> RepoResult<bool> {
-        use backend_model::schema::{kyc_case, kyc_submission};
-
-        let mut conn = self.get_conn().await?;
-
-        let rows_affected = diesel::update(kyc_submission::table)
-            .filter(kyc_submission::id.eq(submission_id_val))
-            .filter(kyc_submission::status.eq("DRAFT"))
-            .filter(
-                kyc_submission::kyc_case_id.eq_any(
-                    kyc_case::table
-                        .filter(kyc_case::user_id.eq(external_id_val))
-                        .select(kyc_case::id),
-                ),
-            )
-            .set((
-                kyc_submission::status.eq("SUBMITTED"),
-                kyc_submission::submitted_at.eq(Utc::now()),
-                kyc_submission::updated_at.eq(Utc::now()),
-            ))
-            .execute(&mut conn)
-            .await
-            .map_err(|e| backend_core::Error::Diesel(e))?;
-
-        Ok(rows_affected > 0)
     }
 }
