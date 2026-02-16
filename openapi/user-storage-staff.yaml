@@ -179,6 +179,49 @@ paths:
           description: Validation failed.
         '401':
           description: Unauthorized.
+  '/api/kyc/staff/submissions/{userId}/documents/{documentId}/download-url':
+    post:
+      tags:
+        - KYC Review
+      summary: Get presigned download URL for a document
+      description: Returns a short-lived presigned URL to download a document from S3.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: User ID.
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Document ID.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignedDownloadUrlRequest'
+      responses:
+        '200':
+          description: Presigned download URL created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedDownloadUrlResponse'
+        '401':
+          description: Unauthorized.
+        '404':
+          description: Submission or document not found.
+        '410':
+          description: Document no longer available (e.g., deleted or expired).
+        '429':
+          description: Too many requests.
+
 components:
   securitySchemes:
     bearerAuth:
@@ -307,3 +350,37 @@ components:
         message:
           type: string
           maxLength: 500
+    PresignedDownloadUrlRequest:
+      type: object
+      properties:
+        expiresInSeconds:
+          type: integer
+          minimum: 60
+          maximum: 3600
+          default: 300
+          description: URL TTL in seconds (default 300, max 3600).
+        responseContentDisposition:
+          type: string
+          description: >
+            Optional content disposition override (e.g. "attachment; filename=\"id-front.jpg\"").
+
+    PresignedDownloadUrlResponse:
+      type: object
+      required:
+        - url
+        - expiresAt
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Presigned S3 URL for downloading the document.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Absolute expiration timestamp for the URL.
+        documentId:
+          type: string
+        fileName:
+          type: string
+        mimeType:
+          type: string

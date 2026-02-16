@@ -225,4 +225,8 @@ impl KycReview<Error> for BackendApi {
             Ok(ApiKycStaffSubmissionsUserIdRequestInfoPostResponse::Status400_ValidationFailed)
         }
     }
+
+    async fn api_kyc_staff_submissions_user_id_documents_document_id_download_url_post(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, path_params: &models::ApiKycStaffSubmissionsUserIdDocumentsDocumentIdDownloadUrlPostPathParams, body: &Option<models::PresignedDownloadUrlRequest>) -> Result<ApiKycStaffSubmissionsUserIdDocumentsDocumentIdDownloadUrlPostResponse, Error> {
+        todo!()
+    }
 }
