@@ -7,6 +7,13 @@
     "files.exclude": {
         "**/.idea": true,
         "**/*tmp*": true,
+        "**/charts/*/charts": true,
         "**/target": true
+    },
+    "search.exclude": {
+        "**/target": true
+    },
+    "files.readonlyInclude": {
+        "app/gen/**/*": true
     }
 }
