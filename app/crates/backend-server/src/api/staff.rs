@@ -1,4 +1,5 @@
 use super::BackendApi;
+use crate::worker;
 use axum_extra::extract::CookieJar;
 use backend_auth::ServiceContext;
 use backend_core::Error;
@@ -17,7 +18,7 @@ use gen_oas_server_staff::models;
 use headers::Host;
 use http::Method;
 use sqlx_data::ParamsBuilder;
-use tracing::info;
+use tracing::{info, warn};
 
 #[backend_core::async_trait]
 impl KycReview<Error> for BackendApi {
@@ -120,8 +121,22 @@ impl KycReview<Error> for BackendApi {
                 user_id = %path_params.user_id,
                 new_tier = req.new_tier,
                 notes = req.notes.as_deref(),
-                "Fineract flow placeholder: staff approved KYC and would provision user."
+                "staff approved KYC, enqueuing fineract provisioning job"
             );
+
+            if let Err(err) = worker::enqueue_fineract_provisioning(
+                &self.state.config.redis.url,
+                &path_params.user_id,
+            )
+            .await
+            {
+                warn!(
+                    user_id = %path_params.user_id,
+                    error = %err,
+                    "failed to enqueue fineract provisioning job"
+                );
+            }
+
             Ok(ApiKycStaffSubmissionsUserIdApprovePostResponse::Status200_KYCApproved)
         } else {
             Ok(ApiKycStaffSubmissionsUserIdApprovePostResponse::Status400_ValidationFailed)

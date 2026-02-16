@@ -128,6 +128,7 @@ pub struct Config {
     pub kc: KcAuth,
     pub bff: BffAuth,
     pub staff: StaffAuth,
+    pub cuss: Cuss,
 }
 
 #[derive(Debug, Clone, Deserialize)]

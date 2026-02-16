@@ -990,6 +990,7 @@ dependencies = [
  "backend-model",
  "backend-repository",
  "chrono",
+ "gen_oas_client_cuss_registration",
  "gen_oas_server_bff",
  "gen_oas_server_kc",
  "gen_oas_server_staff",
