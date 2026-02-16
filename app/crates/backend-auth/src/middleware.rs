@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::{Layer, Service};
+use async_trait::async_trait;
 
 pub async fn require_kc_signature(
     cfg: &KcAuth,
@@ -61,6 +62,21 @@ pub fn kc_signature_layer(cfg: KcAuth) -> KcSignatureLayer {
     KcSignatureLayer::new(cfg)
 }
 
+#[async_trait]
+pub trait JwksProvider: Send + Sync + 'static {
+    async fn get_jwks(&self, url: &str) -> Result<Jwks, String>;
+}
+
+#[derive(Clone, Default)]
+pub struct DefaultJwksProvider;
+
+#[async_trait]
+impl JwksProvider for DefaultJwksProvider {
+    async fn get_jwks(&self, url: &str) -> Result<Jwks, String> {
+        Jwks::from_jwks_url(url).await.map_err(|e| e.to_string())
+    }
+}
+
 pub fn jwks_auth_layer(jwks_url: String, base_paths: Vec<String>) -> JwksAuthLayer {
     JwksAuthLayer::new(jwks_url, base_paths)
 }
@@ -70,6 +86,7 @@ pub struct JwksAuthLayer {
     jwks_url: String,
     base_paths: Vec<String>,
     jwks: Arc<OnceCell<Jwks>>,
+    provider: Arc<Box<dyn JwksProvider>>,
 }
 
 impl JwksAuthLayer {
@@ -78,7 +95,13 @@ impl JwksAuthLayer {
             jwks_url,
             base_paths,
             jwks: Arc::new(OnceCell::new()),
+            provider: Arc::new(Box::new(DefaultJwksProvider)),
         }
+    }
+
+    pub fn with_provider(mut self, provider: Box<dyn JwksProvider>) -> Self {
+        self.provider = Arc::new(provider);
+        self
     }
 }
 
@@ -91,6 +114,7 @@ impl<S> Layer<S> for JwksAuthLayer {
             jwks_url: self.jwks_url.clone(),
             base_paths: self.base_paths.clone(),
             jwks: Arc::clone(&self.jwks),
+            provider: Arc::clone(&self.provider),
         }
     }
 }
@@ -101,6 +125,7 @@ pub struct JwksAuthService<S> {
     jwks_url: String,
     base_paths: Vec<String>,
     jwks: Arc<OnceCell<Jwks>>,
+    provider: Arc<Box<dyn JwksProvider>>,
 }
 
 impl<S> Service<Request<Body>> for JwksAuthService<S>
@@ -119,8 +144,13 @@ where
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         let mut inner = self.inner.clone();
         let jwks_url = self.jwks_url.clone();
-        let base_paths = self.base_paths.clone();
+        let base_paths = if self.base_paths.is_empty() {
+            vec!["/api/registration".to_string(), "/api/kyc/staff".to_string()]
+        } else {
+            self.base_paths.clone()
+        };
         let jwks_cell = Arc::clone(&self.jwks);
+        let provider = Arc::clone(&self.provider);
 
         Box::pin(async move {
             let path = req
@@ -141,7 +171,10 @@ where
             };
 
             let jwks = match jwks_cell
-                .get_or_try_init(|| async { Jwks::from_jwks_url(&jwks_url).await })
+                .get_or_try_init(|| async {
+                    tracing::info!("Lazy-loading JWKS from {}", jwks_url);
+                    provider.get_jwks(&jwks_url).await
+                })
                 .await
             {
                 Ok(jwks) => jwks,
@@ -286,4 +319,3 @@ fn unauthorized(message: &str) -> Response {
     )
         .into_response()
 }
-

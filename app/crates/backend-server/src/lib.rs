@@ -93,13 +93,17 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
         Ok::<_, Infallible>(res)
     }));
 
-    // Apply JWKS auth layer if base paths are configured
-    if !config.oauth2.base_paths.is_empty() {
-        router = router.layer(jwks_auth_layer(
-            config.oauth2.jwks_url.clone(),
-            config.oauth2.base_paths.clone(),
-        ));
+    // Apply JWKS auth layer
+    let mut jwks_base_paths = config.oauth2.base_paths.clone();
+    if jwks_base_paths.is_empty() {
+        jwks_base_paths.push(config.bff.base_path.clone());
+        jwks_base_paths.push(config.staff.base_path.clone());
     }
+
+    router = router.layer(jwks_auth_layer(
+        config.oauth2.jwks_url.clone(),
+        jwks_base_paths,
+    ));
 
     if config.logging.request_logging.enabled || config.logging.log_requests_enabled {
         router.layer(

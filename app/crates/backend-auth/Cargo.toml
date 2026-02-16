@@ -21,6 +21,7 @@ tower.workspace = true
 swagger.workspace = true
 jsonwebtoken.workspace = true
 jwks.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
