@@ -2,9 +2,9 @@ use crate::traits::*;
 use backend_model::{db, staff as staff_map};
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel_async::{AsyncConnection, RunQueryDsl};
-use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::AsyncPgConnection;
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::{AsyncConnection, RunQueryDsl};
 use sqlx::PgPool;
 
 #[derive(Clone)]
@@ -89,7 +89,9 @@ impl KycRepo for KycRepository {
             .transaction::<_, backend_core::Error, _>(|conn| {
                 Box::pin(async move {
                     let sub_id: String = kyc_submission::table
-                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .inner_join(
+                            kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)),
+                        )
                         .filter(kyc_case::user_id.eq(&input.external_id))
                         .filter(kyc_submission::status.eq("DRAFT"))
                         .select(kyc_submission::id)
@@ -120,7 +122,10 @@ impl KycRepo for KycRepository {
         Ok(row)
     }
 
-    async fn get_kyc_profile(&self, external_id_val: &str) -> RepoResult<Option<db::KycSubmissionRow>> {
+    async fn get_kyc_profile(
+        &self,
+        external_id_val: &str,
+    ) -> RepoResult<Option<db::KycSubmissionRow>> {
         use backend_model::schema::{kyc_case, kyc_submission};
 
         let mut conn = self.get_conn().await?;
@@ -146,7 +151,9 @@ impl KycRepo for KycRepository {
         let mut conn = self.get_conn().await?;
 
         let rows = kyc_document::table
-            .inner_join(kyc_submission::table.on(kyc_submission::id.eq(kyc_document::submission_id)))
+            .inner_join(
+                kyc_submission::table.on(kyc_submission::id.eq(kyc_document::submission_id)),
+            )
             .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
             .filter(kyc_case::user_id.eq(external_id_val))
             .select(db::KycDocumentRow::as_select())
@@ -174,7 +181,9 @@ impl KycRepo for KycRepository {
         let mut conn = self.get_conn().await?;
 
         kyc_document::table
-            .inner_join(kyc_submission::table.on(kyc_submission::id.eq(kyc_document::submission_id)))
+            .inner_join(
+                kyc_submission::table.on(kyc_submission::id.eq(kyc_document::submission_id)),
+            )
             .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
             .filter(kyc_case::user_id.eq(external_id_val))
             .filter(kyc_document::id.eq(document_id_val))
@@ -223,7 +232,10 @@ impl KycRepo for KycRepository {
         })
     }
 
-    async fn get_kyc_submission(&self, external_id_val: &str) -> RepoResult<Option<db::KycSubmissionRow>> {
+    async fn get_kyc_submission(
+        &self,
+        external_id_val: &str,
+    ) -> RepoResult<Option<db::KycSubmissionRow>> {
         self.get_kyc_profile(external_id_val).await
     }
 
@@ -240,7 +252,9 @@ impl KycRepo for KycRepository {
             .transaction::<_, backend_core::Error, _>(|conn| {
                 Box::pin(async move {
                     let sub_id: Option<String> = kyc_submission::table
-                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .inner_join(
+                            kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)),
+                        )
                         .filter(kyc_case::user_id.eq(external_id_val))
                         .filter(kyc_submission::status.eq("SUBMITTED"))
                         .select(kyc_submission::id)
@@ -260,13 +274,15 @@ impl KycRepo for KycRepository {
                             .execute(conn)
                             .await?;
 
-                        diesel::update(kyc_case::table.filter(kyc_case::user_id.eq(external_id_val)))
-                            .set((
-                                kyc_case::current_tier.eq(req.new_tier as i32),
-                                kyc_case::updated_at.eq(Utc::now()),
-                            ))
-                            .execute(conn)
-                            .await?;
+                        diesel::update(
+                            kyc_case::table.filter(kyc_case::user_id.eq(external_id_val)),
+                        )
+                        .set((
+                            kyc_case::current_tier.eq(req.new_tier as i32),
+                            kyc_case::updated_at.eq(Utc::now()),
+                        ))
+                        .execute(conn)
+                        .await?;
 
                         Ok(true)
                     } else {
@@ -292,7 +308,9 @@ impl KycRepo for KycRepository {
             .transaction::<_, backend_core::Error, _>(|conn| {
                 Box::pin(async move {
                     let sub_id: Option<String> = kyc_submission::table
-                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .inner_join(
+                            kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)),
+                        )
                         .filter(kyc_case::user_id.eq(external_id_val))
                         .filter(kyc_submission::status.eq("SUBMITTED"))
                         .select(kyc_submission::id)
@@ -336,7 +354,9 @@ impl KycRepo for KycRepository {
             .transaction::<_, backend_core::Error, _>(|conn| {
                 Box::pin(async move {
                     let sub_id: Option<String> = kyc_submission::table
-                        .inner_join(kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)))
+                        .inner_join(
+                            kyc_case::table.on(kyc_case::id.eq(kyc_submission::kyc_case_id)),
+                        )
                         .filter(kyc_case::user_id.eq(external_id_val))
                         .filter(kyc_submission::status.eq("SUBMITTED"))
                         .select(kyc_submission::id)
@@ -420,7 +440,11 @@ impl KycRepo for KycRepository {
             .map_err(|e| backend_core::Error::Diesel(e))
     }
 
-    async fn submit_kyc_profile(&self, submission_id_val: &str, external_id_val: &str) -> RepoResult<bool> {
+    async fn submit_kyc_profile(
+        &self,
+        submission_id_val: &str,
+        external_id_val: &str,
+    ) -> RepoResult<bool> {
         use backend_model::schema::{kyc_case, kyc_submission};
 
         let mut conn = self.get_conn().await?;

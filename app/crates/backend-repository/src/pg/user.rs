@@ -1,9 +1,9 @@
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
+use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::AsyncPgConnection;
 use sqlx::PgPool;
 
 #[derive(Clone)]
@@ -13,10 +13,7 @@ pub struct UserRepository {
 }
 
 impl UserRepository {
-    pub fn new(
-        pool: PgPool,
-        diesel_pool: Pool<AsyncPgConnection>,
-    ) -> Self {
+    pub fn new(pool: PgPool, diesel_pool: Pool<AsyncPgConnection>) -> Self {
         Self { pool, diesel_pool }
     }
 
@@ -50,7 +47,10 @@ impl UserRepo for UserRepository {
             last_name: req.last_name.clone(),
             email: req.email.clone(),
             email_verified: req.email_verified.unwrap_or(false),
-            phone_number: req.attributes.as_ref().and_then(|a| a.get("phone_number").cloned()),
+            phone_number: req
+                .attributes
+                .as_ref()
+                .and_then(|a| a.get("phone_number").cloned()),
             fineract_customer_id: None,
             disabled: !req.enabled.unwrap_or(true),
             attributes: attributes_json,

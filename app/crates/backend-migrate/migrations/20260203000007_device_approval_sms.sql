@@ -29,13 +29,3 @@ CREATE TABLE approval (
     PRIMARY KEY (request_id),
     CONSTRAINT fk_approval_user FOREIGN KEY (user_id) REFERENCES app_user (id)
 );
-
-CREATE TABLE sms_sent (
-    hash VARCHAR(64) NOT NULL,
-    phone_number VARCHAR(64) NOT NULL,
-    otp_hash VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    confirmed BOOLEAN NOT NULL,
-    PRIMARY KEY (hash)
-);

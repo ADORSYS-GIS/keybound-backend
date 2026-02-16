@@ -74,7 +74,9 @@ impl From<db::KycSubmissionRow> for KycSubmissionSummaryDto {
             phone_number: row.phone_number,
             kyc_tier: Some(row.requested_tier),
             kyc_status: Some(row.status),
-            submitted_at: row.submitted_at.map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
+            submitted_at: row
+                .submitted_at
+                .map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
         }
     }
 }
@@ -124,8 +126,12 @@ impl KycSubmissionDetailResponseDto {
             kyc_tier: Some(profile.requested_tier),
             kyc_status: Some(profile.status),
             documents: Some(vec![]),
-            submitted_at: profile.submitted_at.map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
-            reviewed_at: profile.decided_at.map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
+            submitted_at: profile
+                .submitted_at
+                .map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
+            reviewed_at: profile
+                .decided_at
+                .map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
             reviewed_by: profile.decided_by,
             rejection_reason: profile.rejection_reason,
             review_notes: profile.review_notes,

@@ -201,16 +201,37 @@ diesel::table! {
 }
 
 diesel::table! {
-    sms_sent (hash) {
-        #[max_length = 64]
-        hash -> Varchar,
+    sms_messages (id) {
+        #[max_length = 40]
+        id -> Varchar,
+        #[max_length = 255]
+        realm -> Varchar,
+        #[max_length = 255]
+        client_id -> Varchar,
+        #[max_length = 40]
+        user_id -> Nullable<Varchar>,
         #[max_length = 64]
         phone_number -> Varchar,
+        #[max_length = 64]
+        hash -> Varchar,
+        otp_sha256 -> Bytea,
+        ttl_seconds -> Int4,
+        #[max_length = 32]
+        status -> Varchar,
+        attempt_count -> Int4,
+        max_attempts -> Int4,
+        next_retry_at -> Nullable<Timestamptz>,
+        last_error -> Nullable<Text>,
         #[max_length = 255]
-        otp_hash -> Varchar,
+        sns_message_id -> Nullable<Varchar>,
+        #[max_length = 255]
+        session_id -> Nullable<Varchar>,
+        #[max_length = 255]
+        trace_id -> Nullable<Varchar>,
+        metadata -> Nullable<Jsonb>,
         created_at -> Timestamptz,
-        expires_at -> Timestamptz,
-        confirmed -> Bool,
+        sent_at -> Nullable<Timestamptz>,
+        confirmed_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -226,5 +247,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     fineract_provisioning,
     device,
     approval,
-    sms_sent,
+    sms_messages,
 );

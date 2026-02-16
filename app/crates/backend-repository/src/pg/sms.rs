@@ -1,139 +1,171 @@
 use crate::traits::*;
 use backend_model::db;
-use chrono::{DateTime, Utc};
-use serde_json::Value;
+use chrono::Utc;
+use diesel::prelude::*;
+use diesel_async::AsyncPgConnection;
+use diesel_async::RunQueryDsl;
+use diesel_async::pooled_connection::deadpool::Pool;
 use sqlx::PgPool;
-use sqlx_data::{QueryResult, dml, repo};
-
-#[repo]
-pub trait PgSmsRepo {
-    #[dml(file = "queries/sms/queue.sql", unchecked)]
-    async fn queue_sms_db(
-        &self,
-        id: String,
-        realm: String,
-        client_id: String,
-        user_id: Option<String>,
-        phone_number: String,
-        hash: String,
-        otp_sha256: Vec<u8>,
-        ttl_seconds: i32,
-        max_attempts: i32,
-        metadata: Value,
-    ) -> sqlx_data::Result<QueryResult>;
-
-    #[dml(file = "queries/sms/get_by_hash.sql", unchecked)]
-    async fn get_sms_by_hash_db(
-        &self,
-        hash: String,
-    ) -> sqlx_data::Result<Option<db::SmsMessageRow>>;
-
-    #[dml(file = "queries/sms/mark_confirmed.sql", unchecked)]
-    async fn mark_sms_confirmed_db(&self, hash: String) -> sqlx_data::Result<QueryResult>;
-
-    #[dml(file = "queries/sms/list_retryable.sql", unchecked)]
-    async fn list_retryable_sms_db(&self, limit: i64) -> sqlx_data::Result<Vec<db::SmsMessageRow>>;
-
-    #[dml(file = "queries/sms/mark_sent.sql", unchecked)]
-    async fn mark_sms_sent_db(
-        &self,
-        id: String,
-        sns_message_id: Option<String>,
-    ) -> sqlx_data::Result<QueryResult>;
-
-    #[dml(file = "queries/sms/mark_failed.sql", unchecked)]
-    async fn mark_sms_failed_db(
-        &self,
-        id: String,
-        status: String,
-        error: String,
-        next_retry_at: Option<DateTime<Utc>>,
-    ) -> sqlx_data::Result<QueryResult>;
-
-    #[dml(file = "queries/sms/mark_gave_up.sql", unchecked)]
-    async fn mark_sms_gave_up_db(
-        &self,
-        id: String,
-        reason: String,
-    ) -> sqlx_data::Result<QueryResult>;
-}
 
 #[derive(Clone)]
 pub struct SmsRepository {
     pub(crate) pool: PgPool,
+    pub(crate) diesel_pool: Pool<AsyncPgConnection>,
 }
 
-impl PgSmsRepo for SmsRepository {
-    fn get_pool(&self) -> &sqlx_data::Pool {
-        &self.pool
+impl SmsRepository {
+    pub fn new(pool: PgPool, diesel_pool: Pool<AsyncPgConnection>) -> Self {
+        Self { pool, diesel_pool }
+    }
+
+    async fn get_conn(
+        &self,
+    ) -> RepoResult<diesel_async::pooled_connection::deadpool::Object<AsyncPgConnection>> {
+        self.diesel_pool
+            .get()
+            .await
+            .map_err(|e| backend_core::Error::DieselPool(e.to_string()))
     }
 }
 
 impl SmsRepo for SmsRepository {
     async fn queue_sms(&self, sms: SmsPendingInsert) -> RepoResult<SmsQueued> {
-        let hash = backend_id::sms_hash()?;
-        self.queue_sms_db(
-            hash.clone(),
-            sms.realm,
-            sms.client_id,
-            sms.user_id,
-            sms.phone_number,
-            hash.clone(),
-            sms.otp_sha256,
-            sms.ttl_seconds,
-            sms.max_attempts,
-            sms.metadata,
-        )
-        .await?;
+        use backend_model::schema::sms_messages::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+        let hash_val = backend_id::sms_hash()?;
+        let id_val = backend_id::sms_id()?;
+
+        let new_sms = db::SmsMessageRow {
+            id: id_val,
+            realm: sms.realm,
+            client_id: sms.client_id,
+            user_id: sms.user_id,
+            phone_number: sms.phone_number,
+            hash: hash_val.clone(),
+            otp_sha256: sms.otp_sha256,
+            ttl_seconds: sms.ttl_seconds,
+            status: "PENDING".to_owned(),
+            attempt_count: 0,
+            max_attempts: sms.max_attempts,
+            next_retry_at: Some(Utc::now()),
+            last_error: None,
+            sns_message_id: None,
+            session_id: None,
+            trace_id: None,
+            metadata: Some(sms.metadata),
+            created_at: Utc::now(),
+            sent_at: None,
+            confirmed_at: None,
+        };
+
+        diesel::insert_into(sms_messages)
+            .values(&new_sms)
+            .execute(&mut conn)
+            .await
+            .map_err(backend_core::Error::from)?;
 
         Ok(SmsQueued {
-            hash,
+            hash: hash_val,
             ttl_seconds: sms.ttl_seconds,
             status: "PENDING".to_owned(),
         })
     }
 
-    async fn get_sms_by_hash(&self, hash: &str) -> RepoResult<Option<db::SmsMessageRow>> {
-        let row = self.get_sms_by_hash_db(hash.to_owned()).await?;
-        Ok(row)
+    async fn get_sms_by_hash(&self, hash_val: &str) -> RepoResult<Option<db::SmsMessageRow>> {
+        use backend_model::schema::sms_messages::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        sms_messages
+            .filter(hash.eq(hash_val))
+            .first::<db::SmsMessageRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)
     }
 
-    async fn mark_sms_confirmed(&self, hash: &str) -> RepoResult<()> {
-        self.mark_sms_confirmed_db(hash.to_owned()).await?;
-        Ok(())
+    async fn mark_sms_confirmed(&self, hash_val: &str) -> RepoResult<()> {
+        use backend_model::schema::sms_messages::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        diesel::update(sms_messages.filter(hash.eq(hash_val)))
+            .set(confirmed_at.eq(Utc::now()))
+            .execute(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
-    async fn list_retryable_sms(&self, limit: i64) -> RepoResult<Vec<db::SmsMessageRow>> {
-        let rows = self.list_retryable_sms_db(limit).await?;
-        Ok(rows)
+    async fn list_retryable_sms(&self, limit_val: i64) -> RepoResult<Vec<db::SmsMessageRow>> {
+        use backend_model::schema::sms_messages::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        sms_messages
+            .filter(status.eq_any(vec!["PENDING", "FAILED"]))
+            .filter(next_retry_at.le(Utc::now()).or(next_retry_at.is_null()))
+            .filter(attempt_count.lt(max_attempts))
+            .order(created_at.asc())
+            .limit(limit_val)
+            .load::<db::SmsMessageRow>(&mut conn)
+            .await
+            .map_err(Into::into)
     }
 
-    async fn mark_sms_sent(&self, id: &str, sns_message_id: Option<String>) -> RepoResult<()> {
-        self.mark_sms_sent_db(id.to_owned(), sns_message_id).await?;
-        Ok(())
+    async fn mark_sms_sent(
+        &self,
+        id_val: &str,
+        sns_message_id_val: Option<String>,
+    ) -> RepoResult<()> {
+        use backend_model::schema::sms_messages::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        diesel::update(sms_messages.filter(id.eq(id_val)))
+            .set((
+                status.eq("SENT"),
+                sns_message_id.eq(sns_message_id_val),
+                sent_at.eq(Utc::now()),
+                attempt_count.eq(attempt_count + 1),
+            ))
+            .execute(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     async fn mark_sms_failed(&self, update: SmsPublishFailure) -> RepoResult<()> {
-        let status = if update.gave_up {
-            "GAVE_UP".to_owned()
-        } else {
-            "FAILED".to_owned()
-        };
+        use backend_model::schema::sms_messages::dsl::*;
 
-        self.mark_sms_failed_db(update.id, status, update.error, update.next_retry_at)
-            .await?;
-        Ok(())
+        let mut conn = self.get_conn().await?;
+
+        let status_val = if update.gave_up { "GAVE_UP" } else { "FAILED" };
+
+        diesel::update(sms_messages.filter(id.eq(update.id)))
+            .set((
+                status.eq(status_val),
+                last_error.eq(update.error),
+                next_retry_at.eq(update.next_retry_at),
+                attempt_count.eq(attempt_count + 1),
+            ))
+            .execute(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
-    async fn mark_sms_gave_up(&self, id: &str, reason: &str) -> RepoResult<()> {
-        self.mark_sms_gave_up_db(id.to_owned(), reason.to_owned())
-            .await?;
-        Ok(())
-    }
-}
+    async fn mark_sms_gave_up(&self, id_val: &str, reason: &str) -> RepoResult<()> {
+        use backend_model::schema::sms_messages::dsl::*;
 
-impl SmsRepository {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        let mut conn = self.get_conn().await?;
+
+        diesel::update(sms_messages.filter(id.eq(id_val)))
+            .set((status.eq("GAVE_UP"), last_error.eq(reason)))
+            .execute(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
     }
 }

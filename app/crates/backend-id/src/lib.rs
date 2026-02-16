@@ -21,6 +21,10 @@ pub fn sms_hash() -> Result<String> {
     prefixed("sms")
 }
 
+pub fn sms_id() -> Result<String> {
+    prefixed("sms")
+}
+
 pub fn kyc_document_id() -> Result<String> {
     prefixed("kyd")
 }

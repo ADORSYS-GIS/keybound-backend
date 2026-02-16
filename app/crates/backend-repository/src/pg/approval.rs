@@ -1,9 +1,9 @@
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
+use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::AsyncPgConnection;
 use sqlx::PgPool;
 
 #[derive(Clone)]
@@ -79,9 +79,9 @@ impl ApprovalRepo for ApprovalRepository {
         // It seems the table name in create.sql was "approvals" (plural) while migration says "approval" (singular).
         // And schema.rs says "approval".
         // Also some columns are missing in migration/schema.rs: realm, client_id, device_id (it's new_device_id), jkt (it's new_device_jkt), reason, context, idempotency_key.
-        
+
         // I must follow schema.rs and migration.
-        
+
         let new_approval = db::ApprovalRow {
             request_id: request_id_val.clone(),
             user_id: req.user_id.clone(),
@@ -93,7 +93,9 @@ impl ApprovalRepo for ApprovalRepository {
             new_device_app_version: req.new_device.app_version.clone(),
             status: "PENDING".to_string(),
             created_at: chrono::Utc::now(),
-            expires_at: req.expires_at.unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::minutes(15)),
+            expires_at: req
+                .expires_at
+                .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::minutes(15)),
             decided_at: None,
             decided_by_device_id: None,
             message: None,

@@ -57,15 +57,29 @@ pub struct ApprovalRow {
 }
 
 #[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::sms_sent)]
-#[diesel(primary_key(hash))]
+#[diesel(table_name = crate::schema::sms_messages)]
+#[diesel(primary_key(id))]
 pub struct SmsMessageRow {
-    pub hash: String,
+    pub id: String,
+    pub realm: String,
+    pub client_id: String,
+    pub user_id: Option<String>,
     pub phone_number: String,
-    pub otp_hash: String,
+    pub hash: String,
+    pub otp_sha256: Vec<u8>,
+    pub ttl_seconds: i32,
+    pub status: String,
+    pub attempt_count: i32,
+    pub max_attempts: i32,
+    pub next_retry_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub sns_message_id: Option<String>,
+    pub session_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub metadata: Option<Value>,
     pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub confirmed: bool,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub confirmed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
