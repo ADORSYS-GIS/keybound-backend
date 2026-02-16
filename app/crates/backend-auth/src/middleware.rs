@@ -17,6 +17,7 @@ use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::OnceCell;
 use tower::{Layer, Service};
+use tracing::{error, info};
 
 pub async fn require_kc_signature(
     cfg: &KcAuth,
@@ -199,21 +200,40 @@ where
 fn validate_token(token: &str, jwks: &Jwks) -> bool {
     let header = match decode_header(token) {
         Ok(h) => h,
-        Err(_) => return false,
+        Err(e) => {
+            error!("decode header error: {:?}", e);
+            return false
+        },
     };
 
     let kid = match header.kid {
         Some(k) => k,
-        None => return false,
+        None => {
+            error!("decode header error: kid not found");
+            return false
+        },
     };
 
     let jwk = match jwks.keys.get(&kid) {
         Some(j) => j,
-        None => return false,
+        None => {
+            error!("decode header error: jwk");
+            return false
+        },
     };
 
-    let validation = default_jwt_validation();
-    decode::<JwtClaims>(token, &jwk.decoding_key, &validation).is_ok()
+    let mut validation = Validation::new(header.alg);
+    validation.validate_aud = false;
+
+    let result =
+        decode::<JwtClaims>(token, &jwk.decoding_key, &validation);
+
+    if let Err(e) = result {
+        error!("decode header error: {e}");
+        false
+    } else {
+        true
+    }
 }
 
 #[derive(Clone)]
@@ -273,12 +293,6 @@ where
 struct JwtClaims {
     #[allow(dead_code)]
     sub: Option<String>,
-}
-
-fn default_jwt_validation() -> Validation {
-    let mut validation = Validation::new(Algorithm::RS256);
-    validation.algorithms = vec![Algorithm::RS256];
-    validation
 }
 
 fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
