@@ -4,23 +4,21 @@ use diesel::prelude::*;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
-use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct DeviceRepository {
-    pub(crate) pool: PgPool,
-    pub(crate) diesel_pool: Pool<AsyncPgConnection>,
+    pub(crate) pool: Pool<AsyncPgConnection>,
 }
 
 impl DeviceRepository {
-    pub fn new(pool: PgPool, diesel_pool: Pool<AsyncPgConnection>) -> Self {
-        Self { pool, diesel_pool }
+    pub fn new(pool: Pool<AsyncPgConnection>) -> Self {
+        Self { pool }
     }
 
     async fn get_conn(
         &self,
     ) -> RepoResult<diesel_async::pooled_connection::deadpool::Object<AsyncPgConnection>> {
-        self.diesel_pool
+        self.pool
             .get()
             .await
             .map_err(|e| backend_core::Error::DieselPool(e.to_string()))

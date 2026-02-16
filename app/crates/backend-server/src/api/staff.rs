@@ -55,7 +55,7 @@ impl KycReview<Error> for BackendApi {
             .filter(|row| {
                 let status_matches = status_filter
                     .as_ref()
-                    .is_none_or(|status| row.kyc_status.eq_ignore_ascii_case(status));
+                    .is_none_or(|status| row.status.eq_ignore_ascii_case(status));
 
                 let search_matches = search_filter.as_ref().is_none_or(|search| {
                     row.first_name
@@ -185,7 +185,7 @@ impl KycReview<Error> for BackendApi {
             })
             .collect::<Vec<_>>();
 
-        let mut response = KycSubmissionDetailResponseDto::from_profile(profile);
+        let mut response = KycSubmissionDetailResponseDto::from_submission(profile);
         response.documents = Some(document_items);
         response.page = Some(page);
         response.page_size = Some(limit);

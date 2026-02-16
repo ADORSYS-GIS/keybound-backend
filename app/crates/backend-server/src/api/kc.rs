@@ -25,6 +25,7 @@ use gen_oas_server_kc::apis::users::{
 use gen_oas_server_kc::models;
 use headers::Host;
 use http::Method;
+use sha2::{Digest, Sha256};
 
 #[backend_core::async_trait]
 impl Approvals<Error> for BackendApi {
@@ -192,7 +193,7 @@ impl Devices<Error> for BackendApi {
 
         self.state
             .device
-            .update_device_status(&device.id.to_string(), "revoked")
+            .update_device_status(&device.device_id, "revoked")
             .await
             .map(|row| {
                 let dto = DeviceRecordDto::from(row);
@@ -407,7 +408,6 @@ impl Enrollment<Error> for BackendApi {
 
         // Let's check if OTP matches.
         // Note: otp_sha256 is in the DB.
-        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(req.otp.as_bytes());
         let hash = hasher.finalize();
@@ -587,7 +587,6 @@ impl Enrollment<Error> for BackendApi {
     ) -> Result<SendSmsResponse, Error> {
         let req = SmsSendRequest::from(body.clone());
 
-        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(req.otp.as_bytes());
         let otp_sha256 = hasher.finalize().to_vec();

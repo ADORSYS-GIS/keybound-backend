@@ -3,12 +3,13 @@ pub(crate) mod sms_retry;
 pub(crate) mod state;
 pub(crate) mod worker;
 
-use axum::Router;
 use axum::body::Body;
 use axum::http::Request as HttpRequest;
 use axum::response::Response;
+use axum::Router;
 use backend_auth::{jwks_auth_layer, kc_signature_layer};
 use backend_core::{Config, Result};
+use backend_migrate::connect_postgres_and_migrate;
 use hyper::StatusCode;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -18,10 +19,11 @@ use tracing::info;
 
 pub async fn serve(core_config: &Config) -> Result<()> {
     let listen_addr = core_config.api_listen_addr()?;
-    let state = Arc::new(state::AppState::from_config(core_config).await?);
+    let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
+    let state = Arc::new(state::AppState::from_config(core_config, pool).await?);
 
     let api = api::BackendApi::new(state.clone());
-    let app = build_router(&api, &state.config);
+    let app = build_router(api, &state.config);
 
     info!("Listening on {}", listen_addr);
 
@@ -55,11 +57,12 @@ pub async fn serve(core_config: &Config) -> Result<()> {
 }
 
 pub async fn run_worker(core_config: &Config) -> Result<()> {
-    let state = Arc::new(state::AppState::from_config(core_config).await?);
+    let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
+    let state = Arc::new(state::AppState::from_config(core_config, pool).await?);
     worker::run(state).await
 }
 
-fn build_router(api: &api::BackendApi, config: &Config) -> Router {
+fn build_router(api: api::BackendApi, config: &Config) -> Router {
     // Mount sub-routers onto a fresh root router
     let mut router = Router::new();
 

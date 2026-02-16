@@ -1,7 +1,12 @@
 use backend_core::{Error, Result};
-use sqlx::postgres::PgPoolOptions;
+use diesel::pg::PgConnection;
+use diesel::Connection;
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::AsyncPgConnection;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/");
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
 #[derive(Clone, Copy, Debug)]
 enum DbKind {
@@ -30,28 +35,41 @@ impl DbFactory {
         self
     }
 
-    pub async fn build_postgres(self) -> Result<sqlx::PgPool> {
+    pub async fn build_postgres(self) -> Result<Pool<AsyncPgConnection>> {
         if !matches!(self.kind, DbKind::Postgres) {
             return Err(Error::Database(
                 "DbFactory::build_postgres called on non-postgres factory".to_string(),
             ));
         }
 
-        let pool = PgPoolOptions::new()
-            .max_connections(self.max_connections)
-            .connect(&self.url)
-            .await
+        // Run migrations synchronously
+        let url = self.url.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let mut conn = PgConnection::establish(&url)
+                .map_err(|e| Error::Database(format!("Failed to connect for migrations: {}", e)))?;
+
+            conn.run_pending_migrations(MIGRATIONS)
+                .map_err(|e| Error::Database(format!("Migration failed: {}", e)))?;
+
+            Ok::<_, Error>(())
+        })
+        .await
+        .map_err(|e| Error::Database(format!("Migration task failed: {}", e)))??;
+
+        // Create async pool
+        let config = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(self.url);
+        let pool = Pool::builder(config)
+            .max_size(self.max_connections as usize)
+            .build()
             .map_err(|e| Error::Database(e.to_string()))?;
 
-        MIGRATOR
-            .run(&pool)
-            .await
-            .map_err(|e| Error::Database(e.to_string()))?;
         Ok(pool)
     }
 }
 
 /// Connect using PgPool and run the provided migrator.
-pub async fn connect_postgres_and_migrate(database_url: &str) -> Result<sqlx::PgPool> {
+pub async fn connect_postgres_and_migrate(
+    database_url: &str,
+) -> Result<Pool<AsyncPgConnection>> {
     DbFactory::postgres(database_url).build_postgres().await
 }

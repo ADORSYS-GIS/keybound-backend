@@ -2,7 +2,8 @@ use backend_core::Config;
 use backend_repository::{
     ApprovalRepository, DeviceRepository, KycRepository, SmsRepository, UserRepository,
 };
-use sqlx::postgres::PgPoolOptions;
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::AsyncPgConnection;
 use tracing::info;
 
 #[derive(Clone)]
@@ -34,12 +35,11 @@ impl std::fmt::Debug for AppState {
 }
 
 impl AppState {
-    pub async fn from_config(cfg: &Config) -> backend_core::Result<Self> {
+    pub async fn from_config(
+        cfg: &Config,
+        pool: Pool<AsyncPgConnection>,
+    ) -> backend_core::Result<Self> {
         info!("initializing application state and repositories");
-        let db = PgPoolOptions::new()
-            .max_connections(cfg.database_pool_size())
-            .connect(&cfg.database.url)
-            .await?;
 
         let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .load()
@@ -71,22 +71,11 @@ impl AppState {
             aws_sdk_sns::Client::from_conf(builder.build())
         };
 
-        // TODO: Initialize diesel_pool from config
-        let diesel_pool = {
-            let config = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
-                diesel_async::AsyncPgConnection,
-            >::new(&cfg.database.url);
-            diesel_async::pooled_connection::deadpool::Pool::builder(config)
-                .max_size(cfg.database_pool_size() as usize)
-                .build()
-                .map_err(|e| backend_core::Error::DieselPool(e.to_string()))?
-        };
-
-        let kyc = KycRepository::new(db.clone());
-        let user = UserRepository::new(db.clone(), diesel_pool.clone());
-        let device = DeviceRepository::new(db.clone());
-        let approval = ApprovalRepository::new(db.clone(), diesel_pool.clone());
-        let sms = SmsRepository::new(db);
+        let kyc = KycRepository::new(pool.clone());
+        let user = UserRepository::new(pool.clone());
+        let device = DeviceRepository::new(pool.clone());
+        let approval = ApprovalRepository::new(pool.clone());
+        let sms = SmsRepository::new(pool.clone());
 
         Ok(Self {
             kyc,
