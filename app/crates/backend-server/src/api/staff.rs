@@ -9,6 +9,7 @@ use backend_model::staff::{
 use backend_repository::KycRepo;
 use gen_oas_server_staff::apis::kyc_review::{
     ApiKycStaffSubmissionsGetResponse, ApiKycStaffSubmissionsUserIdApprovePostResponse,
+    ApiKycStaffSubmissionsUserIdDocumentsDocumentIdDownloadUrlPostResponse,
     ApiKycStaffSubmissionsUserIdGetResponse, ApiKycStaffSubmissionsUserIdRejectPostResponse,
     ApiKycStaffSubmissionsUserIdRequestInfoPostResponse, KycReview,
 };
