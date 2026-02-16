@@ -20,3 +20,7 @@ runs:
     - name: Prime cargo registry cache
       shell: bash
       run: cargo fetch
+
+    - name: Generate code
+      shell: bash
+      run: just up-single generate-code
