@@ -85,7 +85,7 @@ Naming convention: `YYYYMMDDHHMMSS_description.sql`.
 Database indices and schema constraints must be defined within these migration files to ensure consistency across environments.
 
 **Development Workflow Note**:
-Migrations are compile-time checked and embedded using `sqlx::migrate!`. When adding a new `.sql` migration file, you **MUST** touch a Rust file in the `backend-migrate` crate (e.g., `touch app/crates/backend-migrate/src/migrate.rs`) to force Cargo to recompile the crate and include the new migration in the binary.
+Migrations are compile-time checked and embedded using `diesel_migrations::embed_migrations!`. When adding a new `.sql` migration file, you **MUST** touch a Rust file in the `backend-migrate` crate (e.g., `touch app/crates/backend-migrate/src/migrate.rs`) to force Cargo to recompile the crate and include the new migration in the binary.
 
 The `backend-migrate` crate provides a `DbFactory` for constructing database pools and running migrations:
 - `DbFactory::postgres(url)`: Creates a factory for Postgres.
@@ -126,8 +126,7 @@ The repository implementation is split into domain-specific modules under `src/p
 Before finalizing:
 1. `cargo check --workspace`
 2. No runtime use of `swagger` or generated `server::Service`
-3. No direct `sqlx::query*` or `sqlx-data` usage for migrated modules (currently `user`, `device`, `approval`).
-4. No manual edits under `crates/gen_*`
+3. No manual edits under `crates/gen_*`
 5. Auth and error tests pass:
    - `cargo test -p backend-core --features axum --test error_response`
    - `cargo test -p backend-auth --test jwt_auth_exclude_paths`
@@ -200,8 +199,7 @@ All backends:
 - **Concurrency Control**: Uses `If-Match` header with ETag (version number) to prevent lost updates.
 - **Implementation**:
     - **Handler**: `app/crates/backend-server/src/api/bff.rs` handles the request, checks the version, applies the patch, and calls the repository.
-    - **Repository**: `app/crates/backend-repository/src/pg/kyc.rs` executes the update.
-    - **SQL**: `app/crates/backend-repository/queries/kyc/patch_information.sql` performs the atomic update on the active `DRAFT` submission.
+    - **Repository**: `app/crates/backend-repository/src/pg/kyc.rs` executes the update using Diesel DSL.
 
 ### Background Worker for SMS Retries
 - **Description**: A background worker, powered by the `apalis` crate, handles the retrying of SMS messages.
