@@ -4,7 +4,7 @@ pub mod kyc;
 pub mod sms;
 pub mod user;
 
-pub use approval::{ApprovalRepository, PgApprovalRepo};
+pub use approval::ApprovalRepository;
 pub use device::{DeviceRepository, PgDeviceRepo};
 pub use kyc::{KycRepository, PgKycRepo};
 pub use sms::{PgSmsRepo, SmsRepository};

@@ -71,10 +71,21 @@ impl AppState {
             aws_sdk_sns::Client::from_conf(builder.build())
         };
 
+        // TODO: Initialize diesel_pool from config
+        let diesel_pool = {
+            let config = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+                diesel_async::AsyncPgConnection,
+            >::new(&cfg.database.url);
+            diesel_async::pooled_connection::deadpool::Pool::builder(config)
+                .max_size(cfg.database_pool_size() as usize)
+                .build()
+                .map_err(|e| backend_core::Error::DieselPool(e.to_string()))?
+        };
+
         let kyc = KycRepository::new(db.clone());
-        let user = UserRepository::new(db.clone());
+        let user = UserRepository::new(db.clone(), diesel_pool.clone());
         let device = DeviceRepository::new(db.clone());
-        let approval = ApprovalRepository::new(db.clone());
+        let approval = ApprovalRepository::new(db.clone(), diesel_pool.clone());
         let sms = SmsRepository::new(db);
 
         Ok(Self {
