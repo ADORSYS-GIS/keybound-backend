@@ -44,13 +44,6 @@ pub(crate) fn kc_error(code: &str, message: &str) -> gen_oas_server_kc::models::
     gen_oas_server_kc::models::Error::new(code.to_owned(), message.to_owned())
 }
 
-pub(crate) fn is_unique_violation(err: &Error) -> bool {
-    matches!(
-        err,
-        Error::SqlxError(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23505")
-    )
-}
-
 #[backend_core::async_trait]
 impl gen_oas_server_bff::apis::ErrorHandler<Error> for BackendApi {
     async fn handle_error(

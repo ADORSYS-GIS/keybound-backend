@@ -85,7 +85,7 @@ fn build_router(api: &api::BackendApi, config: &Config) -> Router {
     }
 
     // 404 fallback for unmatched routes
-    router = router.fallback_service(service_fn(|req| async {
+    router = router.fallback_service(service_fn(|_| async {
         let res = Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("Not Found"))

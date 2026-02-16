@@ -1,23 +1,9 @@
-use axum::body::Body;
-use backend_auth::{KcContext, ServiceContext};
 use backend_core::Config;
 use backend_repository::{
     ApprovalRepository, DeviceRepository, KycRepository, SmsRepository, UserRepository,
 };
-use gen_oas_server_bff::models::{KycCaseResponse, LimitsResponse};
-use http::{Request, Response, StatusCode};
-use lru::LruCache;
 use sqlx::postgres::PgPoolOptions;
-use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
-use tower::util::ServiceExt;
-use tracing::{debug, error, info};
-
-#[derive(Clone)]
-pub struct HttpCache {
-    pub kyc_status: Arc<Mutex<LruCache<String, KycCaseResponse>>>,
-    pub limits: Arc<Mutex<LruCache<String, LimitsResponse>>>,
-}
+use tracing::info;
 
 #[derive(Clone)]
 pub struct AppState {
