@@ -9,18 +9,18 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup just
-      uses: extractions/setup-just@v3
-
     - name: Install rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: ${{ inputs.rust-version }}
 
-    - name: Prime cargo registry cache
-      shell: bash
-      run: cargo fetch
+    - name: Setup just
+      uses: extractions/setup-just@v3
 
     - name: Generate code
       shell: bash
       run: just up-single generate-code
+
+    - name: Prime cargo registry cache
+      shell: bash
+      run: cargo fetch
