@@ -17,7 +17,7 @@ use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::OnceCell;
 use tower::{Layer, Service};
-use tracing::{error};
+use tracing::error;
 
 pub async fn require_kc_signature(
     cfg: &KcAuth,
@@ -202,31 +202,30 @@ fn validate_token(token: &str, jwks: &Jwks) -> bool {
         Ok(h) => h,
         Err(e) => {
             error!("decode header error: {:?}", e);
-            return false
-        },
+            return false;
+        }
     };
 
     let kid = match header.kid {
         Some(k) => k,
         None => {
             error!("decode header error: kid not found");
-            return false
-        },
+            return false;
+        }
     };
 
     let jwk = match jwks.keys.get(&kid) {
         Some(j) => j,
         None => {
             error!("decode header error: jwk");
-            return false
-        },
+            return false;
+        }
     };
 
     let mut validation = Validation::new(header.alg);
     validation.validate_aud = false;
 
-    let result =
-        decode::<JwtClaims>(token, &jwk.decoding_key, &validation);
+    let result = decode::<JwtClaims>(token, &jwk.decoding_key, &validation);
 
     if let Err(e) = result {
         error!("decode header error: {e}");

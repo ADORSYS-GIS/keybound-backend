@@ -1,1 +1,1 @@
-SELECT kyc_tier FROM kyc_profiles WHERE external_id = $1
+SELECT current_tier FROM kyc_case WHERE user_id = $1

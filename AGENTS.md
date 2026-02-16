@@ -84,6 +84,9 @@ Naming convention: `YYYYMMDDHHMMSS_description.sql`.
 
 Database indices and schema constraints must be defined within these migration files to ensure consistency across environments.
 
+**Development Workflow Note**:
+Migrations are compile-time checked and embedded using `sqlx::migrate!`. When adding a new `.sql` migration file, you **MUST** touch a Rust file in the `backend-migrate` crate (e.g., `touch app/crates/backend-migrate/src/migrate.rs`) to force Cargo to recompile the crate and include the new migration in the binary.
+
 The `backend-migrate` crate provides a `DbFactory` for constructing database pools and running migrations:
 - `DbFactory::postgres(url)`: Creates a factory for Postgres.
 - `connect_postgres_and_migrate(url)`: Helper to connect and run migrations in one step.
@@ -169,6 +172,11 @@ All backends:
 
 ## Implemented Features
 
+### KYC Case/Submission Model
+- **Architecture**: Uses a relational model with `kyc_case` (lifecycle) and `kyc_submission` (versioned data).
+- **Data Storage**: Identity data (Name, DOB, etc.) is captured in each `kyc_submission` to maintain a historical snapshot.
+- **Status Tracking**: `kyc_case` tracks the current tier and active submission, while `kyc_submission` tracks the state of individual attempts.
+
 ### KYC Profile Patch (Optimistic Locking)
 - **Endpoint**: `PATCH /api/registration/kyc/profile`
 - **Description**: Allows partial updates to the KYC profile using JSON Patch (RFC 6902).
@@ -176,7 +184,7 @@ All backends:
 - **Implementation**:
     - **Handler**: `app/crates/backend-server/src/api/bff.rs` handles the request, checks the version, applies the patch, and calls the repository.
     - **Repository**: `app/crates/backend-repository/src/pg/kyc.rs` executes the update.
-    - **SQL**: `app/crates/backend-repository/queries/kyc/patch_information.sql` performs the atomic update with version checking.
+    - **SQL**: `app/crates/backend-repository/queries/kyc/patch_information.sql` performs the atomic update on the active `DRAFT` submission.
 
 ### Background Worker for SMS Retries
 - **Description**: A background worker, powered by the `apalis` crate, handles the retrying of SMS messages.

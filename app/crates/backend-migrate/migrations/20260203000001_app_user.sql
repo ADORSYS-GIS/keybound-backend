@@ -9,5 +9,6 @@ CREATE TABLE app_user (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE INDEX idx_user_phone ON app_user(phone_number);
 CREATE INDEX idx_user_email ON app_user(email);
 CREATE INDEX idx_user_fineract ON app_user(fineract_customer_id);

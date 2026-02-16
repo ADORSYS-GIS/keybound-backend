@@ -49,3 +49,6 @@ ALTER TABLE kyc_case
   ADD CONSTRAINT fk_active_submission
   FOREIGN KEY (active_submission_id)
   REFERENCES kyc_submission(id);
+
+CREATE INDEX idx_kyc_case_active_submission ON kyc_case(active_submission_id);
+CREATE INDEX idx_kyc_submission_status ON kyc_submission(status);

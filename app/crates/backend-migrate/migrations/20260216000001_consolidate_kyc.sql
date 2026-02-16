@@ -9,7 +9,3 @@ ALTER TABLE kyc_submission
   ADD COLUMN nationality varchar(128),
   ADD COLUMN rejection_reason text,
   ADD COLUMN review_notes text;
-
--- Drop the redundant table and type
-DROP TABLE IF EXISTS kyc_profiles;
-DROP TYPE IF EXISTS kyc_status;
