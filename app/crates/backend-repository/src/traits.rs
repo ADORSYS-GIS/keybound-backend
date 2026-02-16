@@ -64,10 +64,7 @@ pub trait KycRepo: Send + Sync {
     fn list_kyc_documents(
         &self,
         external_id: String,
-        params: impl sqlx_data::IntoParams + Send,
-    ) -> impl std::future::Future<
-        Output = RepoResult<sqlx_data::Serial<backend_model::db::KycDocumentRow>>,
-    > + Send;
+    ) -> impl std::future::Future<Output = RepoResult<Vec<backend_model::db::KycDocumentRow>>> + Send;
     fn get_kyc_document(
         &self,
         external_id: &str,
@@ -79,10 +76,7 @@ pub trait KycRepo: Send + Sync {
     ) -> impl std::future::Future<Output = RepoResult<Option<i32>>> + Send;
     fn list_kyc_submissions(
         &self,
-        params: impl sqlx_data::IntoParams + Send,
-    ) -> impl std::future::Future<
-        Output = RepoResult<sqlx_data::Serial<backend_model::db::KycSubmissionRow>>,
-    > + Send;
+    ) -> impl std::future::Future<Output = RepoResult<Vec<backend_model::db::KycSubmissionRow>>> + Send;
     fn get_kyc_submission(
         &self,
         external_id: &str,

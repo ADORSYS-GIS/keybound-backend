@@ -57,9 +57,6 @@ pub enum Error {
     #[error("Database error: {0}")]
     Database(String),
 
-    #[error("SQLx error: {0}")]
-    SqlxError(#[from] sqlx::Error),
-
     #[error("Diesel error: {0}")]
     Diesel(#[from] diesel::result::Error),
 
@@ -68,9 +65,6 @@ pub enum Error {
 
     #[error("Diesel pool error: {0}")]
     DieselPool(String),
-
-    #[error("SQLx-Data parser error: {0}")]
-    SqlxDataParser(#[from] sqlx_data_parser::ParserError),
 
     #[error("S3 presign config error: {0}")]
     AwsS3PresignConfig(#[from] aws_sdk_s3::presigning::PresigningConfigError),
@@ -175,12 +169,6 @@ impl Error {
                 message: format!("Database operation failed: {t}"),
                 context: None,
             },
-            Self::SqlxError(t) => ErrorMeta {
-                error_key: "DATABASE_ERROR",
-                status_code: 500,
-                message: format!("Database operation failed: {t}"),
-                context: None,
-            },
             Self::Diesel(e) => ErrorMeta {
                 error_key: "DATABASE_ERROR",
                 status_code: 500,
@@ -197,12 +185,6 @@ impl Error {
                 error_key: "DATABASE_ERROR",
                 status_code: 500,
                 message: format!("Database pool error: {e}"),
-                context: None,
-            },
-            Self::SqlxDataParser(e) => ErrorMeta {
-                error_key: "DATABASE_ERROR",
-                status_code: 500,
-                message: format!("Database operation failed: {e}"),
                 context: None,
             },
             Self::S3(e) => ErrorMeta {

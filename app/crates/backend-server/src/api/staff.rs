@@ -17,7 +17,6 @@ use gen_oas_server_staff::apis::kyc_review::{
 use gen_oas_server_staff::models;
 use headers::Host;
 use http::Method;
-use sqlx_data::ParamsBuilder;
 use tracing::{info, warn};
 
 #[backend_core::async_trait]
@@ -37,7 +36,7 @@ impl KycReview<Error> for BackendApi {
         let rows = self
             .state
             .kyc
-            .list_kyc_submissions(ParamsBuilder::default())
+            .list_kyc_submissions()
             .await?;
 
         let status_filter = query_params
@@ -167,15 +166,14 @@ impl KycReview<Error> for BackendApi {
         let documents = self
             .state
             .kyc
-            .list_kyc_documents(path_params.user_id.clone(), ParamsBuilder::default())
+            .list_kyc_documents(path_params.user_id.clone())
             .await?;
 
-        let total_documents = i32::try_from(documents.data.len()).unwrap_or(i32::MAX);
+        let total_documents = i32::try_from(documents.len()).unwrap_or(i32::MAX);
         let start = usize::try_from((page - 1) * limit).unwrap_or(0);
         let end = start.saturating_add(usize::try_from(limit).unwrap_or(0));
 
         let document_items = documents
-            .data
             .into_iter()
             .skip(start)
             .take(end.saturating_sub(start))

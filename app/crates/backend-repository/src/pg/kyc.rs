@@ -142,8 +142,7 @@ impl KycRepo for KycRepository {
     async fn list_kyc_documents(
         &self,
         external_id_val: String,
-        _params: impl sqlx_data::IntoParams + Send,
-    ) -> RepoResult<sqlx_data::Serial<db::KycDocumentRow>> {
+    ) -> RepoResult<Vec<db::KycDocumentRow>> {
         use backend_model::schema::{kyc_case, kyc_document, kyc_submission};
 
         let mut conn = self.get_conn().await?;
@@ -159,14 +158,7 @@ impl KycRepo for KycRepository {
             .await
             .map_err(|e| backend_core::Error::Diesel(e))?;
 
-        let total = rows.len() as i64;
-        Ok(sqlx_data::Serial {
-            data: rows,
-            page: 1,
-            size: total as u32,
-            total_items: total,
-            total_pages: 1,
-        })
+        Ok(rows)
     }
 
     async fn get_kyc_document(
@@ -206,10 +198,7 @@ impl KycRepo for KycRepository {
             .map_err(|e| backend_core::Error::Diesel(e))
     }
 
-    async fn list_kyc_submissions(
-        &self,
-        _params: impl sqlx_data::IntoParams + Send,
-    ) -> RepoResult<sqlx_data::Serial<db::KycSubmissionRow>> {
+    async fn list_kyc_submissions(&self) -> RepoResult<Vec<db::KycSubmissionRow>> {
         use backend_model::schema::kyc_submission;
 
         let mut conn = self.get_conn().await?;
@@ -220,14 +209,7 @@ impl KycRepo for KycRepository {
             .await
             .map_err(|e| backend_core::Error::Diesel(e))?;
 
-        let total = rows.len() as i64;
-        Ok(sqlx_data::Serial {
-            data: rows,
-            page: 1,
-            size: total as u32,
-            total_items: total,
-            total_pages: 1,
-        })
+        Ok(rows)
     }
 
     async fn get_kyc_submission(

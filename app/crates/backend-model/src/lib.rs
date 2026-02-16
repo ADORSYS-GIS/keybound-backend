@@ -7,4 +7,3 @@ pub mod schema;
 
 pub use chrono;
 pub use serde_json;
-pub use sqlx;

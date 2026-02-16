@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use serde_json::Value;
-use sqlx::FromRow;
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::app_user)]
 #[diesel(primary_key(user_id))]
 pub struct UserRow {
@@ -22,7 +21,7 @@ pub struct UserRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::device)]
 #[diesel(primary_key(device_id))]
 pub struct DeviceRow {
@@ -36,7 +35,7 @@ pub struct DeviceRow {
     pub last_seen_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::approval)]
 #[diesel(primary_key(request_id))]
 pub struct ApprovalRow {
@@ -56,7 +55,7 @@ pub struct ApprovalRow {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::sms_messages)]
 #[diesel(primary_key(id))]
 pub struct SmsMessageRow {
@@ -82,7 +81,7 @@ pub struct SmsMessageRow {
     pub confirmed_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::kyc_case)]
 pub struct KycCaseRow {
     pub id: String,
@@ -94,7 +93,7 @@ pub struct KycCaseRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::kyc_submission)]
 pub struct KycSubmissionRow {
     pub id: String,
@@ -119,7 +118,7 @@ pub struct KycSubmissionRow {
     pub review_notes: Option<String>,
 }
 
-#[derive(Debug, Clone, FromRow, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::kyc_document)]
 pub struct KycDocumentRow {
     pub id: String,
