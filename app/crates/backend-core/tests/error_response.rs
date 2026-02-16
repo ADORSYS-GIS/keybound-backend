@@ -22,7 +22,7 @@ fn database_error_maps_to_database_error_meta() {
 
     assert_eq!(meta.error_key, "DATABASE_ERROR");
     assert_eq!(meta.status_code, 500);
-    assert_eq!(meta.message, "Database operation failed");
+    assert_eq!(meta.message, "Database operation failed: db down");
     assert!(meta.context.is_none());
 }
 

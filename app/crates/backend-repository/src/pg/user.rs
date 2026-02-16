@@ -1,6 +1,6 @@
 use crate::traits::*;
 use backend_model::{db, kc as kc_map};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sqlx::PgPool;
 use sqlx_data::{dml, repo, QueryResult};
 
@@ -182,7 +182,7 @@ impl UserRepo for UserRepository {
         }
 
         let user_id = backend_id::user_id()?;
-        let attributes_json = json!({ "phone_number": phone });
+        let attributes_json = serde_json::json!({ "phone_number": phone });
         let user = self
             .create_user_by_phone_db(user_id, realm.to_owned(), phone.to_owned(), attributes_json)
             .await?;
