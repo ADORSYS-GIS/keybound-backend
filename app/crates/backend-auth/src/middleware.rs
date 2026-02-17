@@ -40,7 +40,11 @@ pub async fn require_kc_signature(
     }
 
     let method = req.method().as_str().to_uppercase();
-    let path = req.uri().path().to_owned();
+    let path = req
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|uri| uri.0.path().to_owned())
+        .unwrap_or_else(|| req.uri().path().to_owned());
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, cfg.max_body_bytes).await {
         Ok(value) => value,

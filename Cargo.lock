@@ -832,6 +832,7 @@ dependencies = [
  "backend-otlp",
  "backend-server",
  "clap",
+ "diesel",
  "mimalloc",
  "tokio",
 ]

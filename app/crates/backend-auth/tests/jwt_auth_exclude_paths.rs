@@ -244,6 +244,69 @@ async fn kc_signature_layer_rejects_requests_without_headers() {
 }
 
 #[tokio::test]
+async fn kc_signature_handles_url_encoded_paths() {
+    let cfg = build_kc_auth();
+    let timestamp = now_unix_seconds();
+    let body = "";
+    // The client sends encoded path.
+    // Note: In a real HTTP request, the path on the wire is encoded.
+    // When constructing Request::builder().uri("/v1/users/foo%20bar"), the URI stores it as is.
+    let path = "/v1/users/foo%20bar";
+    let signature = kc_signature(&cfg.signature_secret, timestamp, "GET", path, body);
+
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap();
+
+    request.headers_mut().insert(
+        "x-kc-timestamp",
+        HeaderValue::from_str(&timestamp.to_string()).unwrap(),
+    );
+    request
+        .headers_mut()
+        .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
+
+    let result = require_kc_signature(&cfg, request).await;
+
+    assert!(result.is_ok(), "Signature verification failed for encoded path");
+}
+
+#[tokio::test]
+async fn kc_signature_works_with_nested_router() {
+    let cfg = build_kc_auth();
+    let timestamp = now_unix_seconds();
+    let body = "";
+    let full_path = "/v1/nested/users";
+    let signature = kc_signature(&cfg.signature_secret, timestamp, "GET", full_path, body);
+
+    let router = Router::new()
+        .nest("/v1/nested", Router::new()
+            .route("/users", get(|| async { "ok" }))
+            .layer(kc_signature_layer(cfg.clone()))
+        );
+
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(full_path)
+        .body(Body::empty())
+        .unwrap();
+
+    request.headers_mut().insert(
+        "x-kc-timestamp",
+        HeaderValue::from_str(&timestamp.to_string()).unwrap(),
+    );
+    request
+        .headers_mut()
+        .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
+
+    let response = router.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK, "Signature verification failed for nested router");
+}
+
+#[tokio::test]
 async fn jwks_auth_layer_enforces_when_path_matches_base_path() {
     let jwks_url = "http://localhost/jwks".to_string();
     let base_paths = vec!["/api/registration".to_string()];

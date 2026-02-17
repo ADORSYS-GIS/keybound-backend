@@ -16,6 +16,12 @@ mimalloc.workspace = true
 tokio.workspace = true
 clap.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+diesel = { workspace = true, features = ["postgres", "chrono", "serde_json", "r2d2", "pq-src"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+diesel = { workspace = true, features = ["postgres", "chrono", "serde_json", "r2d2"] }
+
 [[bin]]
 path = "src/health/main.rs"
 name = "health"
