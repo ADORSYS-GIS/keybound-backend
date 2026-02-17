@@ -8,3 +8,5 @@ gen*
 */charts/*/charts
 
 *tmp*
+
+*.js

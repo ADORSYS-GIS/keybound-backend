@@ -128,7 +128,8 @@ impl DeviceRepo for DeviceRepository {
 
         let mut conn = self.get_conn().await?;
 
-        let public_jwk_str = serde_json::to_string(&req.public_jwk).unwrap_or_default();
+        let sorted_jwk: std::collections::BTreeMap<_, _> = req.public_jwk.iter().collect();
+        let public_jwk_str = serde_json::to_string(&sorted_jwk).unwrap_or_default();
 
         let new_device = db::DeviceRow {
             device_id: req.device_id.clone(),
