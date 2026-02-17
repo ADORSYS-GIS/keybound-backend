@@ -35,6 +35,8 @@ Tokenization/user-storage backend with three HTTP surfaces:
 7. Keep server config source in `backend-core::Config` only.
 8. Keep `backend-server` as library; app binary wires and starts it.
 9. `backend-core::Config` supports environment variable expansion in YAML files using `${VAR}` or `${VAR:-default}` syntax.
+10. Use `TEXT` instead of `VARCHAR` for all string columns in migrations.
+11. Use Argon2 for hashing sensitive data that needs verification (e.g., SMS OTPs).
 
 ## IDs (Mandatory)
 Always use prefix + CUID from `backend-id`:
@@ -127,6 +129,13 @@ The repository implementation is split into domain-specific modules under `src/p
 - `kyc.rs`: KYC profile and document management.
 - `sms.rs`: SMS queue and retry logic.
 - `user.rs`: User management and search.
+
+## SMS Provider Architecture
+- **Trait**: `SmsProvider` (in `app/crates/backend-server/src/sms_provider.rs`) defines the contract for sending SMS.
+- **Implementations**:
+  - `ConsoleSmsProvider`: Logs SMS content to stdout (dev/test only).
+  - `SnsSmsProvider`: Sends SMS via AWS SNS (production).
+- **Configuration**: The provider is selected at runtime based on the `sms.provider` config key (`console` or `sns`).
 
 ## Validation Checklist
 Before finalizing:
@@ -226,3 +235,10 @@ All backends:
     - **CLI**: The application can be started in `server`, `worker`, or `shared` mode via a CLI flag.
     - **Worker Logic**: The worker logic is located in `app/crates/backend-server/src/worker.rs`.
     - **Queueing**: SMS messages are enqueued into a Redis-backed queue for the worker to process.
+
+### SMS Provider Trait & Argon2 Hashing
+- **Description**: A pluggable SMS provider system supports both local development (console logging) and production (AWS SNS).
+- **Security**: SMS OTPs are generated as 6-digit codes and hashed using Argon2 before storage. Verification compares the hash of the input against the stored hash.
+- **Implementation**:
+    - **Trait**: `SmsProvider` in `app/crates/backend-server/src/sms_provider.rs`.
+    - **Hashing**: Uses the `argon2` crate for secure password hashing.
