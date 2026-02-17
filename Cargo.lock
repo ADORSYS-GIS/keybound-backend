@@ -914,14 +914,12 @@ dependencies = [
 name = "backend-model"
 version = "0.1.0"
 dependencies = [
- "backend-core",
  "chrono",
  "diesel",
  "gen_oas_server_bff",
  "gen_oas_server_kc",
  "gen_oas_server_staff",
  "o2o",
- "serde",
  "serde_json",
 ]
 
@@ -971,7 +969,6 @@ dependencies = [
  "backend-model",
  "backend-repository",
  "chrono",
- "deadpool-diesel",
  "diesel-async",
  "gen_oas_client_cuss_registration",
  "gen_oas_server_bff",

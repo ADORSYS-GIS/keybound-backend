@@ -7,10 +7,8 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
-backend-core.workspace = true
 chrono.workspace = true
 diesel.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 o2o.workspace = true
 gen_oas_server_bff.workspace = true
