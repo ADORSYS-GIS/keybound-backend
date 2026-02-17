@@ -17,9 +17,9 @@ repos:
         types: [rust]
         pass_filenames: false
     -   id: cargo-check-workspace
-        name: cargo check --workspace
+        name: cargo check --all
         description: Run cargo check across the workspace for static analysis.
-        entry: cargo check --workspace
+        entry: cargo check --all
         language: rust
         pass_filenames: false
     -   id: cargo-build-workspace

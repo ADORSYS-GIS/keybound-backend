@@ -320,9 +320,7 @@ impl KycRepo for KycRepository {
                         diesel::update(
                             kyc_case::table.filter(kyc_case::user_id.eq(external_id_val)),
                         )
-                        .set((
-                            kyc_case::updated_at.eq(Utc::now()),
-                        ))
+                        .set((kyc_case::updated_at.eq(Utc::now()),))
                         .execute(conn)
                         .await?;
 

@@ -1,10 +1,10 @@
 use backend_core::{Error, Result};
-use diesel::pg::PgConnection;
 use diesel::Connection;
-use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel::pg::PgConnection;
 use diesel_async::AsyncPgConnection;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
@@ -68,8 +68,6 @@ impl DbFactory {
 }
 
 /// Connect using PgPool and run the provided migrator.
-pub async fn connect_postgres_and_migrate(
-    database_url: &str,
-) -> Result<Pool<AsyncPgConnection>> {
+pub async fn connect_postgres_and_migrate(database_url: &str) -> Result<Pool<AsyncPgConnection>> {
     DbFactory::postgres(database_url).build_postgres().await
 }

@@ -2,8 +2,8 @@ use backend_core::Config;
 use backend_repository::{
     ApprovalRepository, DeviceRepository, KycRepository, SmsRepository, UserRepository,
 };
-use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::AsyncPgConnection;
+use diesel_async::pooled_connection::deadpool::Pool;
 use tracing::info;
 
 #[derive(Clone)]

@@ -175,7 +175,8 @@ pub fn load_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<Config> {
 }
 
 fn expand_env_vars(content: &str) -> Result<String> {
-    let re = Regex::new(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}").map_err(|e| Error::Server(e.to_string()))?;
+    let re =
+        Regex::new(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}").map_err(|e| Error::Server(e.to_string()))?;
     let mut result = content.to_string();
     let mut missing_vars = Vec::new();
 

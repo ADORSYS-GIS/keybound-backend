@@ -3,10 +3,10 @@ pub(crate) mod sms_retry;
 pub(crate) mod state;
 pub(crate) mod worker;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::Request as HttpRequest;
 use axum::response::Response;
-use axum::Router;
 use backend_auth::{jwks_auth_layer, kc_signature_layer};
 use backend_core::{Config, Result};
 use backend_migrate::connect_postgres_and_migrate;
