@@ -20,7 +20,7 @@ CREATE TYPE kyc_provisioning_status AS ENUM (
 
 CREATE TABLE kyc_case (
   id varchar(40) PRIMARY KEY,
-  user_id varchar(40) NOT NULL REFERENCES app_user(id),
+  user_id varchar(40) NOT NULL REFERENCES app_user(user_id),
   current_tier int NOT NULL DEFAULT 0,
   case_status kyc_case_status NOT NULL DEFAULT 'OPEN',
   active_submission_id varchar(40),
