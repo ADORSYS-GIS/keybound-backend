@@ -7,10 +7,32 @@ services:
       - serve
       - --config-path
       - config/dev.yaml
+      - --mode
+      - server
     volumes:
       - ../../config:/app/config/
     ports:
       - "3001:3000"
+    environment:
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  app-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/user-storage/Dockerfile
+    command:
+      - serve
+      - --config-path
+      - config/dev.yaml
+      - --mode
+      - worker
+    volumes:
+      - ../../config:/app/config/
     environment:
       REDIS_HOST: redis
     depends_on:

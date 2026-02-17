@@ -19,7 +19,7 @@ runtime:
   mode: shared
 
 redis:
-  url: "redis://127.0.0.1:6379"
+  url: "redis://redis:6379"
 
 s3:
   region: "us-east-1"
@@ -43,7 +43,7 @@ oauth2:
 kc:
   enabled: true
   base-path: /kc
-  signature_secret: "change-me"
+  signature_secret: "some-very-long-secret"
   max_clock_skew_seconds: 60
   max_body_bytes: 262144
 

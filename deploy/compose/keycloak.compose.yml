@@ -1,36 +1,35 @@
-x-keycloak-common-env: &keycloak-common-env
-  # Dev-only credentials. Do not reuse in production; wire secrets via a vault or env injection.
-  BACKEND_HTTP_BASE_PATH_e2e-testing: "http://172.17.0.1:3000"
-  BACKEND_HTTP_AUTH_USERNAME: "admin"
-  BACKEND_HTTP_AUTH_PASSWORD: "password"
-
-  NONCE_CACHE_TTL_e2e-testing: "60"
-
-  # Dev-only Keycloak bootstrap credentials. Replace for production.
-  KC_BOOTSTRAP_ADMIN_USERNAME: admin
-  KC_BOOTSTRAP_ADMIN_PASSWORD: password
-
-x-keycloak-common-extra: &keycloak-common-extra
-  entrypoint: /bin/sh
-  command:
-    - -c
-    - |
-      set -e
-      cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers
-      /opt/keycloak/bin/kc.sh start-dev --import-realm
-  volumes:
-    - ../../.docker/keycloak-config/:/opt/keycloak/data/import/:ro
-    - downloaded_data:/downloaded
-  depends_on:
-    download-core-tools:
-      condition: service_completed_successfully
-
 services:
-  keycloak-26:
+  keycloak:
     image: quay.io/keycloak/keycloak:26.5.2
     ports:
       - '127.0.0.1:9026:9026'
     environment:
-      <<: *keycloak-common-env
       KC_HTTP_PORT: 9026
-    <<: *keycloak-common-extra
+      # Dev-only credentials. Do not reuse in production; wire secrets via a vault or env injection.
+      BACKEND_HTTP_BASE_PATH_e2e-testing: "http://app:3000"
+      BACKEND_HTTP_SIGNATURE_SECRET_e2e-testing: "some-very-long-secret"
+      BACKEND_HTTP_SIGNATURE_VERSION_e2e-testing: "1"
+      BACKEND_HTTP_TELEMETRY_ENABLED_e2e-testing: "true"
+      BACKEND_HTTP_ACTOR_e2e-testing: "keycloak-u-e2e-testing"
+
+      BACKEND_HTTP_AUTH_USERNAME: "admin"
+      BACKEND_HTTP_AUTH_PASSWORD: "password"
+
+      NONCE_CACHE_TTL_e2e-testing: "60"
+
+      # Dev-only Keycloak bootstrap credentials. Replace for production.
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: password
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers
+        /opt/keycloak/bin/kc.sh start-dev --import-realm
+    volumes:
+      - ../../.docker/keycloak-config/:/opt/keycloak/data/import/:ro
+      - downloaded_data:/downloaded
+    depends_on:
+      download-core-tools:
+        condition: service_completed_successfully
