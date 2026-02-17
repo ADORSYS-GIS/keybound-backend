@@ -19,26 +19,26 @@ CREATE TYPE kyc_provisioning_status AS ENUM (
 );
 
 CREATE TABLE kyc_case (
-  id varchar(40) PRIMARY KEY,
-  user_id varchar(40) NOT NULL REFERENCES app_user(user_id),
+  id text PRIMARY KEY,
+  user_id text NOT NULL REFERENCES app_user(user_id),
   current_tier int NOT NULL DEFAULT 0,
   case_status kyc_case_status NOT NULL DEFAULT 'OPEN',
-  active_submission_id varchar(40),
+  active_submission_id text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(user_id)
 );
 
 CREATE TABLE kyc_submission (
-  id varchar(40) PRIMARY KEY,
-  kyc_case_id varchar(40) NOT NULL REFERENCES kyc_case(id) ON DELETE CASCADE,
+  id text PRIMARY KEY,
+  kyc_case_id text NOT NULL REFERENCES kyc_case(id) ON DELETE CASCADE,
   version int NOT NULL,
   status kyc_submission_status NOT NULL DEFAULT 'DRAFT',
   requested_tier int NOT NULL DEFAULT 1,
   decided_tier int,
   submitted_at timestamptz,
   decided_at timestamptz,
-  decided_by varchar(40),
+  decided_by text,
   provisioning_status kyc_provisioning_status NOT NULL DEFAULT 'NONE',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

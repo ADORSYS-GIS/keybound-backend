@@ -617,7 +617,7 @@ impl Enrollment<Error> for BackendApi {
         let req = SmsSendRequest::from(body.clone());
 
         let otp = "todo!();";
-        let otp_sha256 = "todo!();";
+        let otp_sha256 = "todo!();".as_bytes().to_vec();
 
         let insert = backend_repository::SmsPendingInsert {
             realm: req.realm,
