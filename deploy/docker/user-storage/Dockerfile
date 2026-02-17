@@ -1,9 +1,8 @@
 # syntax=docker/dockerfile:1.5
 
-FROM rust:1-bullseye as base
+FROM rust:1-alpine as base
 
 ENV CARGO_TERM_COLOR=always
-ENV OPENSSL_STATIC=1
 
 WORKDIR /app
 
@@ -11,16 +10,23 @@ FROM base as builder
 
 ARG TARGETARCH
 
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update && \
-  apt-get install -y --no-install-recommends \
-    musl-tools \
-    build-essential \
-    pkg-config \
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk add \
+    musl-dev \
+    build-base \
+    pkgconfig \
     perl \
-  && rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+    openssl-dev \
+    openssl-libs-static \
+    postgresql-dev \
+    git \
+    protobuf-dev \
+    zlib-static \
+    clang-dev \
+    llvm-dev \
+    cmake
+
+RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 
 RUN \
   # Mount workspace files and only the necessary crates
@@ -34,11 +40,9 @@ RUN \
   case "$TARGETARCH" in \
     "amd64") \
       export RUST_TARGET=x86_64-unknown-linux-musl; \
-      export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc; \
       ;; \
     "arm64") \
       export RUST_TARGET=aarch64-unknown-linux-musl; \
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc; \
       ;; \
     *) \
       echo "Unsupported TARGETARCH: $TARGETARCH"; \

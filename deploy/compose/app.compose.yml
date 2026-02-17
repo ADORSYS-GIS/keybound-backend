@@ -6,7 +6,7 @@ services:
     command:
       - serve
       - --config-path
-      - config/default.yaml
+      - config/dev.yaml
     volumes:
       - ../../config:/app/config/
     ports:
