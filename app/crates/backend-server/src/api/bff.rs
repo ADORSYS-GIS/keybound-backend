@@ -6,7 +6,7 @@ use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_model::db;
 use backend_repository::{
-    KycRepo, KycStepCreateInput, MagicChallengeCreateInput, OtpChallengeCreateInput,
+    KycStepCreateInput, MagicChallengeCreateInput, OtpChallengeCreateInput,
     UploadCompleteInput, UploadIntentCreateInput,
 };
 use chrono::{Duration, Utc};

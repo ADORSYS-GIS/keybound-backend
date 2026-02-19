@@ -1,4 +1,5 @@
 use crate::sms_provider::SmsProvider;
+use crate::worker::WorkerHttpClient;
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
 use backend_repository::{DeviceRepo, DeviceRepository, KycRepo, KycRepository, UserRepo, UserRepository};
@@ -18,6 +19,7 @@ pub struct AppState {
     pub config: Config,
     pub oidc_state: Arc<OidcState>,
     pub signature_state: Arc<SignatureState>,
+    pub worker_http_client: Arc<dyn WorkerHttpClient>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -30,6 +32,7 @@ impl std::fmt::Debug for AppState {
             .field("config", &self.config)
             .field("oidc_state", &"<OidcState>")
             .field("signature_state", &"<SignatureState>")
+            .field("worker_http_client", &self.worker_http_client)
             .finish()
     }
 }
@@ -89,6 +92,9 @@ impl AppState {
             max_body_bytes: cfg.kc.max_body_bytes,
         });
 
+        let worker_http_client: Arc<dyn WorkerHttpClient> =
+            Arc::new(reqwest::Client::builder().build()?);
+
         Ok(Self {
             kyc,
             user,
@@ -98,6 +104,7 @@ impl AppState {
             config: cfg.clone(),
             oidc_state,
             signature_state,
+            worker_http_client,
         })
     }
 }

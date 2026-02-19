@@ -3,7 +3,6 @@ use axum_extra::extract::CookieJar;
 use backend_auth::SignatureContext;
 use backend_core::Error;
 use backend_model::kc::{DeviceRecordDto, UserRecordDto, UserSearch, UserUpsert};
-use backend_repository::{DeviceRepo, UserRepo};
 use gen_oas_server_kc::apis::devices::{Devices, LookupDeviceResponse};
 use gen_oas_server_kc::apis::enrollment::{Enrollment, EnrollmentBindResponse};
 use gen_oas_server_kc::apis::users::{

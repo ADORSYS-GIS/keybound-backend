@@ -3,7 +3,7 @@ use crate::worker;
 use axum_extra::extract::CookieJar;
 use backend_auth::JwtToken;
 use backend_core::Error;
-use backend_repository::{KycRepo, KycReviewCaseRow, KycSubmissionFilter};
+use backend_repository::{KycReviewCaseRow, KycSubmissionFilter};
 use gen_oas_server_staff::apis::kyc_review::{
     ApiKycStaffSubmissionsGetResponse, ApiKycStaffSubmissionsSubmissionIdApprovePostResponse,
     ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse,
@@ -82,9 +82,9 @@ impl KycReview<Error> for BackendApi {
             .state
             .kyc
             .approve_submission(
-                &path_params.submission_id,
-                Some(reviewer_id.as_str()),
-                body.notes.as_deref(),
+                path_params.submission_id.clone(),
+                Some(reviewer_id),
+                body.notes.clone(),
             )
             .await?;
 
@@ -284,10 +284,10 @@ impl KycReview<Error> for BackendApi {
             .state
             .kyc
             .reject_submission(
-                &path_params.submission_id,
-                Some(reviewer_id.as_str()),
-                &body.reason,
-                body.notes.as_deref(),
+                path_params.submission_id.clone(),
+                Some(reviewer_id),
+                body.reason.clone(),
+                body.notes.clone(),
             )
             .await?;
 
@@ -334,11 +334,11 @@ impl KycReview<Error> for BackendApi {
             .state
             .kyc
             .decide_review_case(
-                &path_params.case_id,
-                &body.decision.to_string(),
-                &body.reason_code.to_string(),
-                body.comment.as_deref(),
-                Some(reviewer_id.as_str()),
+                path_params.case_id.clone(),
+                body.decision.to_string(),
+                body.reason_code.to_string(),
+                body.comment.clone(),
+                Some(reviewer_id),
             )
             .await?;
 

@@ -1,9 +1,9 @@
 use crate::state::AppState;
 use crate::sms_provider::{ConsoleSmsProvider, SmsProvider, SnsSmsProvider};
 use apalis::prelude::{BoxDynError, TaskSink, WorkerBuilder};
+use async_trait::async_trait;
 use apalis_redis::{RedisConfig, RedisStorage};
 use backend_core::SmsProviderType;
-use backend_repository::{KycRepo, UserRepo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -11,6 +11,37 @@ use tracing::{info, warn};
 
 const FINERACT_PROVISIONING_QUEUE_NAMESPACE: &str = "backend:fineract_provisioning";
 const NOTIFICATION_QUEUE_NAMESPACE: &str = "backend:notifications";
+
+#[async_trait]
+pub trait WorkerHttpClient: Send + Sync + std::fmt::Debug {
+    async fn post_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<(http::StatusCode, String), BoxDynError>;
+}
+
+#[async_trait]
+impl WorkerHttpClient for reqwest::Client {
+    async fn post_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<(http::StatusCode, String), BoxDynError> {
+        let response = self
+            .post(url)
+            .header("User-Agent", "user-storage/1.0.0")
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| Box::new(e) as BoxDynError)?;
+
+        let status = response.status();
+        let text = response.text().await.map_err(|e| Box::new(e) as BoxDynError)?;
+
+        Ok((status, text))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FineractProvisioningJob {
@@ -230,36 +261,26 @@ async fn process_fineract_provisioning_job(
         address: None,
     };
 
-    let client = reqwest::Client::new();
     let url = format!("{}/api/registration/register", state.config.cuss.api_url);
+    let body = serde_json::to_value(&req).map_err(|e| Box::new(e) as BoxDynError)?;
 
-    let response = client
-        .post(&url)
-        .header("User-Agent", "user-storage/1.0.0")
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| Box::new(e) as BoxDynError)?;
+    let (status, text) = state
+        .worker_http_client
+        .post_json(&url, &body)
+        .await?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
         warn!(
             user_id = %job.user_id,
             status = %status,
-            body = %error_body,
+            body = %text,
             "failed to provision user in fineract"
         );
-        return Err(
-            format!("Fineract provisioning failed with status {status}: {error_body}").into(),
-        );
+        return Err(format!("Fineract provisioning failed with status {status}: {text}").into());
     }
 
-    let resp: RegistrationResponse = response
-        .json()
-        .await
-        .map_err(|e| Box::new(e) as BoxDynError)?;
-
+    let resp: RegistrationResponse =
+        serde_json::from_str(&text).map_err(|e| Box::new(e) as BoxDynError)?;
     info!(
         user_id = %job.user_id,
         external_id = ?resp.external_id,

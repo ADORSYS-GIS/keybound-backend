@@ -268,17 +268,17 @@ pub trait KycRepo: Send + Sync {
 
     async fn approve_submission(
         &self,
-        submission_id: &str,
-        reviewer_id: Option<&str>,
-        notes: Option<&str>,
+        submission_id: String,
+        reviewer_id: Option<String>,
+        notes: Option<String>,
     ) -> RepoResult<bool>;
 
     async fn reject_submission(
         &self,
-        submission_id: &str,
-        reviewer_id: Option<&str>,
-        reason: &str,
-        notes: Option<&str>,
+        submission_id: String,
+        reviewer_id: Option<String>,
+        reason: String,
+        notes: Option<String>,
     ) -> RepoResult<bool>;
 
     async fn request_submission_info(
@@ -300,11 +300,11 @@ pub trait KycRepo: Send + Sync {
 
     async fn decide_review_case(
         &self,
-        case_id: &str,
-        outcome: &str,
-        reason_code: &str,
-        comment: Option<&str>,
-        reviewer_id: Option<&str>,
+        case_id: String,
+        outcome: String,
+        reason_code: String,
+        comment: Option<String>,
+        reviewer_id: Option<String>,
     ) -> RepoResult<Option<KycReviewDecisionRecord>>;
 }
 

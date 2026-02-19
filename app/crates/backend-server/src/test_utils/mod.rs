@@ -1,6 +1,7 @@
 use crate::sms_provider::SmsProvider;
 use crate::state::AppState;
-use async_trait::async_trait;
+use crate::worker::WorkerHttpClient;
+use backend_core::async_trait;
 use backend_auth::{OidcState, SignatureState};
 use backend_core::{Config, Result};
 use backend_repository::{
@@ -12,6 +13,21 @@ use backend_repository::{
 use mockall::mock;
 use std::sync::Arc;
 use std::time::Duration;
+
+mock! {
+    pub WorkerHttpClient {}
+    #[async_trait]
+    impl WorkerHttpClient for WorkerHttpClient {
+        async fn post_json(
+            &self,
+            url: &str,
+            body: &serde_json::Value,
+        ) -> std::result::Result<(http::StatusCode, String), apalis::prelude::BoxDynError>;
+    }
+    impl std::fmt::Debug for WorkerHttpClient {
+        fn fmt<'a>(&self, f: &mut std::fmt::Formatter<'a>) -> std::fmt::Result;
+    }
+}
 
 mock! {
     pub KycRepo {}
@@ -118,14 +134,14 @@ mock! {
 
         async fn approve_submission(
             &self,
-            submission_id: &str,
+            submission_id: String,
             reviewer_id: Option<String>,
             notes: Option<String>,
         ) -> RepoResult<bool>;
 
         async fn reject_submission(
             &self,
-            submission_id: &str,
+            submission_id: String,
             reviewer_id: Option<String>,
             reason: String,
             notes: Option<String>,
@@ -150,9 +166,9 @@ mock! {
 
         async fn decide_review_case(
             &self,
-            case_id: &str,
-            outcome: &str,
-            reason_code: &str,
+            case_id: String,
+            outcome: String,
+            reason_code: String,
             comment: Option<String>,
             reviewer_id: Option<String>,
         ) -> RepoResult<Option<KycReviewDecisionRecord>>;
@@ -243,6 +259,7 @@ pub struct TestAppStateBuilder {
     pub user: Option<Arc<dyn UserRepo>>,
     pub device: Option<Arc<dyn DeviceRepo>>,
     pub sms: Option<Arc<dyn SmsProvider>>,
+    pub worker_http_client: Option<Arc<dyn WorkerHttpClient>>,
     pub config: Option<Config>,
 }
 
@@ -253,6 +270,7 @@ impl Default for TestAppStateBuilder {
             user: None,
             device: None,
             sms: None,
+            worker_http_client: None,
             config: None,
         }
     }
@@ -280,6 +298,11 @@ impl TestAppStateBuilder {
 
     pub fn with_sms(mut self, sms: Arc<dyn SmsProvider>) -> Self {
         self.sms = Some(sms);
+        self
+    }
+
+    pub fn with_worker_http_client(mut self, client: Arc<dyn WorkerHttpClient>) -> Self {
+        self.worker_http_client = Some(client);
         self
     }
 
@@ -348,6 +371,9 @@ cuss:
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
             device: self.device.unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
             sms: self.sms.unwrap_or_else(|| Arc::new(MockSmsProvider::new())),
+            worker_http_client: self
+                .worker_http_client
+                .unwrap_or_else(|| Arc::new(reqwest::Client::new())),
             s3,
             config,
             oidc_state,

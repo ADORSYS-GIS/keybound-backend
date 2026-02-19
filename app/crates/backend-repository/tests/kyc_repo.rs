@@ -275,7 +275,11 @@ async fn kyc_repo_orchestration_flow() -> Result<()> {
 
     // Approve transition
     let approved = repo
-        .approve_submission(&identity_step.id, Some("staff-1"), Some("looks good"))
+        .approve_submission(
+            identity_step.id.clone(),
+            Some("staff-1".to_string()),
+            Some("looks good".to_string()),
+        )
         .await?;
     assert!(approved);
     let approved_step = repo
@@ -295,10 +299,10 @@ async fn kyc_repo_orchestration_flow() -> Result<()> {
         .await?;
     let rejected = repo
         .reject_submission(
-            &reject_step.id,
-            Some("staff-2"),
-            "document mismatch",
-            Some("retry"),
+            reject_step.id.clone(),
+            Some("staff-2".to_string()),
+            "document mismatch".to_string(),
+            Some("retry".to_string()),
         )
         .await?;
     assert!(rejected);
@@ -354,11 +358,11 @@ async fn kyc_repo_orchestration_flow() -> Result<()> {
 
     let decision = repo
         .decide_review_case(
-            &review_step.id,
-            "APPROVE",
-            "OK",
-            Some("approved in test"),
-            Some("staff-3"),
+            review_step.id.clone(),
+            "APPROVE".to_string(),
+            "OK".to_string(),
+            Some("approved in test".to_string()),
+            Some("staff-3".to_string()),
         )
         .await?;
     assert!(decision.is_some());

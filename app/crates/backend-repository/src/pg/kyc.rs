@@ -877,9 +877,9 @@ impl KycRepo for KycRepository {
 
     async fn approve_submission(
         &self,
-        submission_id_val: &str,
-        reviewer_id: Option<&str>,
-        notes: Option<&str>,
+        submission_id_val: String,
+        reviewer_id: Option<String>,
+        notes: Option<String>,
     ) -> RepoResult<bool> {
         use backend_model::schema::{kyc_review_decision, kyc_review_queue, kyc_step};
 
@@ -888,7 +888,7 @@ impl KycRepo for KycRepository {
         conn.transaction::<_, Error, _>(|conn| {
             Box::pin(async move {
                 let step = kyc_step::table
-                    .filter(kyc_step::id.eq(submission_id_val))
+                    .filter(kyc_step::id.eq(&submission_id_val))
                     .filter(kyc_step::step_type.eq(IDENTITY_STEP_TYPE))
                     .select(db::KycStepRow::as_select())
                     .first::<db::KycStepRow>(conn)
@@ -914,9 +914,9 @@ impl KycRepo for KycRepository {
                         kyc_review_decision::step_id.eq(step.id.clone()),
                         kyc_review_decision::outcome.eq("APPROVE"),
                         kyc_review_decision::reason_code.eq("OK"),
-                        kyc_review_decision::comment.eq(notes.map(ToOwned::to_owned)),
+                        kyc_review_decision::comment.eq(notes),
                         kyc_review_decision::decided_at.eq(now),
-                        kyc_review_decision::reviewer_id.eq(reviewer_id.map(ToOwned::to_owned)),
+                        kyc_review_decision::reviewer_id.eq(reviewer_id),
                     ))
                     .execute(conn)
                     .await?;
@@ -947,10 +947,10 @@ impl KycRepo for KycRepository {
 
     async fn reject_submission(
         &self,
-        submission_id_val: &str,
-        reviewer_id: Option<&str>,
-        reason: &str,
-        notes: Option<&str>,
+        submission_id_val: String,
+        reviewer_id: Option<String>,
+        reason: String,
+        notes: Option<String>,
     ) -> RepoResult<bool> {
         use backend_model::schema::{kyc_review_decision, kyc_review_queue, kyc_step};
 
@@ -959,7 +959,7 @@ impl KycRepo for KycRepository {
         conn.transaction::<_, Error, _>(|conn| {
             Box::pin(async move {
                 let step = kyc_step::table
-                    .filter(kyc_step::id.eq(submission_id_val))
+                    .filter(kyc_step::id.eq(&submission_id_val))
                     .filter(kyc_step::step_type.eq(IDENTITY_STEP_TYPE))
                     .select(db::KycStepRow::as_select())
                     .first::<db::KycStepRow>(conn)
@@ -997,7 +997,7 @@ impl KycRepo for KycRepository {
                         kyc_review_decision::reason_code.eq("OTHER"),
                         kyc_review_decision::comment.eq(merged_comment),
                         kyc_review_decision::decided_at.eq(now),
-                        kyc_review_decision::reviewer_id.eq(reviewer_id.map(ToOwned::to_owned)),
+                        kyc_review_decision::reviewer_id.eq(reviewer_id),
                     ))
                     .execute(conn)
                     .await?;
@@ -1212,11 +1212,11 @@ impl KycRepo for KycRepository {
 
     async fn decide_review_case(
         &self,
-        case_id_val: &str,
-        outcome: &str,
-        reason_code: &str,
-        comment: Option<&str>,
-        reviewer_id: Option<&str>,
+        case_id_val: String,
+        outcome: String,
+        reason_code: String,
+        comment: Option<String>,
+        reviewer_id: Option<String>,
     ) -> RepoResult<Option<KycReviewDecisionRecord>> {
         use backend_model::schema::{kyc_review_decision, kyc_review_queue, kyc_step};
 
@@ -1225,7 +1225,7 @@ impl KycRepo for KycRepository {
         conn.transaction::<_, Error, _>(|conn| {
             Box::pin(async move {
                 let step = kyc_step::table
-                    .filter(kyc_step::id.eq(case_id_val))
+                    .filter(kyc_step::id.eq(&case_id_val))
                     .filter(kyc_step::step_type.eq(IDENTITY_STEP_TYPE))
                     .select(db::KycStepRow::as_select())
                     .first::<db::KycStepRow>(conn)
@@ -1255,11 +1255,11 @@ impl KycRepo for KycRepository {
                     .values((
                         kyc_review_decision::session_id.eq(step.session_id.clone()),
                         kyc_review_decision::step_id.eq(step.id.clone()),
-                        kyc_review_decision::outcome.eq(outcome),
+                        kyc_review_decision::outcome.eq(outcome.clone()),
                         kyc_review_decision::reason_code.eq(reason_code),
-                        kyc_review_decision::comment.eq(comment.map(ToOwned::to_owned)),
+                        kyc_review_decision::comment.eq(comment),
                         kyc_review_decision::decided_at.eq(now),
-                        kyc_review_decision::reviewer_id.eq(reviewer_id.map(ToOwned::to_owned)),
+                        kyc_review_decision::reviewer_id.eq(reviewer_id),
                     ))
                     .execute(conn)
                     .await?;
