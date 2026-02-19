@@ -1,437 +1,541 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: Customer Registration Core API
-  version: 1.1.0
+  title: KYC Backend Internal API
+  version: 0.1.0
   description: >
-    Core KYC + limits API consumed by a customer-facing BFF. Identity handled by Keycloak (JWT).
+    Internal API for KYC orchestration, evidence storage metadata, OTP/email issuance,
+    and staff review operations. Intended for trusted callers only (BFF, staff console, jobs).
 servers:
-  - url: https://api.example.com
-    description: Example production server
-
+  - url: https://kyc-internal.example.local
 tags:
-  - name: KYC
-    description: KYC case/submission and documents.
-  - name: Limits
-    description: Transaction limits derived from KYC tier.
+  - name: steps
+  - name: uploads
+  - name: notifications
+  - name: staff
+
+security:
+  - BearerAuth: [ ]
 
 paths:
-  /api/limits:
-    get:
-      tags: [ Limits ]
-      summary: Get transaction limits
-      description: Retrieve deposit/withdrawal limits based on current KYC tier and usage.
-      security: [ { bearerAuth: [ ] } ]
-      responses:
-        '200':
-          description: Limits and usage details.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LimitsResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /api/registration/kyc/profile:
-    patch:
-      tags: [ KYC ]
-      operationId: apiRegistrationKycProfilePatch
-      summary: Partially update my KYC profile using JSON Patch
-      description: >
-        Applies RFC 6902 JSON Patch operations against the authenticated user's KYC profile.
-        Supports nested field updates.
-      security: [ { bearerAuth: [ ] } ]
+  /internal/kyc/sessions:
+    post:
+      tags: [ steps ]
+      summary: Create/resume session for a user
+      description: Allocates or refreshes a backend session tied to a user ID, ensuring steps are tracked consistently.
+      operationId: internalStartSession
+      security:
+        - BearerAuth: [ ]
       requestBody:
         required: true
         content:
-          application/json-patch+json:
+          application/json:
             schema:
-              type: array
-              items:
-                $ref: '#/components/schemas/JsonPatchOperation'
+              $ref: "#/components/schemas/InternalStartSessionRequest"
       responses:
-        '200':
-          description: Profile updated.
+        "201":
+          description: Session
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/KycCaseResponse' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '412': { $ref: '#/components/responses/PreconditionFailed' }
+              schema:
+                $ref: "#/components/schemas/KycSessionInternal"
+
+  /internal/kyc/steps:
+    post:
+      tags: [ steps ]
+      summary: Create a KYC step
+      description: Adds a new verification step (phone, email, address, or identity) to the ongoing session and returns its metadata.
+      operationId: internalCreateStep
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStepRequest"
+      responses:
+        "201":
+          description: Step created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycStepInternal"
+
+  /internal/kyc/steps/{stepId}:
+    get:
+      tags: [ steps ]
+      summary: Get step
+      description: Retrieves the internal state, data payload, and policy of the specified step for orchestration or staff tooling.
+      operationId: internalGetStep
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/StepId"
+      responses:
+        "200":
+          description: Step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycStepInternal"
+
+  /internal/kyc/phone/otp/issue:
+    post:
+      tags: [ notifications ]
+      summary: Issue OTP
+      description: Requests the underlying SMS gateway to issue a one-time code for the given msisdn and step.
+      operationId: internalIssueOtp
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueOtpRequest"
+      responses:
+        "200":
+          description: Challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpChallengeInternal"
+
+  /internal/kyc/phone/otp/verify:
+    post:
+      tags: [ notifications ]
+      summary: Verify OTP
+      description: Confirms the submitted OTP against the stored challenge, returning the verification outcome and updated step status.
+      operationId: internalVerifyOtp
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyOtpInternalRequest"
+      responses:
+        "200":
+          description: Verification outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyOutcome"
+
+  /internal/kyc/email/magic/issue:
+    post:
+      tags: [ notifications ]
+      summary: Issue magic email token
+      description: Generates a magic email token tied to a step so the client can deliver a secure link or code to the user.
+      operationId: internalIssueMagicEmail
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueMagicEmailRequest"
+      responses:
+        "200":
+          description: Challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MagicEmailChallengeInternal"
+
+  /internal/kyc/email/magic/verify:
+    post:
+      tags: [ notifications ]
+      summary: Verify magic token
+      description: Validates the email token and surfaces the result (verified/invalid/expired) along with the current step status.
+      operationId: internalVerifyMagicEmail
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyMagicEmailRequest"
+      responses:
+        "200":
+          description: Outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyOutcome"
+
+  /internal/uploads/presign:
+    post:
+      tags: [ uploads ]
+      summary: Create presigned upload (S3-compatible)
+      description: Provides presigned upload details (single/multipart) and encryption policy for evidence ingestion.
+      operationId: internalPresignUpload
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InternalPresignRequest"
+      responses:
+        "200":
+          description: Presign response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignUploadResponseInternal"
+
+  /internal/uploads/complete:
+    post:
+      tags: [ uploads ]
+      summary: Finalize upload and register evidence
+      description: Closes the upload session, optionally verifies checksum, and registers evidence metadata with the step.
+      operationId: internalCompleteUpload
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InternalCompleteUploadRequest"
+      responses:
+        "200":
+          description: Evidence registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceRef"
 
 components:
   securitySchemes:
-    bearerAuth:
+    BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Generic bearer token used by services and staff consoles.
 
   parameters:
-    SubmissionId:
-      name: submissionId
+    StepId:
+      name: stepId
       in: path
       required: true
       schema:
-        type: string
-        pattern: '^sub_[a-z0-9]{10,}$'
-      description: Submission ID (prefixed CUID).
-
-    DocumentId:
-      name: documentId
-      in: path
-      required: true
-      schema:
-        type: string
-        pattern: '^doc_[a-z0-9]{10,}$'
-      description: Document ID (prefixed CUID).
-
-    IdempotencyKey:
-      name: Idempotency-Key
-      in: header
+        $ref: "#/components/schemas/StepIdValue"
+    Page:
+      name: page
+      in: query
       required: false
       schema:
-        type: string
-        minLength: 8
-        maxLength: 128
-      description: Idempotency key for safe retries.
-
-  responses:
-    BadRequest:
-      description: Bad request / validation error.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    Unauthorized:
-      description: Unauthorized.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    NotFound:
-      description: Not found.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    Conflict:
-      description: Conflict / illegal state transition / duplicate.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    PreconditionFailed:
-      description: ETag mismatch (optimistic concurrency failure).
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
+        $ref: "#/components/schemas/PageNumber"
+      description: Page number (default 1).
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/PageSize"
+      description: Page size (default 20).
 
   schemas:
-    JsonPatchOperation:
-      type: object
-      additionalProperties: false
-      required: [ op, path ]
-      properties:
-        op:
-          type: string
-          enum: [ add, remove, replace, move, copy, test ]
-        path:
-          type: string
-          minLength: 1
-        from:
-          type: string
-        value:
-          nullable: true
-
-    KycCaseStatus:
-      type: string
-      enum: [ OPEN, CLOSED ]
-
-    KycProvisioningStatus:
-      type: string
-      enum: [ NONE, STARTED, SUCCEEDED, FAILED ]
-
-    KycNextAction:
-      type: string
-      enum: [ UPLOAD_DOCUMENTS, FIX_PROFILE, WAIT, CONTACT_SUPPORT ]
-      description: UI helper derived from status.
-
-    KycDocumentType:
-      type: string
-      enum: [ ID_FRONT, ID_BACK, SELFIE, PROOF_OF_ADDRESS ]
-
-    KycDocumentStatus:
-      type: string
-      enum: [ INITIATED, UPLOADED, VERIFIED, REJECTED ]
-
-    KycCaseResponse:
-      type: object
-      required: [ caseId, caseStatus, activeSubmission ]
-      properties:
-        caseId:
-          type: string
-          pattern: '^kyc_[a-z0-9]{10,}$'
-        caseStatus:
-          $ref: '#/components/schemas/KycCaseStatus'
-        currentTier:
-          type: integer
-          minimum: 0
-          maximum: 3
-        activeSubmission:
-          $ref: '#/components/schemas/KycSubmissionSummary'
-
-    KycSubmissionSummary:
-      type: object
-      required: [ submissionId, version, status ]
-      properties:
-        submissionId:
-          type: string
-          pattern: '^sub_[a-z0-9]{10,}$'
-        version:
-          type: integer
-          minimum: 1
-        status:
-          $ref: '#/components/schemas/KycSubmissionStatus'
-        requestedTier:
-          type: integer
-          minimum: 1
-          maximum: 3
-        decidedTier:
-          type: integer
-          minimum: 1
-          maximum: 3
-          nullable: true
-        submittedAt:
-          type: string
-          format: date-time
-          nullable: true
-        decidedAt:
-          type: string
-          format: date-time
-          nullable: true
-        provisioningStatus:
-          $ref: '#/components/schemas/KycProvisioningStatus'
-        nextAction:
-          $ref: '#/components/schemas/KycNextAction'
-
-
-    KycSubmissionStatus:
+    KycStatus:
       type: string
       enum:
-        - DRAFT
-        - SUBMITTED
-        - IN_VERIFICATION
-        - RISK_ASSESSMENT
-        - PENDING_MANUAL_REVIEW
-        - PENDING_USER_RESPONSE
-        - APPROVED
+        - NOT_STARTED
+        - IN_PROGRESS
+        - CAPTURED
+        - PENDING_REVIEW
+        - VERIFIED
         - REJECTED
+        - FAILED
 
-    KycProfilePatchRequest:
+    StepType:
+      type: string
+      enum:
+        - PHONE
+        - EMAIL
+        - ADDRESS
+        - IDENTITY
+
+    StepIdValue:
+      type: string
+      minLength: 8
+
+    PageNumber:
+      type: integer
+      default: 1
+      minimum: 1
+
+    PageSize:
+      type: integer
+      default: 20
+      minimum: 1
+
+    KycSessionInternalStatus:
+      type: string
+      enum:
+        - OPEN
+        - COMPLETED
+        - LOCKED
+
+    KycSessionInternal:
       type: object
       additionalProperties: false
       properties:
-        firstName: { type: string, minLength: 1, maxLength: 100 }
-        lastName: { type: string, minLength: 1, maxLength: 100 }
-        email: { type: string, format: email }
-        phoneNumber: { type: string, maxLength: 64 }
-        dateOfBirth: { type: string, format: date }
-        nationality: { type: string, maxLength: 2, description: "ISO 3166-1 alpha-2" }
-        address: { $ref: '#/components/schemas/KycAddress' }
+        id: { type: string }
+        userId: { type: string }
+        status: { $ref: "#/components/schemas/KycSessionInternalStatus" }
+        stepIds:
+          type: array
+          items: { type: string }
+        updatedAt: { type: string, format: date-time }
+      required: [ id, userId, status, stepIds, updatedAt ]
 
-    OpenSubmissionRequest:
+    InternalStartSessionRequest:
       type: object
       additionalProperties: false
       properties:
-        requestedTier:
-          type: integer
-          minimum: 1
-          maximum: 3
+        userId: { type: string }
+        reason: { type: string }
+      required: [ userId ]
 
-    KycSubmissionDetailResponse:
+    CreateStepRequest:
       type: object
-      required: [ submissionId, version, status, userProfile, documents ]
+      additionalProperties: false
       properties:
-        submissionId:
+        sessionId: { type: string }
+        userId: { type: string }
+        type: { $ref: "#/components/schemas/StepType" }
+        policy:
+          type: object
+          additionalProperties: true
+      required: [ sessionId, userId, type ]
+
+    KycStepInternal:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        userId: { type: string }
+        type: { $ref: "#/components/schemas/StepType" }
+        status: { $ref: "#/components/schemas/KycStatus" }
+        data:
+          type: object
+          description: Internal step data (may include PII/evidence refs).
+          additionalProperties: true
+        policy:
+          type: object
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [ id, sessionId, userId, type, status, createdAt, updatedAt ]
+
+    IssueOtpRequestChannel:
+      type: string
+      enum:
+        - SMS
+        - VOICE
+    IssueOtpRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        stepId: { type: string }
+        msisdn: { type: string, example: "+237690000000" }
+        channel: { $ref: "#/components/schemas/IssueOtpRequestChannel" }
+        ttlSeconds: { type: integer, minimum: 30, maximum: 900 }
+      required: [ stepId, msisdn ]
+
+    OtpChallengeInternal:
+      type: object
+      additionalProperties: false
+      properties:
+        otpRef: { type: string }
+        providerMessageId:
           type: string
-          pattern: '^sub_[a-z0-9]{10,}$'
-        version:
-          type: integer
-        status:
-          $ref: '#/components/schemas/KycSubmissionStatus'
-        userProfile:
-          $ref: '#/components/schemas/UserProfile'
-        documents:
-          type: array
-          items: { $ref: '#/components/schemas/KycDocument' }
-        staffMessages:
-          type: array
-          description: Messages visible to the customer (e.g. request-info).
-          items: { $ref: '#/components/schemas/StaffMessage' }
+          description: Optional provider id from SMS gateway
+        expiresAt: { type: string, format: date-time }
+        triesLeft: { type: integer, minimum: 0 }
+      required: [ otpRef, expiresAt, triesLeft ]
 
-    UserProfile:
-      type: object
-      properties:
-        firstName: { type: string }
-        lastName: { type: string }
-        email: { type: string, format: email }
-        phoneNumber: { type: string }
-        dateOfBirth: { type: string, format: date }
-        nationality: { type: string }
-        address: { $ref: '#/components/schemas/KycAddress' }
-
-    KycAddress:
+    VerifyOtpInternalRequest:
       type: object
       additionalProperties: false
       properties:
-        gps:
+        stepId: { type: string }
+        otpRef: { type: string }
+        code: { type: string, minLength: 4, maxLength: 8 }
+      required: [ stepId, otpRef, code ]
+
+    IssueMagicEmailRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        stepId: { type: string }
+        email: { type: string, format: email }
+        ttlSeconds: { type: integer, minimum: 60, maximum: 86400 }
+        includeShortCode: { type: boolean, default: true }
+      required: [ stepId, email ]
+
+    MagicEmailChallengeInternal:
+      type: object
+      additionalProperties: false
+      properties:
+        tokenRef: { type: string }
+        expiresAt: { type: string, format: date-time }
+      required: [ tokenRef, expiresAt ]
+
+    VerifyMagicEmailRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        token: { type: string, minLength: 10 }
+      required: [ token ]
+
+    VerifyOutcomeReason:
+      type: string
+      enum:
+        - VERIFIED
+        - INVALID
+        - EXPIRED
+        - LOCKED
+        - RATE_LIMITED
+
+    VerifyOutcome:
+      type: object
+      additionalProperties: false
+      properties:
+        ok: { type: boolean }
+        reason: { $ref: "#/components/schemas/VerifyOutcomeReason" }
+        stepStatus: { $ref: "#/components/schemas/KycStatus" }
+      required: [ ok, reason, stepStatus ]
+
+    InternalPresignRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        stepId: { type: string }
+        userId: { type: string }
+        purpose:
+          $ref: "#/components/schemas/InternalUploadPurpose"
+        assetType:
+          $ref: "#/components/schemas/IdentityAssetType"
+        mime: { type: string }
+        sizeBytes: { type: integer, minimum: 1 }
+        encryption:
           type: object
           additionalProperties: false
           properties:
-            lat: { type: number, minimum: -90, maximum: 90 }
-            lon: { type: number, minimum: -180, maximum: 180 }
-        street: { type: string }
-        city: { type: string }
-        postalCode: { type: string }
-        country:
-          type: string
-          description: "ISO 3166-1 alpha-2"
-          minLength: 2
-          maxLength: 2
+            mode:
+              $ref: "#/components/schemas/SseMode"
+          required: [ mode ]
+      required: [ stepId, userId, purpose, assetType, mime, sizeBytes ]
 
-    KycDocument:
+    PresignUploadResponseInternal:
       type: object
-      required: [ documentId, documentType, fileName, status, uploadedAt ]
-      properties:
-        documentId:
-          type: string
-          pattern: '^doc_[a-z0-9]{10,}$'
-        fileName: { type: string }
-        documentType:
-          $ref: '#/components/schemas/KycDocumentType'
-        status:
-          $ref: '#/components/schemas/KycDocumentStatus'
-        uploadedAt:
-          type: string
-          format: date-time
-          nullable: true
-
-    InitDocumentUploadRequest:
-      type: object
-      required: [ documentType, fileName, mimeType ]
       additionalProperties: false
       properties:
-        documentType:
-          $ref: '#/components/schemas/KycDocumentType'
-        fileName:
-          type: string
-          maxLength: 256
-        mimeType:
-          type: string
-          maxLength: 128
-        sizeBytes:
-          type: integer
-          minimum: 1
-          nullable: true
-
-    InitDocumentUploadResponse:
-      type: object
-      required: [ documentId, uploadUrl, expiresAt ]
-      properties:
-        documentId:
-          type: string
-          pattern: '^doc_[a-z0-9]{10,}$'
-        uploadUrl:
-          type: string
-          format: uri
-        expiresAt:
-          type: string
-          format: date-time
-        requiredHeaders:
+        uploadId: { type: string }
+        bucket: { type: string }
+        objectKey: { type: string }
+        method:
+          $ref: "#/components/schemas/UploadMethod"
+        url: { type: string }
+        headers:
           type: object
-          additionalProperties:
-            type: string
-          description: Optional headers the client must include in the PUT to S3.
+          additionalProperties: { type: string }
+        multipart:
+          type: object
+          additionalProperties: false
+          properties:
+            uploadKey: { type: string }
+            partSizeBytes: { type: integer }
+            parts:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  partNumber: { type: integer, minimum: 1 }
+                  url: { type: string }
+                required: [ partNumber, url ]
+          required: [ partSizeBytes, parts ]
+        expiresAt: { type: string, format: date-time }
+      required: [ uploadId, bucket, objectKey, method, expiresAt ]
 
-    ConfirmDocumentUploadRequest:
+    InternalCompleteUploadRequest:
       type: object
-      required: [ sha256, sizeBytes ]
       additionalProperties: false
       properties:
-        sha256:
-          type: string
-          pattern: '^[a-fA-F0-9]{64}$'
-        sizeBytes:
-          type: integer
-          minimum: 1
-
-    StaffMessage:
-      type: object
-      required: [ messageId, message, createdAt ]
-      properties:
-        messageId:
-          type: string
-        message:
-          type: string
-          maxLength: 500
-        createdAt:
-          type: string
-          format: date-time
-
-    LimitsResponse:
-      type: object
-      properties:
-        kycTier: { type: integer }
-        tierName: { type: string }
-        currency: { type: string }
-        effectiveAt:
-          type: string
-          format: date-time
-        limits: { $ref: '#/components/schemas/LimitsResponseLimitsDto' }
-        usage: { $ref: '#/components/schemas/LimitsResponseUsageDto' }
-        available: { $ref: '#/components/schemas/LimitsResponseAvailableDto' }
-        allowedPaymentMethods:
-          type: array
-          items: { type: string }
-        restrictedFeatures:
-          type: array
-          items: { type: string }
-
-    LimitsResponseLimitsDto:
-      type: object
-      properties:
-        dailyDepositLimit: { type: number }
-        dailyWithdrawalLimit: { type: number }
-        perTransactionLimit: { type: number }
-        monthlyTransactionLimit: { type: number }
-
-    LimitsResponseUsageDto:
-      type: object
-      properties:
-        dailyDepositUsed: { type: number }
-        dailyWithdrawalUsed: { type: number }
-        monthlyUsed: { type: number }
-
-    LimitsResponseAvailableDto:
-      type: object
-      properties:
-        depositRemaining: { type: number }
-        withdrawalRemaining: { type: number }
-
-    ProblemDetails:
-      type: object
-      required: [ title, status ]
-      properties:
-        type: { type: string, format: uri }
-        title: { type: string }
-        status: { type: integer }
-        detail: { type: string }
-        instance: { type: string }
-        code:
-          type: string
-          description: Application-specific error code (e.g., KYC_INVALID_STATE).
-        traceId:
-          type: string
-        errors:
+        uploadId: { type: string }
+        bucket: { type: string }
+        objectKey: { type: string }
+        etag: { type: string }
+        parts:
           type: array
           items:
             type: object
-            required: [ field, message ]
+            additionalProperties: false
             properties:
-              field: { type: string }
-              message: { type: string }
+              partNumber: { type: integer, minimum: 1 }
+              etag: { type: string }
+            required: [ partNumber, etag ]
+        computedSha256: { type: string }
+      required: [ uploadId, bucket, objectKey ]
+
+    EvidenceRef:
+      type: object
+      additionalProperties: false
+      properties:
+        evidenceId: { type: string }
+        stepId: { type: string }
+        assetType: { type: string }
+        sha256: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [ evidenceId, stepId, assetType, createdAt ]
+
+    IdentityAssetType:
+      type: string
+      enum:
+        - SELFIE_CLOSEUP
+        - SELFIE_WITH_ID
+        - ID_FRONT
+        - ID_BACK
+
+    InternalUploadPurpose:
+      type: string
+      enum:
+        - KYC_IDENTITY
+
+    SseMode:
+      type: string
+      enum:
+        - SSE_S3
+        - SSE_KMS
+        - SSE_C
+
+    UploadMethod:
+      type: string
+      enum:
+        - PUT
+
+    ReviewDecisionOutcome:
+      type: string
+      enum:
+        - APPROVE
+        - REJECT
+
+    ReviewReasonCode:
+      type: string
+      enum:
+        - OK
+        - BLURRY
+        - MISSING_FACE
+        - ID_NOT_READABLE
+        - ID_MISMATCH
+        - FRAUD_SUSPECTED
+        - OTHER
