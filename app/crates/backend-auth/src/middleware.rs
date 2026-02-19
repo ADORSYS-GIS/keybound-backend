@@ -1,10 +1,10 @@
+use crate::oidc_state::OidcState;
+use crate::signature_principal::SignatureState;
 use axum::body::{Body, to_bytes};
 use axum::extract::OriginalUri;
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
 use axum::response::{IntoResponse, Response};
-use crate::signature_principal::SignatureState;
-use crate::oidc_state::OidcState;
-use jsonwebtoken::{Validation, decode, decode_header, jwk::JwkSet, DecodingKey};
+use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use serde::Deserialize;
 use std::future::Future;
 use std::pin::Pin;
@@ -261,7 +261,6 @@ fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
         None
     }
 }
-
 
 fn unauthorized(message: &str) -> Response {
     (

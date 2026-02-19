@@ -5,7 +5,8 @@ use axum::http::{HeaderValue, Request, StatusCode};
 use axum::routing::get;
 use axum::{body::to_bytes, response::Response};
 use backend_auth::{
-    SignatureState, jwks_auth_layer, kc_signature_layer, require_kc_signature, OidcState, HttpClient
+    HttpClient, OidcState, SignatureState, jwks_auth_layer, kc_signature_layer,
+    require_kc_signature,
 };
 use backend_core::KcAuth;
 use base64::Engine;
@@ -87,7 +88,9 @@ async fn kc_signature_rejects_when_timestamp_header_is_missing() {
         .body(Body::empty())
         .unwrap();
     // Signature is checked first in implementation
-    request.headers_mut().insert("x-kc-signature", HeaderValue::from_static("any"));
+    request
+        .headers_mut()
+        .insert("x-kc-signature", HeaderValue::from_static("any"));
 
     let state = build_signature_state(&cfg);
     let result = require_kc_signature(cfg.enabled, &state, request).await;

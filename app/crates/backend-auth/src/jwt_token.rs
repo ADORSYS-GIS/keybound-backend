@@ -19,16 +19,15 @@ impl JwtToken {
     }
 
     #[instrument(skip(oidc_state))]
-    pub async fn verify(
-        token: &str,
-        oidc_state: &OidcState,
-    ) -> Result<Self> {
+    pub async fn verify(token: &str, oidc_state: &OidcState) -> Result<Self> {
         let jwks = oidc_state.get_jwks().await?;
 
         let header = jsonwebtoken::decode_header(token)
             .map_err(|e| Error::unauthorized(format!("Invalid token header: {e}")))?;
 
-        let kid = header.kid.ok_or_else(|| Error::unauthorized("Missing kid in token header"))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| Error::unauthorized("Missing kid in token header"))?;
 
         let jwk = jwks
             .find(&kid)

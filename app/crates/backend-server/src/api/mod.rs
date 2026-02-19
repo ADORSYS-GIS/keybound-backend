@@ -116,7 +116,11 @@ impl gen_oas_server_kc::apis::ApiKeyAuthHeader for BackendApi {
     type Claims = SignatureContext;
 
     #[instrument(skip(self, _headers))]
-    async fn extract_claims_from_header(&self, _headers: &HeaderMap, _key: &str) -> Option<Self::Claims> {
+    async fn extract_claims_from_header(
+        &self,
+        _headers: &HeaderMap,
+        _key: &str,
+    ) -> Option<Self::Claims> {
         Some(SignatureContext {})
     }
 }

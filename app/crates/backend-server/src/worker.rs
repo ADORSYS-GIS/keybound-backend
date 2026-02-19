@@ -182,7 +182,9 @@ async fn process_fineract_provisioning_job(
             body = %error_body,
             "failed to provision user in fineract"
         );
-        return Err(format!("Fineract provisioning failed with status {status}: {error_body}").into());
+        return Err(
+            format!("Fineract provisioning failed with status {status}: {error_body}").into(),
+        );
     }
 
     let resp: RegistrationResponse = response

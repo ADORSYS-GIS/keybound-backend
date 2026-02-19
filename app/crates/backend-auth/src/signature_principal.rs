@@ -44,8 +44,8 @@ impl SignatureState {
             return Err(Error::unauthorized("Body too large"));
         }
 
-        let body_str = std::str::from_utf8(body)
-            .map_err(|_| Error::unauthorized("Invalid UTF-8 body"))?;
+        let body_str =
+            std::str::from_utf8(body).map_err(|_| Error::unauthorized("Invalid UTF-8 body"))?;
 
         let canonical_payload = format!(
             "{}\n{}\n{}\n{}",
@@ -60,8 +60,8 @@ impl SignatureState {
 
         mac.update(canonical_payload.as_bytes());
 
-        let expected_signature = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(mac.finalize().into_bytes());
+        let expected_signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
 
         if signature != expected_signature {
             return Err(Error::unauthorized("Invalid signature"));

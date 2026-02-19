@@ -4,10 +4,10 @@ pub(crate) mod sms_retry;
 pub(crate) mod state;
 pub(crate) mod worker;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::Request as HttpRequest;
 use axum::response::Response;
-use axum::Router;
 use backend_auth::{jwks_auth_layer, kc_signature_layer};
 use backend_core::{Config, Result};
 use backend_migrate::connect_postgres_and_migrate;
@@ -67,7 +67,11 @@ pub async fn run_worker(core_config: &Config) -> Result<()> {
     worker::run(state).await
 }
 
-fn build_router(api: api::BackendApi, config: &Config, oidc_state: Arc<backend_auth::OidcState>) -> Router {
+fn build_router(
+    api: api::BackendApi,
+    config: &Config,
+    oidc_state: Arc<backend_auth::OidcState>,
+) -> Router {
     // Mount sub-routers onto a fresh root router
     let mut router = Router::new();
 
@@ -109,10 +113,7 @@ fn build_router(api: api::BackendApi, config: &Config, oidc_state: Arc<backend_a
         jwks_base_paths.push(config.staff.base_path.clone());
     }
 
-    router = router.layer(jwks_auth_layer(
-        oidc_state,
-        jwks_base_paths,
-    ));
+    router = router.layer(jwks_auth_layer(oidc_state, jwks_base_paths));
 
     if config.logging.log_requests_enabled {
         router.layer(

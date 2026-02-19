@@ -28,7 +28,8 @@ fn test_signature_verification_success() {
 
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
     mac.update(canonical_payload.as_bytes());
-    let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    let signature =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
 
     let mut headers = HeaderMap::new();
     headers.insert("x-kc-signature", signature.parse().unwrap());

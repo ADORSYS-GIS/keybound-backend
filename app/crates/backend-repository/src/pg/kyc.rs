@@ -2,8 +2,8 @@ use crate::traits::*;
 use backend_model::{db, staff as staff_map};
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::AsyncPgConnection;
+use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 
 #[derive(Clone)]
@@ -471,7 +471,7 @@ impl KycRepo for KycRepository {
             updated_at: Utc::now(),
         };
 
-        let mut query = diesel::update(kyc_submission::table)
+        let query = diesel::update(kyc_submission::table)
             .filter(kyc_submission::status.eq("DRAFT"))
             .filter(
                 kyc_submission::kyc_case_id.eq_any(
