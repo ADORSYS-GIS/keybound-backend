@@ -165,207 +165,210 @@ pub struct KycReviewDecisionRecord {
     pub decided_at: DateTime<Utc>,
 }
 
+#[backend_core::async_trait]
 pub trait KycRepo: Send + Sync {
-    fn start_or_resume_session(
+    async fn start_or_resume_session(
         &self,
         user_id: &str,
-    ) -> impl Future<Output = RepoResult<(backend_model::db::KycSessionRow, Vec<String>)>> + Send;
+    ) -> RepoResult<(backend_model::db::KycSessionRow, Vec<String>)>;
 
-    fn create_step(
+    async fn create_step(
         &self,
         input: KycStepCreateInput,
-    ) -> impl Future<Output = RepoResult<backend_model::db::KycStepRow>> + Send;
+    ) -> RepoResult<backend_model::db::KycStepRow>;
 
-    fn get_step(
+    async fn get_step(
         &self,
         step_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycStepRow>>> + Send;
+    ) -> RepoResult<Option<backend_model::db::KycStepRow>>;
 
-    fn count_recent_otp_challenges(
+    async fn count_recent_otp_challenges(
         &self,
         step_id: &str,
         since: DateTime<Utc>,
-    ) -> impl Future<Output = RepoResult<i64>> + Send;
+    ) -> RepoResult<i64>;
 
-    fn create_otp_challenge(
+    async fn create_otp_challenge(
         &self,
         input: OtpChallengeCreateInput,
-    ) -> impl Future<Output = RepoResult<backend_model::db::KycOtpChallengeRow>> + Send;
+    ) -> RepoResult<backend_model::db::KycOtpChallengeRow>;
 
-    fn get_otp_challenge(
+    async fn get_otp_challenge(
         &self,
         step_id: &str,
         otp_ref: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycOtpChallengeRow>>> + Send;
+    ) -> RepoResult<Option<backend_model::db::KycOtpChallengeRow>>;
 
-    fn mark_otp_verified(
+    async fn mark_otp_verified(
         &self,
         step_id: &str,
         otp_ref: &str,
-    ) -> impl Future<Output = RepoResult<()>> + Send;
+    ) -> RepoResult<()>;
 
-    fn decrement_otp_tries(
+    async fn decrement_otp_tries(
         &self,
         step_id: &str,
         otp_ref: &str,
-    ) -> impl Future<Output = RepoResult<i32>> + Send;
+    ) -> RepoResult<i32>;
 
-    fn count_recent_magic_challenges(
+    async fn count_recent_magic_challenges(
         &self,
         step_id: &str,
         since: DateTime<Utc>,
-    ) -> impl Future<Output = RepoResult<i64>> + Send;
+    ) -> RepoResult<i64>;
 
-    fn create_magic_challenge(
+    async fn create_magic_challenge(
         &self,
         input: MagicChallengeCreateInput,
-    ) -> impl Future<Output = RepoResult<backend_model::db::KycMagicEmailChallengeRow>> + Send;
+    ) -> RepoResult<backend_model::db::KycMagicEmailChallengeRow>;
 
-    fn get_magic_challenge(
+    async fn get_magic_challenge(
         &self,
         token_ref: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycMagicEmailChallengeRow>>> + Send;
+    ) -> RepoResult<Option<backend_model::db::KycMagicEmailChallengeRow>>;
 
-    fn mark_magic_verified(&self, token_ref: &str) -> impl Future<Output = RepoResult<()>> + Send;
+    async fn mark_magic_verified(&self, token_ref: &str) -> RepoResult<()>;
 
-    fn update_step_status(
+    async fn update_step_status(
         &self,
         step_id: &str,
         status: &str,
-    ) -> impl Future<Output = RepoResult<()>> + Send;
+    ) -> RepoResult<()>;
 
-    fn create_upload_intent(
+    async fn create_upload_intent(
         &self,
         input: UploadIntentCreateInput,
-    ) -> impl Future<Output = RepoResult<backend_model::db::KycUploadRow>> + Send;
+    ) -> RepoResult<backend_model::db::KycUploadRow>;
 
-    fn complete_upload_and_register_evidence(
+    async fn complete_upload_and_register_evidence(
         &self,
         input: UploadCompleteInput,
-    ) -> impl Future<Output = RepoResult<UploadCompleteResult>> + Send;
+    ) -> RepoResult<UploadCompleteResult>;
 
-    fn list_staff_submissions(
+    async fn list_staff_submissions(
         &self,
         filter: KycSubmissionFilter,
-    ) -> impl Future<Output = RepoResult<(Vec<KycStaffSubmissionSummaryRow>, i64)>> + Send;
+    ) -> RepoResult<(Vec<KycStaffSubmissionSummaryRow>, i64)>;
 
-    fn get_staff_submission(
+    async fn get_staff_submission(
         &self,
         submission_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<KycStaffSubmissionDetailRow>>> + Send;
+    ) -> RepoResult<Option<KycStaffSubmissionDetailRow>>;
 
-    fn list_staff_submission_documents(
+    async fn list_staff_submission_documents(
         &self,
         submission_id: &str,
-    ) -> impl Future<Output = RepoResult<Vec<KycStaffDocumentRow>>> + Send;
+    ) -> RepoResult<Vec<KycStaffDocumentRow>>;
 
-    fn get_staff_submission_document(
+    async fn get_staff_submission_document(
         &self,
         submission_id: &str,
         document_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<KycStaffDocumentRow>>> + Send;
+    ) -> RepoResult<Option<KycStaffDocumentRow>>;
 
-    fn approve_submission(
+    async fn approve_submission(
         &self,
         submission_id: &str,
         reviewer_id: Option<&str>,
         notes: Option<&str>,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
+    ) -> RepoResult<bool>;
 
-    fn reject_submission(
+    async fn reject_submission(
         &self,
         submission_id: &str,
         reviewer_id: Option<&str>,
         reason: &str,
         notes: Option<&str>,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
+    ) -> RepoResult<bool>;
 
-    fn request_submission_info(
+    async fn request_submission_info(
         &self,
         submission_id: &str,
         message: &str,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
+    ) -> RepoResult<bool>;
 
-    fn list_review_cases(
+    async fn list_review_cases(
         &self,
         page: i32,
         limit: i32,
-    ) -> impl Future<Output = RepoResult<(Vec<KycReviewCaseRow>, i64)>> + Send;
+    ) -> RepoResult<(Vec<KycReviewCaseRow>, i64)>;
 
-    fn get_review_case(
+    async fn get_review_case(
         &self,
         case_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<KycReviewCaseRow>>> + Send;
+    ) -> RepoResult<Option<KycReviewCaseRow>>;
 
-    fn decide_review_case(
+    async fn decide_review_case(
         &self,
         case_id: &str,
         outcome: &str,
         reason_code: &str,
         comment: Option<&str>,
         reviewer_id: Option<&str>,
-    ) -> impl Future<Output = RepoResult<Option<KycReviewDecisionRecord>>> + Send;
+    ) -> RepoResult<Option<KycReviewDecisionRecord>>;
 }
 
+#[backend_core::async_trait]
 pub trait UserRepo: Send + Sync {
-    fn create_user(
+    async fn create_user(
         &self,
         req: &backend_model::kc::UserUpsert,
-    ) -> impl Future<Output = RepoResult<backend_model::db::UserRow>> + Send;
-    fn get_user(
+    ) -> RepoResult<backend_model::db::UserRow>;
+    async fn get_user(
         &self,
         user_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::UserRow>>> + Send;
-    fn update_user(
+    ) -> RepoResult<Option<backend_model::db::UserRow>>;
+    async fn update_user(
         &self,
         user_id: &str,
         req: &backend_model::kc::UserUpsert,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::UserRow>>> + Send;
-    fn delete_user(&self, user_id: &str) -> impl Future<Output = RepoResult<u64>> + Send;
-    fn search_users(
+    ) -> RepoResult<Option<backend_model::db::UserRow>>;
+    async fn delete_user(&self, user_id: &str) -> RepoResult<u64>;
+    async fn search_users(
         &self,
         req: &backend_model::kc::UserSearch,
-    ) -> impl Future<Output = RepoResult<Vec<backend_model::db::UserRow>>> + Send;
-    fn resolve_user_by_phone(
+    ) -> RepoResult<Vec<backend_model::db::UserRow>>;
+    async fn resolve_user_by_phone(
         &self,
         realm: &str,
         phone: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::UserRow>>> + Send;
-    fn resolve_or_create_user_by_phone(
+    ) -> RepoResult<Option<backend_model::db::UserRow>>;
+    async fn resolve_or_create_user_by_phone(
         &self,
         realm: &str,
         phone: &str,
-    ) -> impl Future<Output = RepoResult<(backend_model::db::UserRow, bool)>> + Send;
+    ) -> RepoResult<(backend_model::db::UserRow, bool)>;
 }
 
+#[backend_core::async_trait]
 pub trait DeviceRepo: Send + Sync {
-    fn lookup_device(
+    async fn lookup_device(
         &self,
         req: &backend_model::kc::DeviceLookupRequest,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::DeviceRow>>> + Send;
-    fn list_user_devices(
+    ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
+    async fn list_user_devices(
         &self,
         user_id: &str,
         include_revoked: bool,
-    ) -> impl Future<Output = RepoResult<Vec<backend_model::db::DeviceRow>>> + Send;
-    fn get_user_device(
+    ) -> RepoResult<Vec<backend_model::db::DeviceRow>>;
+    async fn get_user_device(
         &self,
         user_id: &str,
         device_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::DeviceRow>>> + Send;
-    fn update_device_status(
+    ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
+    async fn update_device_status(
         &self,
         record_id: &str,
         status: &str,
-    ) -> impl Future<Output = RepoResult<backend_model::db::DeviceRow>> + Send;
-    fn find_device_binding(
+    ) -> RepoResult<backend_model::db::DeviceRow>;
+    async fn find_device_binding(
         &self,
         device_id: &str,
         jkt: &str,
-    ) -> impl Future<Output = RepoResult<Option<(String, String)>>> + Send;
-    fn bind_device(
+    ) -> RepoResult<Option<(String, String)>>;
+    async fn bind_device(
         &self,
         req: &backend_model::kc::EnrollmentBindRequest,
-    ) -> impl Future<Output = RepoResult<String>> + Send;
-    fn count_user_devices(&self, user_id: &str) -> impl Future<Output = RepoResult<i64>> + Send;
+    ) -> RepoResult<String>;
+    async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64>;
 }

@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 
+[features]
+test-utils = []
+
 [dependencies]
 backend-auth.workspace = true
 backend-core = { workspace = true, features = ["axum"] }
@@ -33,6 +36,7 @@ rand.workspace = true
 serde_json.workspace = true
 json-patch.workspace = true
 serde.workspace = true
+serde_yaml.workspace = true
 redis.workspace = true
 apalis.workspace = true
 apalis-redis.workspace = true
@@ -46,3 +50,6 @@ gen_oas_server_bff.workspace = true
 gen_oas_server_kc.workspace = true
 gen_oas_server_staff.workspace = true
 gen_oas_server_cuss.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true

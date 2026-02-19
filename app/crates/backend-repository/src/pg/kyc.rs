@@ -1,5 +1,5 @@
 use crate::traits::*;
-use backend_core::Error;
+use backend_core::{Error, async_trait};
 use backend_model::db;
 use chrono::{DateTime, Utc};
 use diesel::dsl::count_star;
@@ -71,6 +71,7 @@ impl KycRepository {
     }
 }
 
+#[async_trait]
 impl KycRepo for KycRepository {
     async fn start_or_resume_session(
         &self,

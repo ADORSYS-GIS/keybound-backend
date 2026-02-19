@@ -1,4 +1,5 @@
 use crate::traits::*;
+use backend_core::async_trait;
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
 use diesel_async::AsyncPgConnection;
@@ -25,6 +26,7 @@ impl UserRepository {
     }
 }
 
+#[async_trait]
 impl UserRepo for UserRepository {
     async fn create_user(&self, req: &kc_map::UserUpsert) -> RepoResult<db::UserRow> {
         use backend_model::schema::app_user::dsl::*;

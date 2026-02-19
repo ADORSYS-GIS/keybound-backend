@@ -2,6 +2,8 @@ pub(crate) mod api;
 pub(crate) mod health;
 pub(crate) mod sms_provider;
 pub(crate) mod state;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 pub(crate) mod worker;
 
 use axum::Router;

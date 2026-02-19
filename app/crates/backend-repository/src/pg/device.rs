@@ -1,5 +1,5 @@
 use crate::traits::*;
-use backend_core::Error;
+use backend_core::{Error, async_trait};
 use backend_model::kc::device_record_id;
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
@@ -27,6 +27,7 @@ impl DeviceRepository {
     }
 }
 
+#[async_trait]
 impl DeviceRepo for DeviceRepository {
     async fn lookup_device(
         &self,

@@ -1,6 +1,7 @@
+use crate::sms_provider::SmsProvider;
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
-use backend_repository::{DeviceRepository, KycRepository, UserRepository};
+use backend_repository::{DeviceRepo, DeviceRepository, KycRepo, KycRepository, UserRepo, UserRepository};
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
 use std::sync::Arc;
@@ -9,9 +10,10 @@ use tracing::info;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub kyc: KycRepository,
-    pub user: UserRepository,
-    pub device: DeviceRepository,
+    pub kyc: Arc<dyn KycRepo>,
+    pub user: Arc<dyn UserRepo>,
+    pub device: Arc<dyn DeviceRepo>,
+    pub sms: Arc<dyn SmsProvider>,
     pub s3: aws_sdk_s3::Client,
     pub config: Config,
     pub oidc_state: Arc<OidcState>,
@@ -59,9 +61,17 @@ impl AppState {
             aws_sdk_s3::Client::from_conf(builder.build())
         };
 
-        let kyc = KycRepository::new(pool.clone());
-        let user = UserRepository::new(pool.clone());
-        let device = DeviceRepository::new(pool.clone());
+        let kyc: Arc<dyn KycRepo> = Arc::new(KycRepository::new(pool.clone()));
+        let user: Arc<dyn UserRepo> = Arc::new(UserRepository::new(pool.clone()));
+        let device: Arc<dyn DeviceRepo> = Arc::new(DeviceRepository::new(pool.clone()));
+
+        let sms: Arc<dyn SmsProvider> = match cfg.sms.as_ref().map(|s| &s.provider) {
+            Some(backend_core::SmsProviderType::Sns) => {
+                let sns_client = aws_sdk_sns::Client::new(&shared_config);
+                Arc::new(crate::sms_provider::SnsSmsProvider::new(sns_client))
+            }
+            _ => Arc::new(crate::sms_provider::ConsoleSmsProvider),
+        };
 
         let http_client = HttpClient::new_with_defaults()?;
 
@@ -83,6 +93,7 @@ impl AppState {
             kyc,
             user,
             device,
+            sms,
             s3,
             config: cfg.clone(),
             oidc_state,

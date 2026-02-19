@@ -100,6 +100,8 @@ axum-extra = "0.12"
 headers = "0.4"
 tower-http = { version = "0.6.8", features = ["trace"] }
 
+mockall = "0.14"
+
 [profile.release]
 lto = true
 opt-level = "z"
