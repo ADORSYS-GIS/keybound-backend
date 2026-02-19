@@ -1,8 +1,8 @@
 use crate::sms_provider::SmsProvider;
 use crate::state::AppState;
-use crate::worker::WorkerHttpClient;
-use backend_core::async_trait;
+use crate::worker::{NotificationJob, NotificationQueue, WorkerHttpClient};
 use backend_auth::{OidcState, SignatureState};
+use backend_core::async_trait;
 use backend_core::{Config, Result};
 use backend_repository::{
     DeviceRepo, KycRepo, KycReviewCaseRow, KycReviewDecisionRecord, KycStaffDocumentRow,
@@ -26,6 +26,14 @@ mock! {
     }
     impl std::fmt::Debug for WorkerHttpClient {
         fn fmt<'a>(&self, f: &mut std::fmt::Formatter<'a>) -> std::fmt::Result;
+    }
+}
+
+mock! {
+    pub NotificationQueue {}
+    #[async_trait]
+    impl NotificationQueue for NotificationQueue {
+        async fn enqueue(&self, job: NotificationJob) -> backend_core::Result<()>;
     }
 }
 
@@ -259,6 +267,7 @@ pub struct TestAppStateBuilder {
     pub user: Option<Arc<dyn UserRepo>>,
     pub device: Option<Arc<dyn DeviceRepo>>,
     pub sms: Option<Arc<dyn SmsProvider>>,
+    pub notification_queue: Option<Arc<dyn NotificationQueue>>,
     pub worker_http_client: Option<Arc<dyn WorkerHttpClient>>,
     pub config: Option<Config>,
 }
@@ -270,6 +279,7 @@ impl Default for TestAppStateBuilder {
             user: None,
             device: None,
             sms: None,
+            notification_queue: None,
             worker_http_client: None,
             config: None,
         }
@@ -298,6 +308,11 @@ impl TestAppStateBuilder {
 
     pub fn with_sms(mut self, sms: Arc<dyn SmsProvider>) -> Self {
         self.sms = Some(sms);
+        self
+    }
+
+    pub fn with_notification_queue(mut self, queue: Arc<dyn NotificationQueue>) -> Self {
+        self.notification_queue = Some(queue);
         self
     }
 
@@ -371,6 +386,9 @@ cuss:
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
             device: self.device.unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
             sms: self.sms.unwrap_or_else(|| Arc::new(MockSmsProvider::new())),
+            notification_queue: self
+                .notification_queue
+                .unwrap_or_else(|| Arc::new(MockNotificationQueue::new())),
             worker_http_client: self
                 .worker_http_client
                 .unwrap_or_else(|| Arc::new(reqwest::Client::new())),

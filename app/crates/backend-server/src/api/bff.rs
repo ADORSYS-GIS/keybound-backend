@@ -1,5 +1,5 @@
 use super::BackendApi;
-use crate::worker::{self, NotificationJob};
+use crate::worker::{NotificationJob, NotificationQueue};
 use aws_sdk_s3::types::ServerSideEncryption;
 use axum_extra::extract::CookieJar;
 use backend_auth::JwtToken;
@@ -160,16 +160,15 @@ impl Notifications<Error> for BackendApi {
             .await?;
 
         let token = format!("{}.{}", challenge.token_ref, secret);
-        worker::enqueue_notification(
-            &self.state.config.redis.url,
-            NotificationJob::MagicEmail {
+        self.state
+            .notification_queue
+            .enqueue(NotificationJob::MagicEmail {
                 step_id: challenge.step_id.clone(),
                 email: body.email.clone(),
                 token,
-            },
-        )
-        .await
-        .map_err(|err| Error::internal("NOTIFICATION_ENQUEUE_FAILED", err.to_string()))?;
+            })
+            .await
+            .map_err(|err| Error::internal("NOTIFICATION_ENQUEUE_FAILED", err.to_string()))?;
 
         Ok(InternalIssueMagicEmailResponse::Status200_Challenge(
             models::MagicEmailChallengeInternal::new(challenge.token_ref, challenge.expires_at),
@@ -227,16 +226,15 @@ impl Notifications<Error> for BackendApi {
             })
             .await?;
 
-        worker::enqueue_notification(
-            &self.state.config.redis.url,
-            NotificationJob::Otp {
+        self.state
+            .notification_queue
+            .enqueue(NotificationJob::Otp {
                 step_id: body.step_id.clone(),
                 msisdn: body.msisdn.clone(),
                 otp,
-            },
-        )
-        .await
-        .map_err(|err| Error::internal("NOTIFICATION_ENQUEUE_FAILED", err.to_string()))?;
+            })
+            .await
+            .map_err(|err| Error::internal("NOTIFICATION_ENQUEUE_FAILED", err.to_string()))?;
 
         Ok(InternalIssueOtpResponse::Status200_Challenge(
             models::OtpChallengeInternal::new(
@@ -735,4 +733,464 @@ fn generate_otp_code() -> String {
 
 fn generate_magic_secret() -> String {
     format!("{:032x}", random::<u128>())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{
+        create_fake_jwt, MockKycRepo, MockNotificationQueue, TestAppStateBuilder,
+    };
+    use backend_model::db::{
+        KycMagicEmailChallengeRow, KycOtpChallengeRow, KycSessionRow, KycStepRow,
+    };
+    use gen_oas_server_bff::apis::notifications::Notifications;
+    use gen_oas_server_bff::apis::steps::Steps;
+    use mockall::predicate::*;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_internal_start_session_success() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo
+            .expect_start_or_resume_session()
+            .with(eq("user123"))
+            .returning(|_| {
+                Ok((
+                    KycSessionRow {
+                        id: "session123".to_string(),
+                        user_id: "user123".to_string(),
+                        status: "OPEN".to_string(),
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                    },
+                    vec!["step1".to_string()],
+                ))
+            });
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::InternalStartSessionRequest {
+            user_id: "user123".to_string(),
+            reason: None,
+        };
+
+        let result = api
+            .internal_start_session(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            InternalStartSessionResponse::Status201_Session(session) => {
+                assert_eq!(session.id, "session123");
+                assert_eq!(session.user_id, "user123");
+                assert_eq!(session.step_ids, vec!["step1"]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_internal_start_session_unauthorized() {
+        let state = TestAppStateBuilder::new().build().await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("other_user");
+        let body = models::InternalStartSessionRequest {
+            user_id: "user123".to_string(),
+            reason: None,
+        };
+
+        let result = api
+            .internal_start_session(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.meta().status_code, 401);
+    }
+
+    #[tokio::test]
+    async fn test_internal_create_step_success() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo.expect_create_step().returning(|_| {
+            Ok(KycStepRow {
+                id: "step123".to_string(),
+                session_id: "session123".to_string(),
+                user_id: "user123".to_string(),
+                step_type: "IDENTITY".to_string(),
+                status: "IN_PROGRESS".to_string(),
+                data: serde_json::Value::Null,
+                policy: serde_json::Value::Null,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                submitted_at: None,
+            })
+        });
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::CreateStepRequest {
+            session_id: "session123".to_string(),
+            user_id: "user123".to_string(),
+            r_type: models::StepType::Identity,
+            policy: None,
+        };
+
+        let result = api
+            .internal_create_step(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            InternalCreateStepResponse::Status201_StepCreated(step) => {
+                assert_eq!(step.id, "step123");
+                assert_eq!(step.r_type, models::StepType::Identity);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_internal_get_step_success() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo
+            .expect_get_step()
+            .with(eq("step123"))
+            .returning(|_| {
+                Ok(Some(KycStepRow {
+                    id: "step123".to_string(),
+                    session_id: "session123".to_string(),
+                    user_id: "user123".to_string(),
+                    step_type: "IDENTITY".to_string(),
+                    status: "IN_PROGRESS".to_string(),
+                    data: serde_json::Value::Null,
+                    policy: serde_json::Value::Null,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    submitted_at: None,
+                }))
+            });
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let path_params = models::InternalGetStepPathParams {
+            step_id: "step123".to_string(),
+        };
+
+        let result = api
+            .internal_get_step(
+                &Method::GET,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &path_params,
+            )
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            InternalGetStepResponse::Status200_Step(step) => {
+                assert_eq!(step.id, "step123");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_internal_issue_otp_success() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo
+            .expect_get_step()
+            .with(eq("step123"))
+            .returning(|_| {
+                Ok(Some(KycStepRow {
+                    id: "step123".to_string(),
+                    session_id: "session123".to_string(),
+                    user_id: "user123".to_string(),
+                    step_type: "PHONE".to_string(),
+                    status: "IN_PROGRESS".to_string(),
+                    data: serde_json::Value::Null,
+                    policy: serde_json::Value::Null,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    submitted_at: None,
+                }))
+            });
+
+        kyc_repo
+            .expect_count_recent_otp_challenges()
+            .returning(|_, _| Ok(0));
+
+        kyc_repo.expect_create_otp_challenge().returning(|_| {
+            Ok(KycOtpChallengeRow {
+                otp_ref: "otp_ref_123".to_string(),
+                step_id: "step123".to_string(),
+                msisdn: "+1234567890".to_string(),
+                channel: "SMS".to_string(),
+                otp_hash: "hash".to_string(),
+                expires_at: Utc::now() + Duration::minutes(5),
+                tries_left: 5,
+                created_at: Utc::now(),
+                verified_at: None,
+            })
+        });
+
+        let mut notification_queue = MockNotificationQueue::new();
+        notification_queue.expect_enqueue().returning(|_| Ok(()));
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .with_notification_queue(Arc::new(notification_queue))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::IssueOtpRequest {
+            step_id: "step123".to_string(),
+            msisdn: "+1234567890".to_string(),
+            channel: None,
+            ttl_seconds: None,
+        };
+
+        let result = api
+            .internal_issue_otp(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_internal_issue_otp_rate_limited() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo.expect_get_step().returning(|_| {
+            Ok(Some(KycStepRow {
+                id: "step123".to_string(),
+                session_id: "session123".to_string(),
+                user_id: "user123".to_string(),
+                step_type: "PHONE".to_string(),
+                status: "IN_PROGRESS".to_string(),
+                data: serde_json::Value::Null,
+                policy: serde_json::Value::Null,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                submitted_at: None,
+            }))
+        });
+
+        kyc_repo
+            .expect_count_recent_otp_challenges()
+            .returning(|_, _| Ok(5)); // Max issues
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::IssueOtpRequest {
+            step_id: "step123".to_string(),
+            msisdn: "+1234567890".to_string(),
+            channel: None,
+            ttl_seconds: None,
+        };
+
+        let result = api
+            .internal_issue_otp(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().meta().status_code, 429);
+    }
+
+    #[tokio::test]
+    async fn test_internal_issue_magic_email_success() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo.expect_get_step().returning(|_| {
+            Ok(Some(KycStepRow {
+                id: "step123".to_string(),
+                session_id: "session123".to_string(),
+                user_id: "user123".to_string(),
+                step_type: "EMAIL".to_string(),
+                status: "IN_PROGRESS".to_string(),
+                data: serde_json::Value::Null,
+                policy: serde_json::Value::Null,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                submitted_at: None,
+            }))
+        });
+
+        kyc_repo
+            .expect_count_recent_magic_challenges()
+            .returning(|_, _| Ok(0));
+
+        kyc_repo.expect_create_magic_challenge().returning(|_| {
+            Ok(KycMagicEmailChallengeRow {
+                token_ref: "token_ref_123".to_string(),
+                step_id: "step123".to_string(),
+                email: "test@example.com".to_string(),
+                token_hash: "hash".to_string(),
+                expires_at: Utc::now() + Duration::minutes(5),
+                created_at: Utc::now(),
+                verified_at: None,
+            })
+        });
+
+        let mut notification_queue = MockNotificationQueue::new();
+        notification_queue.expect_enqueue().returning(|_| Ok(()));
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .with_notification_queue(Arc::new(notification_queue))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::IssueMagicEmailRequest {
+            step_id: "step123".to_string(),
+            email: "test@example.com".to_string(),
+            ttl_seconds: None,
+            include_short_code: None,
+        };
+
+        let result = api
+            .internal_issue_magic_email(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_internal_issue_magic_email_rate_limited() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo.expect_get_step().returning(|_| {
+            Ok(Some(KycStepRow {
+                id: "step123".to_string(),
+                session_id: "session123".to_string(),
+                user_id: "user123".to_string(),
+                step_type: "EMAIL".to_string(),
+                status: "IN_PROGRESS".to_string(),
+                data: serde_json::Value::Null,
+                policy: serde_json::Value::Null,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                submitted_at: None,
+            }))
+        });
+
+        kyc_repo
+            .expect_count_recent_magic_challenges()
+            .returning(|_, _| Ok(5));
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::IssueMagicEmailRequest {
+            step_id: "step123".to_string(),
+            email: "test@example.com".to_string(),
+            ttl_seconds: None,
+            include_short_code: None,
+        };
+
+        let result = api
+            .internal_issue_magic_email(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().meta().status_code, 429);
+    }
 }

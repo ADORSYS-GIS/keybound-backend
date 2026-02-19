@@ -63,6 +63,28 @@ pub enum NotificationJob {
     },
 }
 
+#[async_trait]
+pub trait NotificationQueue: Send + Sync {
+    async fn enqueue(&self, job: NotificationJob) -> backend_core::Result<()>;
+}
+
+pub struct RedisNotificationQueue {
+    redis_url: String,
+}
+
+impl RedisNotificationQueue {
+    pub fn new(redis_url: String) -> Self {
+        Self { redis_url }
+    }
+}
+
+#[async_trait]
+impl NotificationQueue for RedisNotificationQueue {
+    async fn enqueue(&self, job: NotificationJob) -> backend_core::Result<()> {
+        enqueue_notification(&self.redis_url, job).await
+    }
+}
+
 pub async fn enqueue_fineract_provisioning(
     redis_url: &str,
     user_id: &str,

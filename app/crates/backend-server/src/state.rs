@@ -1,5 +1,5 @@
 use crate::sms_provider::SmsProvider;
-use crate::worker::WorkerHttpClient;
+use crate::worker::{NotificationQueue, RedisNotificationQueue, WorkerHttpClient};
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
 use backend_repository::{DeviceRepo, DeviceRepository, KycRepo, KycRepository, UserRepo, UserRepository};
@@ -15,6 +15,7 @@ pub struct AppState {
     pub user: Arc<dyn UserRepo>,
     pub device: Arc<dyn DeviceRepo>,
     pub sms: Arc<dyn SmsProvider>,
+    pub notification_queue: Arc<dyn NotificationQueue>,
     pub s3: aws_sdk_s3::Client,
     pub config: Config,
     pub oidc_state: Arc<OidcState>,
@@ -95,16 +96,87 @@ impl AppState {
         let worker_http_client: Arc<dyn WorkerHttpClient> =
             Arc::new(reqwest::Client::builder().build()?);
 
+        let notification_queue = Arc::new(RedisNotificationQueue::new(cfg.redis.url.clone()));
+
         Ok(Self {
             kyc,
             user,
             device,
             sms,
+            notification_queue,
             s3,
             config: cfg.clone(),
             oidc_state,
             signature_state,
             worker_http_client,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::health::health_router;
+    use axum::body::Body;
+    use axum::http::Request;
+    use backend_core::Config;
+    use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_app_state_from_config_minimal() {
+        let config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+  tls:
+    cert_path: "cert.pem"
+    key_path: "key.pem"
+logging:
+  level: "info"
+database:
+  url: "postgres://localhost/test"
+oauth2:
+  issuer: "http://localhost:8081/realms/test"
+kc:
+  enabled: true
+  base_path: "/kc"
+  signature_secret: "test-secret"
+  max_clock_skew_seconds: 30
+  max_body_bytes: 1048576
+bff:
+  enabled: true
+  base_path: "/bff"
+staff:
+  enabled: true
+  base_path: "/staff"
+cuss:
+  api_url: "http://localhost:8082"
+"#;
+        let cfg: Config = serde_yaml::from_str(config_yaml).unwrap();
+
+        // Create a dummy pool. It won't be used for actual DB ops in this test.
+        let manager = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new("postgres://localhost/test");
+        let pool = Pool::builder(manager).build().unwrap();
+
+        let state = AppState::from_config(&cfg, pool).await.unwrap();
+
+        assert_eq!(state.config.server.port, 8080);
+    }
+
+    #[tokio::test]
+    async fn test_health_router_regression() {
+        let app = health_router();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), hyper::StatusCode::OK);
     }
 }
