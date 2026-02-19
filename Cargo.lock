@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "backend-cli",
  "backend-core",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "backend-auth"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -902,14 +902,14 @@ dependencies = [
 
 [[package]]
 name = "backend-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "clap",
 ]
 
 [[package]]
 name = "backend-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "backend-id"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "backend-core",
  "cuid",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "backend-migrate"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "backend-core",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "backend-model"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "diesel",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "backend-otlp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "backend-core",
  "tracing",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "backend-repository"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "backend-core",
@@ -1002,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "backend-server"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "apalis",
  "apalis-redis",

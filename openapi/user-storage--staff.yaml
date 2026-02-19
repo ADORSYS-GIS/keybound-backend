@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Customer Registration Staff Review API
-  version: 1.0.0
+  version: 0.1.2
   description: KYC review endpoints available only to staff reviewers.
 servers:
   - url: 'https://api.example.com'
@@ -21,18 +21,8 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 'Optional status filter (pending, approved, rejected).'
-        - name: search
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Optional text to search across names and emails.
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/SearchQuery'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -53,12 +43,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: User ID.
+        - $ref: '#/components/parameters/UserId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -81,12 +66,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: User ID.
+        - $ref: '#/components/parameters/UserId'
       requestBody:
         required: true
         content:
@@ -109,12 +89,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: User ID.
+        - $ref: '#/components/parameters/UserId'
       requestBody:
         required: true
         content:
@@ -137,12 +112,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: User ID.
+        - $ref: '#/components/parameters/UserId'
       requestBody:
         required: true
         content:
@@ -165,18 +135,8 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: User ID.
-        - name: documentId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Document ID.
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/DocumentId'
       requestBody:
         required: false
         content:
@@ -226,12 +186,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: caseId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Case ID.
+        - $ref: '#/components/parameters/CaseId'
       description: Fetches a case record with its evidence references so the reviewer can inspect all attachments.
       responses:
         "200":
@@ -249,12 +204,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: caseId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Case ID.
+        - $ref: '#/components/parameters/CaseId'
       description: Persists the reviewer's decision and reason, updating the case status and notifying downstream systems.
       requestBody:
         required: true
@@ -295,7 +245,50 @@ components:
         default: 20
         minimum: 1
       description: Page size (default 20).
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/KycStatus'
+      description: Optional status filter for review queues and submissions.
+    SearchQuery:
+      name: search
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/SearchText'
+      description: Optional text to search across names and emails.
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UserId'
+      description: User ID.
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/DocumentId'
+      description: Document ID.
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/CaseId'
+      description: Case ID.
   schemas:
+    SearchText:
+      type: string
+    UserId:
+      type: string
+    DocumentId:
+      type: string
+    CaseId:
+      type: string
     KycSubmissionsResponse:
       type: object
       properties:
