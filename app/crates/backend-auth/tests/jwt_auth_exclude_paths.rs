@@ -4,12 +4,15 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Request, StatusCode};
 use axum::routing::get;
 use axum::{body::to_bytes, response::Response};
-use backend_auth::{JwksProvider, jwks_auth_layer, kc_signature_layer, require_kc_signature};
+use backend_auth::{
+    JwksProvider, SignatureState, jwks_auth_layer, kc_signature_layer, require_kc_signature,
+};
 use backend_core::KcAuth;
 use base64::Engine;
 use jwks::Jwks;
 use ring::hmac;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 
@@ -20,6 +23,14 @@ fn build_kc_auth() -> KcAuth {
         signature_secret: "test-secret".to_owned(),
         max_clock_skew_seconds: 120,
         max_body_bytes: 1024,
+    }
+}
+
+fn build_signature_state(cfg: &KcAuth) -> SignatureState {
+    SignatureState {
+        signature_secret: cfg.signature_secret.clone(),
+        max_clock_skew_seconds: cfg.max_clock_skew_seconds,
+        max_body_bytes: cfg.max_body_bytes,
     }
 }
 
@@ -63,7 +74,8 @@ async fn kc_signature_bypasses_when_disabled() {
         .body(Body::empty())
         .unwrap();
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_ok());
 }
@@ -76,7 +88,8 @@ async fn kc_signature_rejects_when_timestamp_header_is_missing() {
         .body(Body::empty())
         .unwrap();
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -95,7 +108,8 @@ async fn kc_signature_rejects_when_signature_header_is_missing() {
         .headers_mut()
         .insert("x-kc-timestamp", HeaderValue::from_str(&timestamp).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -116,7 +130,8 @@ async fn kc_signature_rejects_when_timestamp_is_invalid() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_static("any"));
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -139,7 +154,8 @@ async fn kc_signature_rejects_when_timestamp_is_outside_allowed_skew() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_static("any"));
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -163,7 +179,8 @@ async fn kc_signature_rejects_when_signature_is_invalid() {
         HeaderValue::from_static("invalid-signature"),
     );
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -190,7 +207,8 @@ async fn kc_signature_rejects_when_body_exceeds_limit() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -216,7 +234,8 @@ async fn kc_signature_accepts_valid_signature_and_preserves_body() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_ok());
     let request = result.unwrap();
@@ -226,9 +245,11 @@ async fn kc_signature_accepts_valid_signature_and_preserves_body() {
 
 #[tokio::test]
 async fn kc_signature_layer_rejects_requests_without_headers() {
+    let cfg = build_kc_auth();
+    let state = Arc::new(build_signature_state(&cfg));
     let router = Router::new()
         .route("/v1/users", get(|| async { "ok" }))
-        .layer(kc_signature_layer(build_kc_auth()));
+        .layer(kc_signature_layer(cfg.enabled, state));
 
     let response = router
         .oneshot(
@@ -268,7 +289,8 @@ async fn kc_signature_handles_url_encoded_paths() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(
         result.is_ok(),
@@ -284,11 +306,12 @@ async fn kc_signature_works_with_nested_router() {
     let full_path = "/v1/nested/users";
     let signature = kc_signature(&cfg.signature_secret, timestamp, "GET", full_path, body);
 
+    let state = Arc::new(build_signature_state(&cfg));
     let router = Router::new().nest(
         "/v1/nested",
         Router::new()
             .route("/users", get(|| async { "ok" }))
-            .layer(kc_signature_layer(cfg.clone())),
+            .layer(kc_signature_layer(cfg.enabled, state)),
     );
 
     let mut request = Request::builder()
@@ -338,7 +361,8 @@ async fn kc_signature_rejects_when_method_mismatch() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -368,7 +392,8 @@ async fn kc_signature_rejects_when_path_mismatch() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
@@ -397,7 +422,8 @@ async fn kc_signature_rejects_when_body_mismatch() {
         .headers_mut()
         .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
 
-    let result = require_kc_signature(&cfg, request).await;
+    let state = build_signature_state(&cfg);
+    let result = require_kc_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;

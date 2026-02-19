@@ -3,68 +3,49 @@ use axum::body::{Body, to_bytes};
 use axum::extract::OriginalUri;
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
 use axum::response::{IntoResponse, Response};
-use backend_core::KcAuth;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use crate::signature_principal::SignatureState;
 use jsonwebtoken::{Validation, decode, decode_header};
 use jwks::Jwks;
-use ring::hmac;
 use serde::Deserialize;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::OnceCell;
 use tower::{Layer, Service};
 use tracing::error;
 
 pub async fn require_kc_signature(
-    cfg: &KcAuth,
+    enabled: bool,
+    state: &SignatureState,
     req: Request<Body>,
 ) -> Result<Request<Body>, Response> {
-    if !cfg.enabled {
+    if !enabled {
         return Ok(req);
     }
 
-    let timestamp_header = match header_value(req.headers(), "x-kc-timestamp") {
-        Some(value) => value,
-        None => return Err(unauthorized("missing x-kc-timestamp")),
-    };
-    let signature_header = match header_value(req.headers(), "x-kc-signature") {
-        Some(value) => value,
-        None => return Err(unauthorized("missing x-kc-signature")),
-    };
-    if is_timestamp_invalid(&timestamp_header, cfg.max_clock_skew_seconds) {
-        return Err(unauthorized("invalid x-kc-timestamp"));
-    }
-
-    let method = req.method().as_str().to_uppercase();
-    let path = req
+    let method = req.method().clone();
+    let uri = req
         .extensions()
         .get::<OriginalUri>()
-        .map(|uri| uri.0.path().to_owned())
-        .unwrap_or_else(|| req.uri().path().to_owned());
+        .map(|u| u.0.clone())
+        .unwrap_or_else(|| req.uri().clone());
+
     let (parts, body) = req.into_parts();
-    let body_bytes = match to_bytes(body, cfg.max_body_bytes).await {
+    let body_bytes = match to_bytes(body, state.max_body_bytes).await {
         Ok(value) => value,
         Err(_) => return Err(unauthorized("invalid request body")),
     };
-    let body_str = String::from_utf8_lossy(&body_bytes);
-    let payload = format!("{timestamp_header}\n{method}\n{path}\n{body_str}");
 
-    let key = hmac::Key::new(hmac::HMAC_SHA256, cfg.signature_secret.as_bytes());
-    let digest = hmac::sign(&key, payload.as_bytes());
-    let expected = URL_SAFE_NO_PAD.encode(digest.as_ref());
-    if expected != signature_header {
-        return Err(unauthorized("invalid x-kc-signature"));
+    if let Err(e) = state.verify_signature(&method, &uri, &parts.headers, &body_bytes) {
+        return Err(unauthorized(&e.to_string()));
     }
 
     Ok(Request::from_parts(parts, Body::from(body_bytes)))
 }
 
-pub fn kc_signature_layer(cfg: KcAuth) -> KcSignatureLayer {
-    KcSignatureLayer::new(cfg)
+pub fn kc_signature_layer(enabled: bool, state: Arc<SignatureState>) -> KcSignatureLayer {
+    KcSignatureLayer::new(enabled, state)
 }
 
 #[async_trait]
@@ -234,12 +215,13 @@ fn validate_token(token: &str, jwks: &Jwks) -> bool {
 
 #[derive(Clone)]
 pub struct KcSignatureLayer {
-    cfg: Arc<KcAuth>,
+    enabled: bool,
+    state: Arc<SignatureState>,
 }
 
 impl KcSignatureLayer {
-    fn new(cfg: KcAuth) -> Self {
-        Self { cfg: Arc::new(cfg) }
+    fn new(enabled: bool, state: Arc<SignatureState>) -> Self {
+        Self { enabled, state }
     }
 }
 
@@ -249,7 +231,8 @@ impl<S> Layer<S> for KcSignatureLayer {
     fn layer(&self, inner: S) -> Self::Service {
         KcSignatureService {
             inner,
-            cfg: Arc::clone(&self.cfg),
+            enabled: self.enabled,
+            state: Arc::clone(&self.state),
         }
     }
 }
@@ -257,7 +240,8 @@ impl<S> Layer<S> for KcSignatureLayer {
 #[derive(Clone)]
 pub struct KcSignatureService<S> {
     inner: S,
-    cfg: Arc<KcAuth>,
+    enabled: bool,
+    state: Arc<SignatureState>,
 }
 
 impl<S> Service<Request<Body>> for KcSignatureService<S>
@@ -274,10 +258,11 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let cfg = Arc::clone(&self.cfg);
+        let enabled = self.enabled;
+        let state = Arc::clone(&self.state);
         let mut inner = self.inner.clone();
         Box::pin(async move {
-            match require_kc_signature(&cfg, req).await {
+            match require_kc_signature(enabled, &state, req).await {
                 Ok(req) => inner.call(req).await,
                 Err(resp) => Ok(resp),
             }
@@ -303,22 +288,6 @@ fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
     }
 }
 
-fn header_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(ToOwned::to_owned)
-}
-
-fn is_timestamp_invalid(timestamp: &str, max_clock_skew_seconds: i64) -> bool {
-    let Ok(ts) = timestamp.parse::<i64>() else {
-        return true;
-    };
-    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
-        return true;
-    };
-    (now.as_secs() as i64 - ts).abs() > max_clock_skew_seconds
-}
 
 fn unauthorized(message: &str) -> Response {
     (

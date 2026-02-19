@@ -14,6 +14,10 @@ impl JwtToken {
         JwtToken { claims }
     }
 
+    pub fn user_id(&self) -> &str {
+        &self.claims.sub
+    }
+
     #[instrument(skip(oidc_state))]
     pub async fn verify(
         token: &str,

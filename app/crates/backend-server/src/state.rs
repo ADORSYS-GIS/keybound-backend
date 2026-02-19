@@ -1,11 +1,13 @@
 use crate::sms_provider::{ConsoleSmsProvider, SmsProvider, SnsSmsProvider};
+use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::{Config, SmsProviderType};
 use backend_repository::{
     ApprovalRepository, DeviceRepository, KycRepository, SmsRepository, UserRepository,
 };
-use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::AsyncPgConnection;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::info;
 
 #[derive(Clone)]
@@ -19,6 +21,8 @@ pub struct AppState {
     pub sns: aws_sdk_sns::Client,
     pub sms_provider: Arc<dyn SmsProvider>,
     pub config: Config,
+    pub oidc_state: Arc<OidcState>,
+    pub signature_state: Arc<SignatureState>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -33,7 +37,8 @@ impl std::fmt::Debug for AppState {
             .field("sns", &"<SnsClient>")
             .field("sms_provider", &"<SmsProvider>")
             .field("config", &self.config)
-            .field("http_cache", &"<HttpCache>")
+            .field("oidc_state", &"<OidcState>")
+            .field("signature_state", &"<SignatureState>")
             .finish()
     }
 }
@@ -92,6 +97,22 @@ impl AppState {
         let approval = ApprovalRepository::new(pool.clone());
         let sms = SmsRepository::new(pool.clone());
 
+        let http_client = HttpClient::new_with_defaults()?;
+
+        let oidc_state = Arc::new(OidcState::new(
+            cfg.oauth2.issuer.clone(),
+            None, // TODO: add audiences to config if needed
+            Duration::from_secs(3600),
+            Duration::from_secs(3600),
+            http_client,
+        ));
+
+        let signature_state = Arc::new(SignatureState {
+            signature_secret: cfg.kc.signature_secret.clone(),
+            max_clock_skew_seconds: cfg.kc.max_clock_skew_seconds,
+            max_body_bytes: cfg.kc.max_body_bytes,
+        });
+
         Ok(Self {
             kyc,
             user,
@@ -102,6 +123,8 @@ impl AppState {
             sns,
             sms_provider,
             config: cfg.clone(),
+            oidc_state,
+            signature_state,
         })
     }
 }

@@ -75,3 +75,6 @@ impl SignatureState {
 pub struct SignaturePrincipal {
     pub subject: String,
 }
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct SignatureContext {}

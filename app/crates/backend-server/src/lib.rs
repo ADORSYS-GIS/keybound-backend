@@ -23,7 +23,11 @@ pub async fn serve(core_config: &Config) -> Result<()> {
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let state = Arc::new(state::AppState::from_config(core_config, pool).await?);
 
-    let api = api::BackendApi::new(state.clone());
+    let api = api::BackendApi::new(
+        state.clone(),
+        state.oidc_state.clone(),
+        state.signature_state.clone(),
+    );
     let app = build_router(api, &state.config);
 
     info!("Listening on {}", listen_addr);
@@ -70,7 +74,7 @@ fn build_router(api: api::BackendApi, config: &Config) -> Router {
     // Mount KC router if base path is provided
     let kc_base = config.kc.base_path.trim();
     if !kc_base.is_empty() && kc_base != "/" {
-        let layer = kc_signature_layer(config.kc.clone());
+        let layer = kc_signature_layer(config.kc.enabled, api.signature_state.clone());
         let kc_router = gen_oas_server_kc::server::new(api.clone()).layer(layer);
         router = router.nest(kc_base, kc_router);
     }
@@ -126,7 +130,7 @@ fn build_router(api: api::BackendApi, config: &Config) -> Router {
 }
 
 fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth) -> Router {
-    let layer = kc_signature_layer(cfg);
+    let layer = kc_signature_layer(cfg.enabled, api.signature_state.clone());
     let router = gen_oas_server_kc::server::new(api);
     router.layer(layer)
 }

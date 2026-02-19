@@ -56,6 +56,7 @@ Never use UUID for backend IDs.
 ## Auth
 - Auth logic is implemented as `axum` middleware layers in `backend-auth`.
 - Each API surface (KC, BFF, Staff) has its own middleware layer applied at the router level in `backend-server`.
+- `BackendApi` and `AppState` hold `Arc<OidcState>` and `Arc<SignatureState>` for runtime verification.
 
 ### Auth and Error Test Coverage (Mandatory)
 - Global error/exception mapping tests live in `app/crates/backend-core/tests/error_response.rs`.
@@ -251,3 +252,4 @@ All backends:
     - **Canonical Payload**: `timestamp + "\n" + method + "\n" + path + "\n" + body`.
     - **Encoding**: The resulting HMAC digest is Base64URL encoded (no padding).
 - **JWT Validation**: Tokens are validated against the JWKS obtained via OIDC discovery.
+- **Integration**: `backend-server`'s `AppState` and `BackendApi` now hold `OidcState` and `SignatureState`. API handlers use these for robust JWT verification and signature checking.
