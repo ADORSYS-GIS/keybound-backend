@@ -18,6 +18,14 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "provisioning_status"))]
     pub struct ProvisioningStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "kyc_review_queue_status"))]
+    pub struct KycReviewQueueStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "kyc_review_decision_outcome"))]
+    pub struct KycReviewDecisionOutcome;
 }
 
 diesel::table! {
@@ -51,13 +59,12 @@ diesel::table! {
     use super::sql_types::KycCaseStatus;
 
     kyc_case (id) {
-        #[max_length = 40]
-        id -> Varchar,
-        #[max_length = 40]
-        user_id -> Varchar,
+        id -> Text,
+        user_id -> Text,
         case_status -> Varchar,
-        #[max_length = 40]
-        active_submission_id -> Nullable<Varchar>,
+        active_submission_id -> Nullable<Text>,
+        queue_rank -> Nullable<Int8>,
+        last_activity_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -69,30 +76,29 @@ diesel::table! {
     use super::sql_types::KycProvisioningStatus;
 
     kyc_submission (id) {
-        #[max_length = 40]
-        id -> Varchar,
-        #[max_length = 40]
-        kyc_case_id -> Varchar,
+        id -> Text,
+        kyc_case_id -> Text,
+        version -> Int4,
         status -> Varchar,
+        requested_tier -> Nullable<Int4>,
+        decided_tier -> Nullable<Int4>,
+        approved_tier -> Nullable<Int4>,
         submitted_at -> Nullable<Timestamptz>,
         decided_at -> Nullable<Timestamptz>,
-        #[max_length = 40]
-        decided_by -> Nullable<Varchar>,
+        decided_by -> Nullable<Text>,
+        reviewer_id -> Nullable<Text>,
+        next_action -> Nullable<Text>,
         provisioning_status -> Varchar,
+        profile_json -> Jsonb,
+        profile_etag -> Text,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
-        #[max_length = 255]
-        first_name -> Nullable<Varchar>,
-        #[max_length = 255]
-        last_name -> Nullable<Varchar>,
-        #[max_length = 320]
-        email -> Nullable<Varchar>,
-        #[max_length = 64]
-        phone_number -> Nullable<Varchar>,
-        #[max_length = 64]
-        date_of_birth -> Nullable<Varchar>,
-        #[max_length = 128]
-        nationality -> Nullable<Varchar>,
+        first_name -> Nullable<Text>,
+        last_name -> Nullable<Text>,
+        email -> Nullable<Text>,
+        phone_number -> Nullable<Text>,
+        date_of_birth -> Nullable<Text>,
+        nationality -> Nullable<Text>,
         rejection_reason -> Nullable<Text>,
         review_notes -> Nullable<Text>,
     }
@@ -103,25 +109,64 @@ diesel::table! {
     use super::sql_types::KycDocumentStatus;
 
     kyc_document (id) {
-        #[max_length = 40]
-        id -> Varchar,
-        #[max_length = 40]
-        submission_id -> Varchar,
-        #[max_length = 64]
-        doc_type -> Varchar,
-        #[max_length = 128]
-        s3_bucket -> Varchar,
-        #[max_length = 512]
-        s3_key -> Varchar,
-        #[max_length = 256]
-        file_name -> Varchar,
-        #[max_length = 128]
-        mime_type -> Varchar,
+        id -> Text,
+        submission_id -> Text,
+        doc_type -> Text,
+        s3_bucket -> Text,
+        s3_key -> Text,
+        file_name -> Text,
+        mime_type -> Text,
         size_bytes -> Int8,
-        #[max_length = 64]
-        sha256 -> Bpchar,
+        sha256 -> Text,
         status -> Varchar,
         uploaded_at -> Timestamptz,
+        expires_at -> Nullable<Timestamptz>,
+        object_url -> Nullable<Text>,
+        is_verified -> Bool,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    kyc_submission_profile_history (id) {
+        id -> Int8,
+        submission_id -> Text,
+        version -> Int4,
+        profile_json -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::KycReviewQueueStatus;
+
+    kyc_review_queue (id) {
+        id -> Int8,
+        case_id -> Text,
+        status -> Varchar,
+        assigned_to -> Nullable<Text>,
+        claimed_at -> Nullable<Timestamptz>,
+        lock_expires_at -> Nullable<Timestamptz>,
+        priority -> Int4,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::KycReviewDecisionOutcome;
+
+    kyc_review_decision (id) {
+        id -> Int8,
+        submission_id -> Text,
+        decision -> Varchar,
+        reason_code -> Text,
+        comment -> Nullable<Text>,
+        decided_at -> Timestamptz,
+        reviewer_id -> Nullable<Text>,
     }
 }
 
@@ -129,17 +174,12 @@ diesel::table! {
     use diesel::sql_types::*;
 
     fineract_provisioning (id) {
-        #[max_length = 40]
-        id -> Varchar,
-        #[max_length = 40]
-        kyc_case_id -> Varchar,
-        #[max_length = 40]
-        submission_id -> Varchar,
+        id -> Text,
+        kyc_case_id -> Text,
+        submission_id -> Text,
         status -> Varchar,
-        #[max_length = 128]
-        fineract_customer_id -> Nullable<Varchar>,
-        #[max_length = 64]
-        error_code -> Nullable<Varchar>,
+        fineract_customer_id -> Nullable<Text>,
+        error_code -> Nullable<Text>,
         error_message -> Nullable<Text>,
         attempt_no -> Int4,
         created_at -> Timestamptz,
@@ -230,6 +270,11 @@ diesel::table! {
 }
 
 diesel::joinable!(kyc_case -> app_user (user_id));
+diesel::joinable!(kyc_submission -> kyc_case (kyc_case_id));
+diesel::joinable!(kyc_submission_profile_history -> kyc_submission (submission_id));
+diesel::joinable!(kyc_document -> kyc_submission (submission_id));
+diesel::joinable!(kyc_review_queue -> kyc_case (case_id));
+diesel::joinable!(kyc_review_decision -> kyc_submission (submission_id));
 diesel::joinable!(device -> app_user (user_id));
 diesel::joinable!(approval -> app_user (user_id));
 
@@ -237,7 +282,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     app_user,
     kyc_case,
     kyc_submission,
+    kyc_submission_profile_history,
     kyc_document,
+    kyc_review_queue,
+    kyc_review_decision,
     fineract_provisioning,
     device,
     approval,

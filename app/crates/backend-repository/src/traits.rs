@@ -48,6 +48,41 @@ pub struct SmsPublishFailure {
     pub next_retry_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KycSubmissionFilter {
+    pub status: Option<String>,
+    pub search: Option<String>,
+    pub page: i32,
+    pub limit: i32,
+}
+
+impl KycSubmissionFilter {
+    pub fn normalized(self) -> Self {
+        let page = self.page.max(1);
+        let limit = self.limit.clamp(1, 100);
+
+        let status = self
+            .status
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        let search = self
+            .search
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+
+        Self {
+            status,
+            search,
+            page,
+            limit,
+        }
+    }
+
+    pub fn offset(&self) -> i64 {
+        i64::from((self.page - 1) * self.limit)
+    }
+}
+
 pub trait KycRepo: Send + Sync {
     fn ensure_kyc_profile(&self, user_id: &str) -> impl Future<Output = RepoResult<()>> + Send;
     fn insert_kyc_document_intent(

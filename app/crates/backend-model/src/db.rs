@@ -88,6 +88,8 @@ pub struct KycCaseRow {
     pub user_id: String,
     pub case_status: String,
     pub active_submission_id: Option<String>,
+    pub queue_rank: Option<i64>,
+    pub last_activity_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -97,11 +99,19 @@ pub struct KycCaseRow {
 pub struct KycSubmissionRow {
     pub id: String,
     pub kyc_case_id: String,
+    pub version: i32,
     pub status: String,
+    pub requested_tier: Option<i32>,
+    pub decided_tier: Option<i32>,
+    pub approved_tier: Option<i32>,
     pub submitted_at: Option<DateTime<Utc>>,
     pub decided_at: Option<DateTime<Utc>>,
     pub decided_by: Option<String>,
+    pub reviewer_id: Option<String>,
+    pub next_action: Option<String>,
     pub provisioning_status: String,
+    pub profile_json: Value,
+    pub profile_etag: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub first_name: Option<String>,
@@ -128,4 +138,43 @@ pub struct KycDocumentRow {
     pub sha256: String,
     pub status: String,
     pub uploaded_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub object_url: Option<String>,
+    pub is_verified: bool,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = crate::schema::kyc_submission_profile_history)]
+pub struct KycSubmissionProfileHistoryRow {
+    pub id: i64,
+    pub submission_id: String,
+    pub version: i32,
+    pub profile_json: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = crate::schema::kyc_review_queue)]
+pub struct KycReviewQueueRow {
+    pub id: i64,
+    pub case_id: String,
+    pub status: String,
+    pub assigned_to: Option<String>,
+    pub claimed_at: Option<DateTime<Utc>>,
+    pub lock_expires_at: Option<DateTime<Utc>>,
+    pub priority: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = crate::schema::kyc_review_decision)]
+pub struct KycReviewDecisionRow {
+    pub id: i64,
+    pub submission_id: String,
+    pub decision: String,
+    pub reason_code: String,
+    pub comment: Option<String>,
+    pub decided_at: DateTime<Utc>,
+    pub reviewer_id: Option<String>,
 }

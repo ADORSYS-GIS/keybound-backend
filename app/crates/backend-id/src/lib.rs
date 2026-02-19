@@ -29,6 +29,10 @@ pub fn kyc_document_id() -> Result<String> {
     prefixed("kyd")
 }
 
+pub fn kyc_case_id() -> Result<String> {
+    prefixed("kyc")
+}
+
 pub fn kyc_submission_id() -> Result<String> {
     prefixed("sub")
 }

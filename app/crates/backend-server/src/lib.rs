@@ -1,4 +1,5 @@
 pub(crate) mod api;
+pub(crate) mod health;
 pub(crate) mod sms_provider;
 pub(crate) mod sms_retry;
 pub(crate) mod state;
@@ -64,7 +65,54 @@ pub async fn serve(core_config: &Config) -> Result<()> {
 pub async fn run_worker(core_config: &Config) -> Result<()> {
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let state = Arc::new(state::AppState::from_config(core_config, pool).await?);
-    worker::run(state).await
+
+    let health_server = if core_config.runtime.mode == backend_core::RuntimeMode::Worker {
+        let listen_addr = core_config.api_listen_addr()?;
+        let health_app = health::health_router();
+
+        info!("Worker health check listening on {}", listen_addr);
+
+        let handle = axum_server::Handle::new();
+        let shutdown_handle = handle.clone();
+
+        tokio::spawn(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            shutdown_handle.graceful_shutdown(None);
+        });
+
+        let tls_files = core_config.api_tls_files();
+        Some(tokio::spawn(async move {
+            match tls_files {
+                Some((cert_path, key_path)) => {
+                    let rustls_config =
+                        axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
+                            .await
+                            .expect("failed to load tls config for worker health");
+
+                    axum_server::bind_rustls(listen_addr, rustls_config)
+                        .handle(handle)
+                        .serve(health_app.into_make_service())
+                        .await
+                        .expect("worker health server failed");
+                }
+                None => {
+                    axum_server::bind(listen_addr)
+                        .handle(handle)
+                        .serve(health_app.into_make_service())
+                        .await
+                        .expect("worker health server failed");
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
+    let worker_res = worker::run(state).await;
+    if let Some(hs) = health_server {
+        hs.abort();
+    }
+    worker_res
 }
 
 fn build_router(
@@ -73,7 +121,7 @@ fn build_router(
     oidc_state: Arc<backend_auth::OidcState>,
 ) -> Router {
     // Mount sub-routers onto a fresh root router
-    let mut router = Router::new();
+    let mut router = Router::new().merge(health::health_router());
 
     // Mount KC router if base path is provided
     let kc_base = config.kc.base_path.trim();
