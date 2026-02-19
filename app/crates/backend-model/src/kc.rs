@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
+use hex::encode;
 use o2o::o2o;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::db;
 
@@ -157,6 +159,37 @@ pub fn kc_any_map_to_value(map: KcAnyMap) -> Value {
         out.insert(k, v.0);
     }
     Value::Object(out)
+}
+
+pub fn device_record_id(device_id: &str, public_jwk: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(public_jwk.as_bytes());
+    let digest = hasher.finalize();
+    let hash = encode(digest);
+    format!("{device_id}:{hash}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::device_record_id;
+    use hex::encode as hex_encode;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn device_record_id_is_deterministic() {
+        let device_id = "dvc_test";
+        let public_jwk = "{\"a\":1,\"b\":2}";
+        let expected_hash = {
+            let mut hasher = Sha256::new();
+            hasher.update(public_jwk.as_bytes());
+            hex_encode(hasher.finalize())
+        };
+
+        assert_eq!(
+            device_record_id(device_id, public_jwk),
+            format!("{device_id}:{expected_hash}")
+        );
+    }
 }
 
 impl From<db::UserRow> for UserRecordDto {

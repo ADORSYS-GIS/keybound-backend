@@ -148,7 +148,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    device (device_id) {
+    device (device_id, public_jwk) {
         #[max_length = 40]
         device_id -> Varchar,
         #[max_length = 40]

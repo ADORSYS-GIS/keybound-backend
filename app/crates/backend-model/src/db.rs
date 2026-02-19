@@ -23,7 +23,7 @@ pub struct UserRow {
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
 #[diesel(table_name = crate::schema::device)]
-#[diesel(primary_key(device_id))]
+#[diesel(primary_key(device_id, public_jwk))]
 pub struct DeviceRow {
     pub device_id: String,
     pub user_id: String,

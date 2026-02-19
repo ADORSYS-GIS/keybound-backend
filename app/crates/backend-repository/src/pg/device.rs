@@ -1,4 +1,6 @@
 use crate::traits::*;
+use backend_core::Error;
+use backend_model::kc::device_record_id;
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
 use diesel_async::AsyncPgConnection;
@@ -33,6 +35,10 @@ impl DeviceRepo for DeviceRepository {
         use backend_model::schema::device::dsl::*;
 
         let mut conn = self.get_conn().await?;
+        if req.device_id.is_none() && req.jkt.is_none() {
+            return Ok(None);
+        }
+
         let mut query = device.into_boxed();
 
         if let Some(device_id_val) = &req.device_id {
@@ -43,11 +49,27 @@ impl DeviceRepo for DeviceRepository {
             query = query.filter(jkt.eq(jkt_val));
         }
 
-        query
+        let mut row_opt = query
             .first::<db::DeviceRow>(&mut conn)
             .await
             .optional()
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)?;
+
+        if let Some(ref mut row) = row_opt {
+            let now = chrono::Utc::now();
+            diesel::update(
+                device
+                    .filter(device_id.eq(&row.device_id))
+                    .filter(public_jwk.eq(&row.public_jwk)),
+            )
+            .set(last_seen_at.eq(now))
+            .execute(&mut conn)
+            .await
+            .map_err(Into::<Error>::into)?;
+            row.last_seen_at = Some(now);
+        }
+
+        Ok(row_opt)
     }
 
     async fn list_user_devices(
@@ -67,7 +89,7 @@ impl DeviceRepo for DeviceRepository {
         query
             .load::<db::DeviceRow>(&mut conn)
             .await
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)
     }
 
     async fn get_user_device(
@@ -85,7 +107,7 @@ impl DeviceRepo for DeviceRepository {
             .first::<db::DeviceRow>(&mut conn)
             .await
             .optional()
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)
     }
 
     async fn update_device_status(
@@ -101,7 +123,7 @@ impl DeviceRepo for DeviceRepository {
             .set(status.eq(status_val))
             .get_result::<db::DeviceRow>(&mut conn)
             .await
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)
     }
 
     async fn find_device_binding(
@@ -120,7 +142,7 @@ impl DeviceRepo for DeviceRepository {
             .first::<(String, String)>(&mut conn)
             .await
             .optional()
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)
     }
 
     async fn bind_device(&self, req: &kc_map::EnrollmentBindRequest) -> RepoResult<String> {
@@ -129,25 +151,31 @@ impl DeviceRepo for DeviceRepository {
         let mut conn = self.get_conn().await?;
 
         let sorted_jwk: std::collections::BTreeMap<_, _> = req.public_jwk.iter().collect();
-        let public_jwk_str = serde_json::to_string(&sorted_jwk).unwrap_or_default();
+        let public_jwk_str = serde_json::to_string(&sorted_jwk).map_err(|e| {
+            Error::Server(format!(
+                "Failed to serialize public_jwk for device bind: {e}"
+            ))
+        })?;
 
+        let now = chrono::Utc::now();
         let new_device = db::DeviceRow {
             device_id: req.device_id.clone(),
             user_id: req.user_id.clone(),
             jkt: req.jkt.clone(),
-            public_jwk: public_jwk_str,
+            public_jwk: public_jwk_str.clone(),
             status: "ACTIVE".to_string(),
             label: None, // Label is not provided in EnrollmentBindRequest
-            created_at: chrono::Utc::now(),
-            last_seen_at: Some(chrono::Utc::now()),
+            created_at: now,
+            last_seen_at: Some(now),
         };
 
         diesel::insert_into(device)
             .values(&new_device)
-            .returning(device_id)
-            .get_result::<String>(&mut conn)
+            .execute(&mut conn)
             .await
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)?;
+
+        Ok(device_record_id(&req.device_id, &public_jwk_str))
     }
 
     async fn count_user_devices(&self, user_id_val: &str) -> RepoResult<i64> {
@@ -160,6 +188,6 @@ impl DeviceRepo for DeviceRepository {
             .count()
             .get_result::<i64>(&mut conn)
             .await
-            .map_err(Into::into)
+            .map_err(Into::<Error>::into)
     }
 }

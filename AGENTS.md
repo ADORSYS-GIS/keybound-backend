@@ -52,6 +52,8 @@ Never use UUID for backend IDs.
 - Device uniqueness is on both `device_id` and `jkt`.
 - Enforce at precheck and bind time.
 - Bind must re-check and handle unique-conflict races deterministically.
+- Device rows now use a `(device_id, public_jwk)` composite primary key and expose a deterministic `device_record_id` that wraps `device_id` + SHA‑256 of the sorted JWK. `lookup_device` must refresh `last_seen_at` on every match so usage tracking stays accurate.
+- The new `backend-repository/tests/device_repo.rs` integration test requires an available Postgres instance; set `DATABASE_URL` before running `cargo test -p backend-repository --test device_repo`, otherwise the test will skip with a notice.
 
 ## Auth
 - Auth logic is implemented as `axum` middleware layers in `backend-auth`.
@@ -176,6 +178,7 @@ Let's talk about all the rules we're having to work efficiently:
 - **Error Mapping**: Consistently map Diesel errors to `backend_core::Error` using `Into::into`.
 - **Verification**: Run `cargo check --workspace` and relevant tests after every significant change.
 - **Documentation**: Keep `AGENTS.md` updated with the current state of the project (e.g., which modules are migrated).
+  - When you add new README/overview docs, include them at the workspace root so future contributors know where to look.
 
 ### Rust (Cargo workspace)
 
