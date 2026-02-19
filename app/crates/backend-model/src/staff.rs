@@ -54,13 +54,15 @@ impl From<db::KycDocumentRow> for KycDocumentDto {
 #[derive(Debug, Clone, o2o)]
 #[owned_into(gen_oas_server_staff::models::KycSubmissionSummary)]
 pub struct KycSubmissionSummaryDto {
+    #[map(user_id)]
     pub external_id: Option<String>,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub email: Option<String>,
     pub phone_number: Option<String>,
     pub kyc_tier: Option<i32>,
-    pub kyc_status: Option<String>,
+    #[map(kyc_status)]
+    pub kyc_status: Option<gen_oas_server_staff::models::KycStatus>,
     pub submitted_at: Option<String>,
 }
 
@@ -73,7 +75,7 @@ impl From<db::KycSubmissionRow> for KycSubmissionSummaryDto {
             email: row.email,
             phone_number: row.phone_number,
             kyc_tier: None, // Calculated dynamically
-            kyc_status: Some(row.status),
+            kyc_status: row.status.parse().ok(),
             submitted_at: row
                 .submitted_at
                 .map(|v: chrono::DateTime<chrono::Utc>| v.to_rfc3339()),
@@ -93,6 +95,7 @@ pub struct KycSubmissionsResponseDto {
 #[derive(Debug, Clone, o2o)]
 #[owned_into(gen_oas_server_staff::models::KycSubmissionDetailResponse)]
 pub struct KycSubmissionDetailResponseDto {
+    #[map(user_id)]
     pub external_id: Option<String>,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
@@ -101,7 +104,8 @@ pub struct KycSubmissionDetailResponseDto {
     pub date_of_birth: Option<String>,
     pub nationality: Option<String>,
     pub kyc_tier: Option<i32>,
-    pub kyc_status: Option<String>,
+    #[map(kyc_status)]
+    pub kyc_status: Option<gen_oas_server_staff::models::KycStatus>,
     pub documents: Option<Vec<gen_oas_server_staff::models::KycDocumentDto>>,
     pub submitted_at: Option<String>,
     pub reviewed_at: Option<String>,
@@ -124,7 +128,7 @@ impl KycSubmissionDetailResponseDto {
             date_of_birth: profile.date_of_birth,
             nationality: profile.nationality,
             kyc_tier: None, // Calculated dynamically
-            kyc_status: Some(profile.status),
+            kyc_status: profile.status.parse().ok(),
             documents: Some(vec![]),
             submitted_at: profile
                 .submitted_at

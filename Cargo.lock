@@ -1027,6 +1027,7 @@ dependencies = [
  "json-patch",
  "rand 0.10.0",
  "redis 1.0.3",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "sha2",

@@ -138,10 +138,8 @@ async fn process_fineract_provisioning_job(
     job: FineractProvisioningJob,
 ) -> Result<(), BoxDynError> {
     use backend_repository::KycRepo;
-    use gen_oas_client_cuss_registration::{
-        apis::{configuration::Configuration, registration_api},
-        models::RegistrationRequest,
-    };
+    use gen_oas_server_cuss::models::{RegistrationRequest, RegistrationResponse};
+    use reqwest;
 
     info!(user_id = %job.user_id, "processing fineract provisioning job");
 
@@ -157,35 +155,47 @@ async fn process_fineract_provisioning_job(
         email: profile.email.unwrap_or_default(),
         phone: profile.phone_number.unwrap_or_default(),
         national_id: None,
-        date_of_birth: profile.date_of_birth,
+        date_of_birth: profile
+            .date_of_birth
+            .and_then(|d| d.parse::<chrono::NaiveDate>().ok()),
         gender: None,
         address: None,
     };
 
-    let config = Configuration {
-        base_path: state.config.cuss.api_url.clone(),
-        user_agent: Some("user-storage/1.0.0".to_owned()),
-        ..Default::default()
-    };
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/registration/register", state.config.cuss.api_url);
 
-    match registration_api::api_registration_register_post(&config, req).await {
-        Ok(resp) => {
-            info!(
-                user_id = %job.user_id,
-                external_id = ?resp.external_id,
-                status = ?resp.status,
-                "successfully provisioned user in fineract"
-            );
-        }
-        Err(err) => {
-            warn!(
-                user_id = %job.user_id,
-                error = %err,
-                "failed to provision user in fineract"
-            );
-            return Err(Box::new(err));
-        }
+    let response = client
+        .post(&url)
+        .header("User-Agent", "user-storage/1.0.0")
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| Box::new(e) as BoxDynError)?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.text().await.unwrap_or_default();
+        warn!(
+            user_id = %job.user_id,
+            status = %status,
+            body = %error_body,
+            "failed to provision user in fineract"
+        );
+        return Err(format!("Fineract provisioning failed with status {status}: {error_body}").into());
     }
+
+    let resp: RegistrationResponse = response
+        .json()
+        .await
+        .map_err(|e| Box::new(e) as BoxDynError)?;
+
+    info!(
+        user_id = %job.user_id,
+        external_id = ?resp.external_id,
+        status = ?resp.status,
+        "successfully provisioned user in fineract"
+    );
 
     Ok(())
 }

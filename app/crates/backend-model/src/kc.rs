@@ -44,30 +44,9 @@ pub struct DeviceDescriptor {
     pub jkt: String,
     #[map(public_jwk)]
     pub public_jwk: Option<KcAnyMap>,
-    pub platform: Option<String>,
-    pub model: Option<String>,
+    pub platform: String,
+    pub model: String,
     pub app_version: Option<String>,
-}
-
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::ApprovalCreateRequest)]
-pub struct ApprovalCreateRequest {
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: String,
-    pub new_device: gen_oas_server_kc::models::DeviceDescriptor,
-    pub reason: Option<String>,
-    pub expires_at: Option<DateTime<Utc>>,
-    #[map(context)]
-    pub context: Option<KcAnyMap>,
-}
-
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::ApprovalDecisionRequest)]
-pub struct ApprovalDecisionRequest {
-    pub decision: gen_oas_server_kc::models::QueryApprovalStatus,
-    pub decided_by_device_id: Option<String>,
-    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, o2o)]
@@ -77,18 +56,50 @@ pub struct DeviceLookupRequest {
     pub jkt: Option<String>,
 }
 
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::EnrollmentPrecheckRequest)]
+#[derive(Debug, Clone)]
+pub struct ApprovalCreateRequest {
+    pub realm: String,
+    pub client_id: String,
+    pub user_id: String,
+    pub new_device: DeviceDescriptor,
+    pub reason: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub context: Option<KcAnyMap>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApprovalDecisionRequest {
+    pub decision: String,
+    pub decided_by_device_id: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct EnrollmentPrecheckRequest {
     pub realm: String,
     pub client_id: String,
     pub user_hint: Option<String>,
     pub device_id: String,
     pub jkt: String,
-    #[map(public_jwk)]
     pub public_jwk: Option<KcAnyMap>,
-    #[map(proof_context)]
     pub proof_context: Option<KcAnyMap>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmsSendRequest {
+    pub realm: String,
+    pub client_id: String,
+    pub user_id: Option<String>,
+    pub phone_number: String,
+    pub session_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub metadata: Option<KcAnyMap>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmsConfirmRequest {
+    pub hash: String,
+    pub otp: String,
 }
 
 #[derive(Debug, Clone, o2o)]
@@ -109,26 +120,6 @@ pub struct EnrollmentBindRequest {
 }
 
 #[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::SmsSendRequest)]
-pub struct SmsSendRequest {
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: Option<String>,
-    pub phone_number: String,
-    pub session_id: Option<String>,
-    pub trace_id: Option<String>,
-    #[map(metadata)]
-    pub metadata: Option<KcAnyMap>,
-}
-
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::SmsConfirmRequest)]
-pub struct SmsConfirmRequest {
-    pub hash: String,
-    pub otp: String,
-}
-
-#[derive(Debug, Clone, o2o)]
 #[owned_into(gen_oas_server_kc::models::UserRecord)]
 pub struct UserRecordDto {
     pub user_id: String,
@@ -141,6 +132,7 @@ pub struct UserRecordDto {
     pub email_verified: bool,
     pub created_at: Option<DateTime<Utc>>,
     pub attributes: Option<KcMap>,
+    pub custom: Option<KcMap>,
 }
 
 impl UserRecordDto {
@@ -179,7 +171,8 @@ impl From<db::UserRow> for UserRecordDto {
             enabled: !row.disabled,
             email_verified: row.email_verified,
             created_at: Some(row.created_at),
-            attributes: Self::parse_attributes(row.attributes),
+            attributes: Self::parse_attributes(row.attributes.clone()),
+            custom: Self::parse_attributes(row.attributes),
         }
     }
 }
@@ -193,6 +186,9 @@ pub struct DeviceRecordDto {
     pub created_at: DateTime<Utc>,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub label: Option<String>,
+    pub device_os: Option<String>,
+    pub device_model: Option<String>,
+    pub device_app_version: Option<String>,
 }
 
 impl DeviceRecordDto {
@@ -212,70 +208,9 @@ impl From<db::DeviceRow> for DeviceRecordDto {
             created_at: row.created_at,
             last_seen_at: row.last_seen_at,
             label: row.label,
-        }
-    }
-}
-
-#[derive(Debug, Clone, o2o)]
-#[owned_into(gen_oas_server_kc::models::ApprovalStatusResponse)]
-pub struct ApprovalStatusDto {
-    pub request_id: String,
-    pub status: gen_oas_server_kc::models::QueryApprovalStatus,
-    pub decided_at: Option<DateTime<Utc>>,
-    pub decided_by_device_id: Option<String>,
-    pub message: Option<String>,
-}
-
-impl ApprovalStatusDto {
-    fn parse_status(s: &str) -> gen_oas_server_kc::models::QueryApprovalStatus {
-        s.parse()
-            .unwrap_or(gen_oas_server_kc::models::QueryApprovalStatus::Pending)
-    }
-}
-
-impl From<db::ApprovalRow> for ApprovalStatusDto {
-    fn from(row: db::ApprovalRow) -> Self {
-        Self {
-            request_id: row.request_id,
-            status: Self::parse_status(&row.status),
-            decided_at: row.decided_at,
-            decided_by_device_id: row.decided_by_device_id,
-            message: row.message,
-        }
-    }
-}
-
-#[derive(Debug, Clone, o2o)]
-#[owned_into(gen_oas_server_kc::models::UserApprovalRecord)]
-pub struct UserApprovalRecordDto {
-    pub request_id: String,
-    pub user_id: String,
-    pub device_id: String,
-    pub status: gen_oas_server_kc::models::UserApprovalRecordStatus,
-    pub created_at: DateTime<Utc>,
-    pub decided_at: Option<DateTime<Utc>>,
-    pub decided_by_device_id: Option<String>,
-    pub message: Option<String>,
-}
-
-impl UserApprovalRecordDto {
-    fn parse_status(s: &str) -> gen_oas_server_kc::models::UserApprovalRecordStatus {
-        s.parse()
-            .unwrap_or(gen_oas_server_kc::models::UserApprovalRecordStatus::Pending)
-    }
-}
-
-impl From<db::ApprovalRow> for UserApprovalRecordDto {
-    fn from(row: db::ApprovalRow) -> Self {
-        Self {
-            request_id: row.request_id,
-            user_id: row.user_id,
-            device_id: row.new_device_id,
-            status: Self::parse_status(&row.status),
-            created_at: row.created_at,
-            decided_at: row.decided_at,
-            decided_by_device_id: row.decided_by_device_id,
-            message: row.message,
+            device_os: None,
+            device_model: None,
+            device_app_version: None,
         }
     }
 }
