@@ -243,3 +243,11 @@ All backends:
 - **Implementation**:
     - **Trait**: `SmsProvider` in `app/crates/backend-server/src/sms_provider.rs`.
     - **Hashing**: Uses the `argon2` crate for secure password hashing.
+
+### OIDC Discovery & Keycloak Signature Verification
+- **OIDC Discovery**: `backend-auth` supports automatic OIDC discovery. It fetches the discovery document from the configured `issuer` to obtain the `jwks_uri` and caches it.
+- **Signature Verification**: Keycloak requests are verified using a HMAC-SHA256 signature.
+    - **Headers**: `x-kc-signature` and `x-kc-timestamp`.
+    - **Canonical Payload**: `timestamp + "\n" + method + "\n" + path + "\n" + body`.
+    - **Encoding**: The resulting HMAC digest is Base64URL encoded (no padding).
+- **JWT Validation**: Tokens are validated against the JWKS obtained via OIDC discovery.

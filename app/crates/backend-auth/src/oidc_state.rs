@@ -14,6 +14,7 @@ pub struct OidcState {
     discovery_ttl: Duration,
     jwks_ttl: Duration,
     http: HttpClient,
+    inner: Arc<RwLock<Inner>>,
 }
 
 #[derive(Clone)]
@@ -47,10 +48,10 @@ impl OidcState {
             discovery_ttl,
             jwks_ttl,
             http,
-            inner: RwLock::new(Inner {
+            inner: Arc::new(RwLock::new(Inner {
                 discovery: None,
                 jwks: None,
-            }),
+            })),
         }
     }
 

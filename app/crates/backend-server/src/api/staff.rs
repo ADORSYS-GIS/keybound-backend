@@ -1,27 +1,23 @@
 use super::BackendApi;
 use crate::worker;
 use axum_extra::extract::CookieJar;
-use backend_auth::ServiceContext;
+use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_model::staff::{
     KycApprovalRequest, KycDocumentDto, KycRejectionRequest, KycRequestInfoRequest,
     KycSubmissionDetailResponseDto, KycSubmissionSummaryDto, KycSubmissionsResponseDto,
 };
 use backend_repository::KycRepo;
-use gen_oas_server_staff::apis::kyc_review::{
-    ApiKycStaffSubmissionsGetResponse, ApiKycStaffSubmissionsUserIdApprovePostResponse,
-    ApiKycStaffSubmissionsUserIdDocumentsDocumentIdDownloadUrlPostResponse,
-    ApiKycStaffSubmissionsUserIdGetResponse, ApiKycStaffSubmissionsUserIdRejectPostResponse,
-    ApiKycStaffSubmissionsUserIdRequestInfoPostResponse, KycReview,
-};
+use gen_oas_server_staff::apis::kyc_review::{ApiKycStaffSubmissionsGetResponse, ApiKycStaffSubmissionsUserIdApprovePostResponse, ApiKycStaffSubmissionsUserIdDocumentsDocumentIdDownloadUrlPostResponse, ApiKycStaffSubmissionsUserIdGetResponse, ApiKycStaffSubmissionsUserIdRejectPostResponse, ApiKycStaffSubmissionsUserIdRequestInfoPostResponse, KycReview, StaffReviewCasesCaseIdDecisionPostResponse, StaffReviewCasesCaseIdGetResponse, StaffReviewQueueGetResponse};
 use gen_oas_server_staff::models;
 use headers::Host;
 use http::Method;
 use tracing::{info, warn};
+use gen_oas_server_staff::models::{ReviewDecision, StaffReviewCasesCaseIdDecisionPostPathParams, StaffReviewCasesCaseIdGetPathParams, StaffReviewQueueGetQueryParams};
 
 #[backend_core::async_trait]
 impl KycReview<Error> for BackendApi {
-    type Claims = ServiceContext;
+    type Claims = JwtToken;
 
     async fn api_kyc_staff_submissions_get(
         &self,
@@ -267,5 +263,17 @@ impl KycReview<Error> for BackendApi {
         } else {
             Ok(ApiKycStaffSubmissionsUserIdRequestInfoPostResponse::Status400_ValidationFailed)
         }
+    }
+
+    async fn staff_review_cases_case_id_decision_post(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, path_params: &StaffReviewCasesCaseIdDecisionPostPathParams, body: &ReviewDecision) -> Result<StaffReviewCasesCaseIdDecisionPostResponse, Error> {
+        todo!()
+    }
+
+    async fn staff_review_cases_case_id_get(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, path_params: &StaffReviewCasesCaseIdGetPathParams) -> Result<StaffReviewCasesCaseIdGetResponse, Error> {
+        todo!()
+    }
+
+    async fn staff_review_queue_get(&self, method: &Method, host: &Host, cookies: &CookieJar, claims: &Self::Claims, query_params: &StaffReviewQueueGetQueryParams) -> Result<StaffReviewQueueGetResponse, Error> {
+        todo!()
     }
 }

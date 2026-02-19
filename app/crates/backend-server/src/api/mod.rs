@@ -28,7 +28,7 @@ impl BackendApi {
         Self { state, oidc_state }
     }
 
-    pub(crate) fn require_user_id(context: &ServiceContext) -> AppResult<String> {
+    pub(crate) fn require_user_id(context: &JwtToken) -> AppResult<String> {
         context
             .user_id()
             .map(ToOwned::to_owned)
@@ -129,7 +129,7 @@ fn claims_from_header_key(
 ) -> Option<JwtToken> {
     let auth_header = headers.get(key).clone();
     let ctx = JwtToken::from_request(auth_header);
-    
+
     debug!(
         has_user_id = ctx.user_id().is_some(),
         "constructed auth claims from header"

@@ -72,7 +72,7 @@ pub struct Database {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Oauth2 {
-    pub jwks_url: String,
+    pub issuer: String,
     #[serde(default, alias = "base-paths")]
     pub base_paths: Vec<String>,
 }

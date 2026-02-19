@@ -1,5 +1,5 @@
 use super::BackendApi;
-use backend_auth::ServiceContext;
+use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_repository::KycRepo;
 use gen_oas_server_bff::apis::kyc::{ApiRegistrationKycProfilePatchResponse, Kyc};
@@ -11,7 +11,7 @@ use serde_json::{json, Map, Value};
 
 #[backend_core::async_trait]
 impl Kyc<Error> for BackendApi {
-    type Claims = ServiceContext;
+    type Claims = JwtToken;
 
     async fn api_registration_kyc_profile_patch(
         &self,
@@ -64,7 +64,7 @@ impl Kyc<Error> for BackendApi {
 
 #[backend_core::async_trait]
 impl Limits<Error> for BackendApi {
-    type Claims = ServiceContext;
+    type Claims = JwtToken;
 
     async fn api_limits_get(
         &self,
