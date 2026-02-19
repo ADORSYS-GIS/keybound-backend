@@ -2,9 +2,8 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use serde_json::Value;
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::app_user)]
-#[diesel(primary_key(user_id))]
 pub struct UserRow {
     pub user_id: String,
     pub realm: String,
@@ -21,9 +20,8 @@ pub struct UserRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::device)]
-#[diesel(primary_key(device_id, public_jwk))]
 pub struct DeviceRow {
     pub device_id: String,
     pub user_id: String,
@@ -35,129 +33,98 @@ pub struct DeviceRow {
     pub last_seen_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::approval)]
-#[diesel(primary_key(request_id))]
-pub struct ApprovalRow {
-    pub request_id: String,
-    pub user_id: String,
-    pub new_device_id: String,
-    pub new_device_jkt: String,
-    pub new_device_public_jwk: String,
-    pub new_device_platform: Option<String>,
-    pub new_device_model: Option<String>,
-    pub new_device_app_version: Option<String>,
-    pub status: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub decided_at: Option<DateTime<Utc>>,
-    pub decided_by_device_id: Option<String>,
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::sms_messages)]
-#[diesel(primary_key(id))]
-pub struct SmsMessageRow {
-    pub id: String,
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: Option<String>,
-    pub phone_number: String,
-    pub hash: String,
-    pub otp_sha256: Vec<u8>,
-    pub ttl_seconds: i32,
-    pub status: String,
-    pub attempt_count: i32,
-    pub max_attempts: i32,
-    pub next_retry_at: Option<DateTime<Utc>>,
-    pub last_error: Option<String>,
-    pub sns_message_id: Option<String>,
-    pub session_id: Option<String>,
-    pub trace_id: Option<String>,
-    pub metadata: Option<Value>,
-    pub created_at: DateTime<Utc>,
-    pub sent_at: Option<DateTime<Utc>>,
-    pub confirmed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::kyc_case)]
-pub struct KycCaseRow {
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::kyc_session)]
+pub struct KycSessionRow {
     pub id: String,
     pub user_id: String,
-    pub case_status: String,
-    pub active_submission_id: Option<String>,
-    pub queue_rank: Option<i64>,
-    pub last_activity_at: Option<DateTime<Utc>>,
+    pub status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::kyc_submission)]
-pub struct KycSubmissionRow {
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::kyc_step)]
+pub struct KycStepRow {
     pub id: String,
-    pub kyc_case_id: String,
-    pub version: i32,
+    pub session_id: String,
+    pub user_id: String,
+    pub step_type: String,
     pub status: String,
-    pub requested_tier: Option<i32>,
-    pub decided_tier: Option<i32>,
-    pub approved_tier: Option<i32>,
+    pub data: Value,
+    pub policy: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub submitted_at: Option<DateTime<Utc>>,
-    pub decided_at: Option<DateTime<Utc>>,
-    pub decided_by: Option<String>,
-    pub reviewer_id: Option<String>,
-    pub next_action: Option<String>,
-    pub provisioning_status: String,
-    pub profile_json: Value,
-    pub profile_etag: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub email: Option<String>,
-    pub phone_number: Option<String>,
-    pub date_of_birth: Option<String>,
-    pub nationality: Option<String>,
-    pub rejection_reason: Option<String>,
-    pub review_notes: Option<String>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::kyc_document)]
-pub struct KycDocumentRow {
-    pub id: String,
-    pub submission_id: String,
-    pub doc_type: String,
-    pub s3_bucket: String,
-    pub s3_key: String,
-    pub file_name: String,
-    pub mime_type: String,
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::kyc_otp_challenge)]
+pub struct KycOtpChallengeRow {
+    pub otp_ref: String,
+    pub step_id: String,
+    pub msisdn: String,
+    pub channel: String,
+    pub otp_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub tries_left: i32,
+    pub created_at: DateTime<Utc>,
+    pub verified_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::kyc_magic_email_challenge)]
+pub struct KycMagicEmailChallengeRow {
+    pub token_ref: String,
+    pub step_id: String,
+    pub email: String,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub verified_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::kyc_upload)]
+pub struct KycUploadRow {
+    pub upload_id: String,
+    pub step_id: String,
+    pub user_id: String,
+    pub purpose: String,
+    pub asset_type: String,
+    pub mime: String,
     pub size_bytes: i64,
-    pub sha256: String,
-    pub status: String,
-    pub uploaded_at: DateTime<Utc>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub object_url: Option<String>,
-    pub is_verified: bool,
+    pub bucket: String,
+    pub object_key: String,
+    pub method: String,
+    pub url: String,
+    pub headers: Value,
+    pub multipart: Option<Value>,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub etag: Option<String>,
+    pub computed_sha256: Option<String>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
-#[diesel(table_name = crate::schema::kyc_submission_profile_history)]
-pub struct KycSubmissionProfileHistoryRow {
-    pub id: i64,
-    pub submission_id: String,
-    pub version: i32,
-    pub profile_json: Value,
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::kyc_evidence)]
+pub struct KycEvidenceRow {
+    pub evidence_id: String,
+    pub step_id: String,
+    pub asset_type: String,
+    pub bucket: String,
+    pub object_key: String,
+    pub sha256: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::kyc_review_queue)]
 pub struct KycReviewQueueRow {
     pub id: i64,
-    pub case_id: String,
+    pub session_id: String,
+    pub step_id: String,
     pub status: String,
     pub assigned_to: Option<String>,
     pub claimed_at: Option<DateTime<Utc>>,
@@ -167,14 +134,175 @@ pub struct KycReviewQueueRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::kyc_review_decision)]
 pub struct KycReviewDecisionRow {
     pub id: i64,
-    pub submission_id: String,
-    pub decision: String,
+    pub session_id: String,
+    pub step_id: String,
+    pub outcome: String,
     pub reason_code: String,
     pub comment: Option<String>,
     pub decided_at: DateTime<Utc>,
     pub reviewer_id: Option<String>,
+}
+
+impl diesel::associations::HasTable for UserRow {
+    type Table = crate::schema::app_user::table;
+
+    fn table() -> Self::Table {
+        crate::schema::app_user::table
+    }
+}
+
+impl diesel::associations::HasTable for DeviceRow {
+    type Table = crate::schema::device::table;
+
+    fn table() -> Self::Table {
+        crate::schema::device::table
+    }
+}
+
+impl diesel::associations::HasTable for KycSessionRow {
+    type Table = crate::schema::kyc_session::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_session::table
+    }
+}
+
+impl diesel::associations::HasTable for KycStepRow {
+    type Table = crate::schema::kyc_step::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_step::table
+    }
+}
+
+impl diesel::associations::HasTable for KycOtpChallengeRow {
+    type Table = crate::schema::kyc_otp_challenge::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_otp_challenge::table
+    }
+}
+
+impl diesel::associations::HasTable for KycMagicEmailChallengeRow {
+    type Table = crate::schema::kyc_magic_email_challenge::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_magic_email_challenge::table
+    }
+}
+
+impl diesel::associations::HasTable for KycUploadRow {
+    type Table = crate::schema::kyc_upload::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_upload::table
+    }
+}
+
+impl diesel::associations::HasTable for KycEvidenceRow {
+    type Table = crate::schema::kyc_evidence::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_evidence::table
+    }
+}
+
+impl diesel::associations::HasTable for KycReviewQueueRow {
+    type Table = crate::schema::kyc_review_queue::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_review_queue::table
+    }
+}
+
+impl diesel::associations::HasTable for KycReviewDecisionRow {
+    type Table = crate::schema::kyc_review_decision::table;
+
+    fn table() -> Self::Table {
+        crate::schema::kyc_review_decision::table
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a UserRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.user_id.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a DeviceRow {
+    type Id = (&'a str, &'a str);
+
+    fn id(self) -> Self::Id {
+        (self.device_id.as_str(), self.public_jwk.as_str())
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycSessionRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.id.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycStepRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.id.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycOtpChallengeRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.otp_ref.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycMagicEmailChallengeRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.token_ref.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycUploadRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.upload_id.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycEvidenceRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.evidence_id.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycReviewQueueRow {
+    type Id = i64;
+
+    fn id(self) -> Self::Id {
+        self.id
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a KycReviewDecisionRow {
+    type Id = i64;
+
+    fn id(self) -> Self::Id {
+        self.id
+    }
 }
