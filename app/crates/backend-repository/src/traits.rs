@@ -1,52 +1,7 @@
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 
 pub type RepoResult<T> = backend_core::Result<T>;
-
-#[derive(Debug, Clone)]
-pub struct KycDocumentInsert {
-    pub user_id: String,
-    pub document_type: String,
-    pub file_name: String,
-    pub mime_type: String,
-    pub content_length: i64,
-    pub s3_bucket: String,
-    pub s3_key: String,
-    pub presigned_expires_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApprovalCreated {
-    pub request_id: String,
-    pub status: String,
-    pub expires_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmsQueued {
-    pub hash: String,
-    pub ttl_seconds: i32,
-    pub status: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmsPendingInsert {
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: Option<String>,
-    pub phone_number: String,
-    pub otp_sha256: Vec<u8>,
-    pub ttl_seconds: i32,
-    pub max_attempts: i32,
-    pub metadata: serde_json::Value,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmsPublishFailure {
-    pub id: String,
-    pub gave_up: bool,
-    pub error: String,
-    pub next_retry_at: Option<DateTime<Utc>>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KycSubmissionFilter {
@@ -83,59 +38,276 @@ impl KycSubmissionFilter {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct KycStepCreateInput {
+    pub session_id: String,
+    pub user_id: String,
+    pub step_type: String,
+    pub policy: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct OtpChallengeCreateInput {
+    pub step_id: String,
+    pub msisdn: String,
+    pub channel: String,
+    pub otp_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub tries_left: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct MagicChallengeCreateInput {
+    pub step_id: String,
+    pub email: String,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadIntentCreateInput {
+    pub step_id: String,
+    pub user_id: String,
+    pub purpose: String,
+    pub asset_type: String,
+    pub mime: String,
+    pub size_bytes: i64,
+    pub bucket: String,
+    pub object_key: String,
+    pub method: String,
+    pub url: String,
+    pub headers: Value,
+    pub multipart: Option<Value>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadCompleteInput {
+    pub upload_id: String,
+    pub user_id: String,
+    pub bucket: String,
+    pub object_key: String,
+    pub etag: Option<String>,
+    pub computed_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadCompleteResult {
+    pub evidence: backend_model::db::KycEvidenceRow,
+    pub moved_to_pending_review: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct KycStaffSubmissionSummaryRow {
+    pub submission_id: String,
+    pub user_id: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub status: String,
+    pub submitted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KycStaffSubmissionDetailRow {
+    pub submission_id: String,
+    pub user_id: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub date_of_birth: Option<String>,
+    pub nationality: Option<String>,
+    pub status: String,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub reviewed_at: Option<DateTime<Utc>>,
+    pub reviewed_by: Option<String>,
+    pub rejection_reason: Option<String>,
+    pub review_notes: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KycStaffDocumentRow {
+    pub id: String,
+    pub submission_id: String,
+    pub document_type: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub bucket: String,
+    pub object_key: String,
+    pub uploaded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KycReviewEvidenceRow {
+    pub asset_type: String,
+    pub evidence_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct KycReviewCaseRow {
+    pub case_id: String,
+    pub user_id: String,
+    pub step_id: String,
+    pub status: String,
+    pub submitted_at: DateTime<Utc>,
+    pub first_name: String,
+    pub middle_name: Option<String>,
+    pub last_name: String,
+    pub evidence: Vec<KycReviewEvidenceRow>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KycReviewDecisionRecord {
+    pub case_id: String,
+    pub decision: String,
+    pub decided_at: DateTime<Utc>,
+}
+
 pub trait KycRepo: Send + Sync {
-    fn ensure_kyc_profile(&self, user_id: &str) -> impl Future<Output = RepoResult<()>> + Send;
-    fn insert_kyc_document_intent(
-        &self,
-        input: KycDocumentInsert,
-    ) -> impl Future<Output = RepoResult<backend_model::db::KycDocumentRow>> + Send;
-    fn get_kyc_profile(
+    fn start_or_resume_session(
         &self,
         user_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycSubmissionRow>>> + Send;
-    fn list_kyc_documents(
+    ) -> impl Future<Output = RepoResult<(backend_model::db::KycSessionRow, Vec<String>)>> + Send;
+
+    fn create_step(
         &self,
-        user_id: String,
-    ) -> impl Future<Output = RepoResult<Vec<backend_model::db::KycDocumentRow>>> + Send;
-    fn get_kyc_document(
+        input: KycStepCreateInput,
+    ) -> impl Future<Output = RepoResult<backend_model::db::KycStepRow>> + Send;
+
+    fn get_step(
         &self,
-        user_id: &str,
-        document_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycDocumentRow>>> + Send;
-    fn get_kyc_tier(&self, user_id: &str) -> impl Future<Output = RepoResult<Option<i32>>> + Send;
-    fn list_kyc_submissions(
+        step_id: &str,
+    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycStepRow>>> + Send;
+
+    fn count_recent_otp_challenges(
+        &self,
+        step_id: &str,
+        since: DateTime<Utc>,
+    ) -> impl Future<Output = RepoResult<i64>> + Send;
+
+    fn create_otp_challenge(
+        &self,
+        input: OtpChallengeCreateInput,
+    ) -> impl Future<Output = RepoResult<backend_model::db::KycOtpChallengeRow>> + Send;
+
+    fn get_otp_challenge(
+        &self,
+        step_id: &str,
+        otp_ref: &str,
+    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycOtpChallengeRow>>> + Send;
+
+    fn mark_otp_verified(
+        &self,
+        step_id: &str,
+        otp_ref: &str,
+    ) -> impl Future<Output = RepoResult<()>> + Send;
+
+    fn decrement_otp_tries(
+        &self,
+        step_id: &str,
+        otp_ref: &str,
+    ) -> impl Future<Output = RepoResult<i32>> + Send;
+
+    fn count_recent_magic_challenges(
+        &self,
+        step_id: &str,
+        since: DateTime<Utc>,
+    ) -> impl Future<Output = RepoResult<i64>> + Send;
+
+    fn create_magic_challenge(
+        &self,
+        input: MagicChallengeCreateInput,
+    ) -> impl Future<Output = RepoResult<backend_model::db::KycMagicEmailChallengeRow>> + Send;
+
+    fn get_magic_challenge(
+        &self,
+        token_ref: &str,
+    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycMagicEmailChallengeRow>>> + Send;
+
+    fn mark_magic_verified(
+        &self,
+        token_ref: &str,
+    ) -> impl Future<Output = RepoResult<()>> + Send;
+
+    fn update_step_status(
+        &self,
+        step_id: &str,
+        status: &str,
+    ) -> impl Future<Output = RepoResult<()>> + Send;
+
+    fn create_upload_intent(
+        &self,
+        input: UploadIntentCreateInput,
+    ) -> impl Future<Output = RepoResult<backend_model::db::KycUploadRow>> + Send;
+
+    fn complete_upload_and_register_evidence(
+        &self,
+        input: UploadCompleteInput,
+    ) -> impl Future<Output = RepoResult<UploadCompleteResult>> + Send;
+
+    fn list_staff_submissions(
         &self,
         filter: KycSubmissionFilter,
-    ) -> impl Future<Output = RepoResult<(Vec<backend_model::db::KycSubmissionRow>, i64)>> + Send;
-    fn get_kyc_submission(
-        &self,
-        user_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycSubmissionRow>>> + Send;
-    fn update_kyc_approved(
-        &self,
-        user_id: &str,
-        req: &backend_model::staff::KycApprovalRequest,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
-    fn update_kyc_rejected(
-        &self,
-        user_id: &str,
-        req: &backend_model::staff::KycRejectionRequest,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
-    fn update_kyc_request_info(
-        &self,
-        user_id: &str,
-        req: &backend_model::staff::KycRequestInfoRequest,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
-    fn submit_kyc_profile(
+    ) -> impl Future<Output = RepoResult<(Vec<KycStaffSubmissionSummaryRow>, i64)>> + Send;
+
+    fn get_staff_submission(
         &self,
         submission_id: &str,
-        user_id: &str,
-    ) -> impl Future<Output = RepoResult<bool>> + Send;
-    fn patch_kyc_profile(
+    ) -> impl Future<Output = RepoResult<Option<KycStaffSubmissionDetailRow>>> + Send;
+
+    fn list_staff_submission_documents(
         &self,
-        user_id: &str,
-        req: &backend_model::bff::KycInformationPatchRequest,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::KycSubmissionRow>>> + Send;
+        submission_id: &str,
+    ) -> impl Future<Output = RepoResult<Vec<KycStaffDocumentRow>>> + Send;
+
+    fn get_staff_submission_document(
+        &self,
+        submission_id: &str,
+        document_id: &str,
+    ) -> impl Future<Output = RepoResult<Option<KycStaffDocumentRow>>> + Send;
+
+    fn approve_submission(
+        &self,
+        submission_id: &str,
+        reviewer_id: Option<&str>,
+        notes: Option<&str>,
+    ) -> impl Future<Output = RepoResult<bool>> + Send;
+
+    fn reject_submission(
+        &self,
+        submission_id: &str,
+        reviewer_id: Option<&str>,
+        reason: &str,
+        notes: Option<&str>,
+    ) -> impl Future<Output = RepoResult<bool>> + Send;
+
+    fn request_submission_info(
+        &self,
+        submission_id: &str,
+        message: &str,
+    ) -> impl Future<Output = RepoResult<bool>> + Send;
+
+    fn list_review_cases(
+        &self,
+        page: i32,
+        limit: i32,
+    ) -> impl Future<Output = RepoResult<(Vec<KycReviewCaseRow>, i64)>> + Send;
+
+    fn get_review_case(
+        &self,
+        case_id: &str,
+    ) -> impl Future<Output = RepoResult<Option<KycReviewCaseRow>>> + Send;
+
+    fn decide_review_case(
+        &self,
+        case_id: &str,
+        outcome: &str,
+        reason_code: &str,
+        comment: Option<&str>,
+        reviewer_id: Option<&str>,
+    ) -> impl Future<Output = RepoResult<Option<KycReviewDecisionRecord>>> + Send;
 }
 
 pub trait UserRepo: Send + Sync {
@@ -199,57 +371,4 @@ pub trait DeviceRepo: Send + Sync {
         req: &backend_model::kc::EnrollmentBindRequest,
     ) -> impl Future<Output = RepoResult<String>> + Send;
     fn count_user_devices(&self, user_id: &str) -> impl Future<Output = RepoResult<i64>> + Send;
-}
-
-pub trait ApprovalRepo: Send + Sync {
-    fn create_approval(
-        &self,
-        req: &backend_model::kc::ApprovalCreateRequest,
-        idempotency_key: Option<String>,
-    ) -> impl Future<Output = RepoResult<ApprovalCreated>> + Send;
-    fn get_approval(
-        &self,
-        request_id: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::ApprovalRow>>> + Send;
-    fn list_user_approvals(
-        &self,
-        user_id: &str,
-        statuses: Option<Vec<String>>,
-    ) -> impl Future<Output = RepoResult<Vec<backend_model::db::ApprovalRow>>> + Send;
-    fn decide_approval(
-        &self,
-        request_id: &str,
-        req: &backend_model::kc::ApprovalDecisionRequest,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::ApprovalRow>>> + Send;
-    fn cancel_approval(&self, request_id: &str) -> impl Future<Output = RepoResult<u64>> + Send;
-}
-
-pub trait SmsRepo: Send + Sync {
-    fn queue_sms(
-        &self,
-        sms: SmsPendingInsert,
-    ) -> impl Future<Output = RepoResult<SmsQueued>> + Send;
-    fn get_sms_by_hash(
-        &self,
-        hash: &str,
-    ) -> impl Future<Output = RepoResult<Option<backend_model::db::SmsMessageRow>>> + Send;
-    fn mark_sms_confirmed(&self, hash: &str) -> impl Future<Output = RepoResult<()>> + Send;
-    fn list_retryable_sms(
-        &self,
-        limit: i64,
-    ) -> impl Future<Output = RepoResult<Vec<backend_model::db::SmsMessageRow>>> + Send;
-    fn mark_sms_sent(
-        &self,
-        id: &str,
-        sns_message_id: Option<String>,
-    ) -> impl Future<Output = RepoResult<()>> + Send;
-    fn mark_sms_failed(
-        &self,
-        update: SmsPublishFailure,
-    ) -> impl Future<Output = RepoResult<()>> + Send;
-    fn mark_sms_gave_up(
-        &self,
-        id: &str,
-        reason: &str,
-    ) -> impl Future<Output = RepoResult<()>> + Send;
 }

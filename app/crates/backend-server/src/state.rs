@@ -1,9 +1,7 @@
 use crate::sms_provider::{ConsoleSmsProvider, SmsProvider, SnsSmsProvider};
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::{Config, SmsProviderType};
-use backend_repository::{
-    ApprovalRepository, DeviceRepository, KycRepository, SmsRepository, UserRepository,
-};
+use backend_repository::{DeviceRepository, KycRepository, UserRepository};
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
 use std::sync::Arc;
@@ -15,8 +13,6 @@ pub struct AppState {
     pub kyc: KycRepository,
     pub user: UserRepository,
     pub device: DeviceRepository,
-    pub approval: ApprovalRepository,
-    pub sms: SmsRepository,
     pub s3: aws_sdk_s3::Client,
     pub sns: aws_sdk_sns::Client,
     pub sms_provider: Arc<dyn SmsProvider>,
@@ -31,8 +27,6 @@ impl std::fmt::Debug for AppState {
             .field("kyc", &"<KycRepository>")
             .field("user", &"<UserRepository>")
             .field("device", &"<DeviceRepository>")
-            .field("approval", &"<ApprovalRepository>")
-            .field("sms", &"<SmsRepository>")
             .field("s3", &"<S3Client>")
             .field("sns", &"<SnsClient>")
             .field("sms_provider", &"<SmsProvider>")
@@ -94,8 +88,6 @@ impl AppState {
         let kyc = KycRepository::new(pool.clone());
         let user = UserRepository::new(pool.clone());
         let device = DeviceRepository::new(pool.clone());
-        let approval = ApprovalRepository::new(pool.clone());
-        let sms = SmsRepository::new(pool.clone());
 
         let http_client = HttpClient::new_with_defaults()?;
 
@@ -117,8 +109,6 @@ impl AppState {
             kyc,
             user,
             device,
-            approval,
-            sms,
             s3,
             sns,
             sms_provider,

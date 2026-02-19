@@ -36,3 +36,27 @@ pub fn kyc_case_id() -> Result<String> {
 pub fn kyc_submission_id() -> Result<String> {
     prefixed("sub")
 }
+
+pub fn kyc_session_id() -> Result<String> {
+    prefixed("kys")
+}
+
+pub fn kyc_step_id() -> Result<String> {
+    prefixed("kysp")
+}
+
+pub fn kyc_otp_ref() -> Result<String> {
+    prefixed("otp")
+}
+
+pub fn kyc_magic_ref() -> Result<String> {
+    prefixed("mgc")
+}
+
+pub fn kyc_upload_id() -> Result<String> {
+    prefixed("upl")
+}
+
+pub fn kyc_evidence_id() -> Result<String> {
+    prefixed("evi")
+}

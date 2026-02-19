@@ -1,7 +1,6 @@
 pub(crate) mod api;
 pub(crate) mod health;
 pub(crate) mod sms_provider;
-pub(crate) mod sms_retry;
 pub(crate) mod state;
 pub(crate) mod worker;
 

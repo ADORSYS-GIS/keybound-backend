@@ -14,6 +14,7 @@ security:
 paths:
   /api/kyc/staff/submissions:
     get:
+      operationId: apiKycStaffSubmissionsGet
       tags:
       - KYC Review
       summary: List submissions
@@ -34,8 +35,9 @@ paths:
                 $ref: '#/components/schemas/KycSubmissionsResponse'
         '401':
           description: Unauthorized.
-  '/api/kyc/staff/submissions/{userId}':
+  '/api/kyc/staff/submissions/{submissionId}':
     get:
+      operationId: apiKycStaffSubmissionsSubmissionIdGet
       tags:
       - KYC Review
       summary: Get submission
@@ -43,7 +45,7 @@ paths:
       security:
       - BearerAuth: []
       parameters:
-      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/SubmissionId'
       - $ref: '#/components/parameters/Page'
       - $ref: '#/components/parameters/Limit'
       responses:
@@ -57,16 +59,17 @@ paths:
           description: Unauthorized.
         '404':
           description: Submission not found.
-  '/api/kyc/staff/submissions/{userId}/approve':
+  '/api/kyc/staff/submissions/{submissionId}/approve':
     post:
+      operationId: apiKycStaffSubmissionsSubmissionIdApprovePost
       tags:
       - KYC Review
       summary: Approve KYC
-      description: Records an approval ticket for the user and optionally triggers downstream tier migration.
+      description: Records an approval ticket for the submission and optionally triggers downstream tier migration.
       security:
       - BearerAuth: []
       parameters:
-      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/SubmissionId'
       requestBody:
         required: true
         content:
@@ -80,8 +83,9 @@ paths:
           description: Validation failed.
         '401':
           description: Unauthorized.
-  '/api/kyc/staff/submissions/{userId}/reject':
+  '/api/kyc/staff/submissions/{submissionId}/reject':
     post:
+      operationId: apiKycStaffSubmissionsSubmissionIdRejectPost
       tags:
       - KYC Review
       summary: Reject KYC
@@ -89,7 +93,7 @@ paths:
       security:
       - BearerAuth: []
       parameters:
-      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/SubmissionId'
       requestBody:
         required: true
         content:
@@ -103,8 +107,9 @@ paths:
           description: Validation failed.
         '401':
           description: Unauthorized.
-  '/api/kyc/staff/submissions/{userId}/request-info':
+  '/api/kyc/staff/submissions/{submissionId}/request-info':
     post:
+      operationId: apiKycStaffSubmissionsSubmissionIdRequestInfoPost
       tags:
       - KYC Review
       summary: Request more info
@@ -112,7 +117,7 @@ paths:
       security:
       - BearerAuth: []
       parameters:
-      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/SubmissionId'
       requestBody:
         required: true
         content:
@@ -126,8 +131,9 @@ paths:
           description: Validation failed.
         '401':
           description: Unauthorized.
-  '/api/kyc/staff/submissions/{userId}/documents/{documentId}/download-url':
+  '/api/kyc/staff/submissions/{submissionId}/documents/{documentId}/download-url':
     post:
+      operationId: apiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPost
       tags:
       - KYC Review
       summary: Get presigned download URL for a document
@@ -135,7 +141,7 @@ paths:
       security:
       - BearerAuth: []
       parameters:
-      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/SubmissionId'
       - $ref: '#/components/parameters/DocumentId'
       requestBody:
         required: false
@@ -161,6 +167,7 @@ paths:
 
   /staff/review/queue:
     get:
+      operationId: staffReviewQueueGet
       tags:
       - KYC Review
       summary: Get pending review queue
@@ -171,15 +178,16 @@ paths:
       - $ref: '#/components/parameters/Page'
       - $ref: '#/components/parameters/Limit'
       responses:
-        "200":
+        '200':
           description: Paginated list of cases
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewQueueResponse"
+                $ref: '#/components/schemas/ReviewQueueResponse'
 
   /staff/review/cases/{caseId}:
     get:
+      operationId: staffReviewCasesCaseIdGet
       tags:
       - KYC Review
       summary: Get a single review case (includes evidence refs)
@@ -187,17 +195,18 @@ paths:
       - BearerAuth: []
       parameters:
       - $ref: '#/components/parameters/CaseId'
-      description: Fetches a case record with its evidence references so the reviewer can inspect all attachments.
+      description: Fetches a case record with its evidence references so the reviewer can inspect all attachments. `caseId` is the submission identifier (IDENTITY step id).
       responses:
-        "200":
+        '200':
           description: Case
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewCase"
+                $ref: '#/components/schemas/ReviewCase'
 
   /staff/review/cases/{caseId}/decision:
     post:
+      operationId: staffReviewCasesCaseIdDecisionPost
       tags:
       - KYC Review
       summary: Approve or reject a case
@@ -205,20 +214,20 @@ paths:
       - BearerAuth: []
       parameters:
       - $ref: '#/components/parameters/CaseId'
-      description: Persists the reviewer's decision and reason, updating the case status and notifying downstream systems.
+      description: Persists the reviewer's decision and reason, updating the case status and notifying downstream systems. `caseId` is the submission identifier (IDENTITY step id).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReviewDecision"
+              $ref: '#/components/schemas/ReviewDecision'
       responses:
-        "200":
+        '200':
           description: Decision recorded
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewDecisionResult"
+                $ref: '#/components/schemas/ReviewDecisionResult'
 
 components:
   securitySchemes:
@@ -259,13 +268,13 @@ components:
       schema:
         $ref: '#/components/schemas/SearchText'
       description: Optional text to search across names and emails.
-    UserId:
-      name: userId
+    SubmissionId:
+      name: submissionId
       in: path
       required: true
       schema:
-        $ref: '#/components/schemas/UserId'
-      description: User ID.
+        $ref: '#/components/schemas/SubmissionId'
+      description: Submission ID (IDENTITY step ID).
     DocumentId:
       name: documentId
       in: path
@@ -279,11 +288,11 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/CaseId'
-      description: Case ID.
+      description: Case ID (same as submission ID).
   schemas:
     SearchText:
       type: string
-    UserId:
+    SubmissionId:
       type: string
     DocumentId:
       type: string
@@ -305,6 +314,8 @@ components:
     KycSubmissionSummary:
       type: object
       properties:
+        submissionId:
+          type: string
         userId:
           type: string
         firstName:
@@ -325,6 +336,8 @@ components:
     KycSubmissionDetailResponse:
       type: object
       properties:
+        submissionId:
+          type: string
         userId:
           type: string
         firstName:
