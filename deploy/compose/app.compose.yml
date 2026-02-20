@@ -5,19 +5,20 @@ x-env: &env
 
 services:
   app:
+    image: user-storage-app
     build:
       context: ../..
       dockerfile: deploy/docker/user-storage/Dockerfile
     command:
-      - serve
-      - --config-path
-      - config/dev.yaml
-      - --mode
-      - server
+    - serve
+    - --config-path
+    - config/dev.yaml
+    - --mode
+    - server
     volumes:
-      - ../../config:/app/config/
+    - ../../config:/app/config/
     ports:
-      - "3001:3000"
+    - "3001:3000"
     environment:
       <<: *env
     depends_on:
@@ -27,17 +28,18 @@ services:
         condition: service_healthy
 
   app-worker:
+    image: user-storage-app
     build:
       context: ../..
       dockerfile: deploy/docker/user-storage/Dockerfile
     command:
-      - serve
-      - --config-path
-      - config/dev.yaml
-      - --mode
-      - worker
+    - serve
+    - --config-path
+    - config/dev.yaml
+    - --mode
+    - worker
     volumes:
-      - ../../config:/app/config/
+    - ../../config:/app/config/
     environment:
       <<: *env
     depends_on:
