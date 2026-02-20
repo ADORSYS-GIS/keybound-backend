@@ -430,7 +430,6 @@ cuss:
             device: self
                 .device
                 .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
-            sms: self.sms.unwrap_or_else(|| Arc::new(MockSmsProvider::new())),
             notification_queue: self
                 .notification_queue
                 .unwrap_or_else(|| Arc::new(MockNotificationQueue::new())),
