@@ -427,7 +427,9 @@ cuss:
         AppState {
             kyc: self.kyc.unwrap_or_else(|| Arc::new(MockKycRepo::new())),
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
-            device: self.device.unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
+            device: self
+                .device
+                .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
             sms: self.sms.unwrap_or_else(|| Arc::new(MockSmsProvider::new())),
             notification_queue: self
                 .notification_queue

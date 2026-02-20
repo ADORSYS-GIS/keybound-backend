@@ -60,11 +60,13 @@ Never use UUID for backend IDs.
 - Each API surface (KC, BFF, Staff) has its own middleware layer applied at the router level in `backend-server`.
 - `BackendApi` and `AppState` hold `Arc<OidcState>` and `Arc<SignatureState>` for runtime verification.
 
-### Auth and Error Test Coverage (Mandatory)
+### Testing Coverage (Mandatory)
 - Global error/exception mapping tests live in `app/crates/backend-core/tests/error_response.rs`.
 - JWT middleware tests (BFF + Staff bearer auth) live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
 - KC signature middleware tests also live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
+- **Unit Tests**: `backend-server` has comprehensive unit tests for `state`, `api::{bff, staff}`, and `worker` using `test_utils` mocks.
 
+#### Auth and Error Scenarios
 Required scenarios to keep covered in tests:
 - `backend_core::Error` metadata mapping and `IntoResponse` payload/status behavior.
 - Bearer middleware bypass cases (`enabled = false`, blank base path, path outside protected base path).
@@ -85,6 +87,7 @@ Required scenarios to keep covered in tests:
 Suggested verification commands:
 - `cargo test -p backend-core --features axum --test error_response`
 - `cargo test -p backend-auth --test jwt_auth_exclude_paths`
+- `cargo test -p backend-server` (runs all unit tests with mocks)
 
 ## Caching
 - In-process cache uses `lru`.
@@ -140,6 +143,15 @@ The repository implementation is split into domain-specific modules under `src/p
   - `ConsoleSmsProvider`: Logs SMS content to stdout (dev/test only).
   - `SnsSmsProvider`: Sends SMS via AWS SNS (production).
 - **Configuration**: The provider is selected at runtime based on the `sms.provider` config key (`console` or `sns`).
+
+## Abstractions & Mocking
+To support unit testing without external dependencies, `backend-server` uses trait-based abstractions in `AppState`:
+- **Storage**: `FileStorage` trait (in `app/crates/backend-server/src/file_storage.rs`) abstracts S3.
+- **Worker HTTP**: `WorkerHttpClient` trait (in `app/crates/backend-server/src/worker.rs`) abstracts external API calls.
+- **Queues**: `NotificationQueue` and `ProvisioningQueue` traits (in `app/crates/backend-server/src/worker.rs`) abstract Redis-backed job enqueueing.
+- **Repositories**: `KycRepo`, `UserRepo`, and `DeviceRepo` are used via `Arc<dyn Trait>`.
+
+Mocks for these traits are provided in `app/crates/backend-server/src/test_utils/mod.rs` using `mockall`.
 
 ## Validation Checklist
 Before finalizing:
@@ -256,3 +268,8 @@ All backends:
     - **Encoding**: The resulting HMAC digest is Base64URL encoded (no padding).
 - **JWT Validation**: Tokens are validated against the JWKS obtained via OIDC discovery.
 - **Integration**: `backend-server`'s `AppState` and `BackendApi` now hold `OidcState` and `SignatureState`. API handlers use these for robust JWT verification and signature checking.
+
+### Backend-Server Unit Testing Expansion
+- **Coverage**: Expanded coverage for `state`, `api::{bff, staff}`, and `worker` modules.
+- **Mocks**: Uses `mockall` and `test_utils` to exercise handlers without hitting real AWS/SNS/Redis/HTTP dependencies.
+- **Traits**: Introduced `FileStorage`, `WorkerHttpClient`, `NotificationQueue`, and `ProvisioningQueue` traits to enable clean dependency injection in `AppState`.

@@ -180,12 +180,6 @@ fn build_router(
     }
 }
 
-fn build_kc_router(api: api::BackendApi, cfg: backend_core::KcAuth) -> Router {
-    let layer = kc_signature_layer(cfg.enabled, api.signature_state.clone());
-    let router = gen_oas_server_kc::server::new(api);
-    router.layer(layer)
-}
-
 fn request_path(req: &HttpRequest<Body>) -> String {
     req.extensions()
         .get::<axum::extract::OriginalUri>()

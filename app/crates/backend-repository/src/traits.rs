@@ -177,10 +177,7 @@ pub trait KycRepo: Send + Sync {
         input: KycStepCreateInput,
     ) -> RepoResult<backend_model::db::KycStepRow>;
 
-    async fn get_step(
-        &self,
-        step_id: &str,
-    ) -> RepoResult<Option<backend_model::db::KycStepRow>>;
+    async fn get_step(&self, step_id: &str) -> RepoResult<Option<backend_model::db::KycStepRow>>;
 
     async fn count_recent_otp_challenges(
         &self,
@@ -199,17 +196,9 @@ pub trait KycRepo: Send + Sync {
         otp_ref: &str,
     ) -> RepoResult<Option<backend_model::db::KycOtpChallengeRow>>;
 
-    async fn mark_otp_verified(
-        &self,
-        step_id: &str,
-        otp_ref: &str,
-    ) -> RepoResult<()>;
+    async fn mark_otp_verified(&self, step_id: &str, otp_ref: &str) -> RepoResult<()>;
 
-    async fn decrement_otp_tries(
-        &self,
-        step_id: &str,
-        otp_ref: &str,
-    ) -> RepoResult<i32>;
+    async fn decrement_otp_tries(&self, step_id: &str, otp_ref: &str) -> RepoResult<i32>;
 
     async fn count_recent_magic_challenges(
         &self,
@@ -229,11 +218,7 @@ pub trait KycRepo: Send + Sync {
 
     async fn mark_magic_verified(&self, token_ref: &str) -> RepoResult<()>;
 
-    async fn update_step_status(
-        &self,
-        step_id: &str,
-        status: &str,
-    ) -> RepoResult<()>;
+    async fn update_step_status(&self, step_id: &str, status: &str) -> RepoResult<()>;
 
     async fn create_upload_intent(
         &self,
@@ -281,11 +266,8 @@ pub trait KycRepo: Send + Sync {
         notes: Option<String>,
     ) -> RepoResult<bool>;
 
-    async fn request_submission_info(
-        &self,
-        submission_id: &str,
-        message: &str,
-    ) -> RepoResult<bool>;
+    async fn request_submission_info(&self, submission_id: &str, message: &str)
+    -> RepoResult<bool>;
 
     async fn list_review_cases(
         &self,
@@ -293,10 +275,7 @@ pub trait KycRepo: Send + Sync {
         limit: i32,
     ) -> RepoResult<(Vec<KycReviewCaseRow>, i64)>;
 
-    async fn get_review_case(
-        &self,
-        case_id: &str,
-    ) -> RepoResult<Option<KycReviewCaseRow>>;
+    async fn get_review_case(&self, case_id: &str) -> RepoResult<Option<KycReviewCaseRow>>;
 
     async fn decide_review_case(
         &self,
@@ -314,10 +293,7 @@ pub trait UserRepo: Send + Sync {
         &self,
         req: &backend_model::kc::UserUpsert,
     ) -> RepoResult<backend_model::db::UserRow>;
-    async fn get_user(
-        &self,
-        user_id: &str,
-    ) -> RepoResult<Option<backend_model::db::UserRow>>;
+    async fn get_user(&self, user_id: &str) -> RepoResult<Option<backend_model::db::UserRow>>;
     async fn update_user(
         &self,
         user_id: &str,

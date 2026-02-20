@@ -1,5 +1,4 @@
 use crate::file_storage::{FileStorage, S3FileStorage};
-use crate::sms_provider::SmsProvider;
 use crate::worker::{
     NotificationQueue, ProvisioningQueue, RedisNotificationQueue, RedisProvisioningQueue,
     WorkerHttpClient,
@@ -9,8 +8,8 @@ use backend_core::Config;
 use backend_repository::{
     DeviceRepo, DeviceRepository, KycRepo, KycRepository, UserRepo, UserRepository,
 };
-use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::AsyncPgConnection;
+use diesel_async::pooled_connection::deadpool::Pool;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -20,7 +19,6 @@ pub struct AppState {
     pub kyc: Arc<dyn KycRepo>,
     pub user: Arc<dyn UserRepo>,
     pub device: Arc<dyn DeviceRepo>,
-    pub sms: Arc<dyn SmsProvider>,
     pub notification_queue: Arc<dyn NotificationQueue>,
     pub provisioning_queue: Arc<dyn ProvisioningQueue>,
     pub s3: Arc<dyn FileStorage>,
@@ -77,14 +75,6 @@ impl AppState {
         let user: Arc<dyn UserRepo> = Arc::new(UserRepository::new(pool.clone()));
         let device: Arc<dyn DeviceRepo> = Arc::new(DeviceRepository::new(pool.clone()));
 
-        let sms: Arc<dyn SmsProvider> = match cfg.sms.as_ref().map(|s| &s.provider) {
-            Some(backend_core::SmsProviderType::Sns) => {
-                let sns_client = aws_sdk_sns::Client::new(&shared_config);
-                Arc::new(crate::sms_provider::SnsSmsProvider::new(sns_client))
-            }
-            _ => Arc::new(crate::sms_provider::ConsoleSmsProvider),
-        };
-
         let http_client = HttpClient::new_with_defaults()?;
 
         let oidc_state = Arc::new(OidcState::new(
@@ -111,7 +101,6 @@ impl AppState {
             kyc,
             user,
             device,
-            sms,
             notification_queue,
             provisioning_queue,
             s3,
@@ -166,7 +155,9 @@ cuss:
         let cfg: Config = serde_yaml::from_str(config_yaml).unwrap();
 
         // Create a dummy pool. It won't be used for actual DB ops in this test.
-        let manager = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new("postgres://localhost/test");
+        let manager = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(
+            "postgres://localhost/test",
+        );
         let pool = Pool::builder(manager).build().unwrap();
 
         let state = AppState::from_config(&cfg, pool).await.unwrap();

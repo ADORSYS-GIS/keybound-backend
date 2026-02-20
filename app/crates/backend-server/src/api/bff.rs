@@ -1,12 +1,12 @@
 use super::BackendApi;
-use crate::worker::{NotificationJob, NotificationQueue};
+use crate::worker::NotificationJob;
 use axum_extra::extract::CookieJar;
 use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_model::db;
 use backend_repository::{
-    KycStepCreateInput, MagicChallengeCreateInput, OtpChallengeCreateInput,
-    UploadCompleteInput, UploadIntentCreateInput,
+    KycStepCreateInput, MagicChallengeCreateInput, OtpChallengeCreateInput, UploadCompleteInput,
+    UploadIntentCreateInput,
 };
 use chrono::{Duration, Utc};
 use gen_oas_server_bff::apis::notifications::{
@@ -725,7 +725,7 @@ fn generate_magic_secret() -> String {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        create_fake_jwt, MockKycRepo, MockNotificationQueue, TestAppStateBuilder,
+        MockKycRepo, MockNotificationQueue, TestAppStateBuilder, create_fake_jwt,
     };
     use backend_model::db::{
         KycMagicEmailChallengeRow, KycOtpChallengeRow, KycSessionRow, KycStepRow,

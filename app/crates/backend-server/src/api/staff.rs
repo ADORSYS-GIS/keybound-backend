@@ -463,7 +463,7 @@ fn review_case_from_row(row: KycReviewCaseRow) -> Result<models::ReviewCase, Err
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{create_fake_jwt, MockFileStorage, MockKycRepo, TestAppStateBuilder};
+    use crate::test_utils::{MockFileStorage, MockKycRepo, TestAppStateBuilder, create_fake_jwt};
     use backend_repository::{
         KycStaffDocumentRow, KycStaffSubmissionDetailRow, KycStaffSubmissionSummaryRow,
     };

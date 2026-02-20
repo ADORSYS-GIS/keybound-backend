@@ -1,8 +1,8 @@
-use crate::state::AppState;
 use crate::sms_provider::{ConsoleSmsProvider, SmsProvider, SnsSmsProvider};
+use crate::state::AppState;
 use apalis::prelude::{BoxDynError, TaskSink, WorkerBuilder};
-use async_trait::async_trait;
 use apalis_redis::{RedisConfig, RedisStorage};
+use async_trait::async_trait;
 use backend_core::SmsProviderType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,7 +37,10 @@ impl WorkerHttpClient for reqwest::Client {
             .map_err(|e| Box::new(e) as BoxDynError)?;
 
         let status = response.status();
-        let text = response.text().await.map_err(|e| Box::new(e) as BoxDynError)?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| Box::new(e) as BoxDynError)?;
 
         Ok((status, text))
     }
@@ -192,7 +195,9 @@ pub async fn run(state: Arc<AppState>) -> backend_core::Result<()> {
     Ok(())
 }
 
-async fn build_sms_provider(cfg: &backend_core::Config) -> backend_core::Result<Arc<dyn SmsProvider>> {
+async fn build_sms_provider(
+    cfg: &backend_core::Config,
+) -> backend_core::Result<Arc<dyn SmsProvider>> {
     let provider: Arc<dyn SmsProvider> = if let Some(sms_cfg) = &cfg.sms {
         match sms_cfg.provider {
             SmsProviderType::Console => Arc::new(ConsoleSmsProvider),
@@ -308,10 +313,7 @@ async fn process_fineract_provisioning_job(
     let url = format!("{}/api/registration/register", state.config.cuss.api_url);
     let body = serde_json::to_value(&req).map_err(|e| Box::new(e) as BoxDynError)?;
 
-    let (status, text) = state
-        .worker_http_client
-        .post_json(&url, &body)
-        .await?;
+    let (status, text) = state.worker_http_client.post_json(&url, &body).await?;
 
     if !status.is_success() {
         warn!(

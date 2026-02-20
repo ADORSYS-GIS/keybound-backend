@@ -99,16 +99,16 @@ impl FileStorage for S3FileStorage {
 
         match encryption {
             EncryptionMode::S3 => {
-                builder = builder
-                    .server_side_encryption(aws_sdk_s3::types::ServerSideEncryption::Aes256);
+                builder =
+                    builder.server_side_encryption(aws_sdk_s3::types::ServerSideEncryption::Aes256);
                 headers.insert(
                     "x-amz-server-side-encryption".to_owned(),
                     "AES256".to_owned(),
                 );
             }
             EncryptionMode::Kms => {
-                builder = builder
-                    .server_side_encryption(aws_sdk_s3::types::ServerSideEncryption::AwsKms);
+                builder =
+                    builder.server_side_encryption(aws_sdk_s3::types::ServerSideEncryption::AwsKms);
                 headers.insert(
                     "x-amz-server-side-encryption".to_owned(),
                     "aws:kms".to_owned(),
