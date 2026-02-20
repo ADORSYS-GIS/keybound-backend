@@ -874,6 +874,7 @@ dependencies = [
  "diesel",
  "mimalloc",
  "openssl",
+ "openssl-sys",
  "tokio",
 ]
 
@@ -953,6 +954,7 @@ dependencies = [
  "diesel-async",
  "diesel_migrations",
  "openssl",
+ "openssl-sys",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1001,6 +1003,7 @@ dependencies = [
  "diesel-async",
  "gen_oas_server_kc",
  "openssl",
+ "openssl-sys",
  "serde_json",
  "tokio",
 ]
@@ -1039,6 +1042,7 @@ dependencies = [
  "json-patch",
  "mockall",
  "openssl",
+ "openssl-sys",
  "rand 0.10.0",
  "redis 1.0.3",
  "reqwest 0.13.2",

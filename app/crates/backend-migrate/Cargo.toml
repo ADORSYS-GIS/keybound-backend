@@ -17,6 +17,7 @@ async-trait.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 openssl.workspace = true
+openssl-sys.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 diesel = { workspace = true, features = ["postgres", "chrono", "serde_json", "r2d2", "pq-src"] }

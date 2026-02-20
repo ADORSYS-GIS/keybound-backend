@@ -1,5 +1,8 @@
 mod branding;
 
+#[allow(unused_imports)]
+use openssl_sys as _;
+
 use backend_cli::{AppCli, AppCommands, Parser, RuntimeMode as CliRuntimeMode};
 use backend_core::{Result, RuntimeMode as ConfigRuntimeMode, load_from_path};
 use backend_otlp::init_tracing;

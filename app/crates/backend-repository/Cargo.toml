@@ -15,6 +15,7 @@ deadpool-diesel.workspace = true
 diesel-async.workspace = true
 serde_json.workspace = true
 openssl.workspace = true
+openssl-sys.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 diesel = { workspace = true, features = ["pq-src"] }
