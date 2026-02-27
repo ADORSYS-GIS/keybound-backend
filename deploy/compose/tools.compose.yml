@@ -8,7 +8,7 @@ services:
     - /bin/sh
     - -c
     - |
-      set -e;
+      set -ex;
       rm -rf /data/*
       mkdir -p /data/bin
       mkdir -p /data/kc-plugins

@@ -2,7 +2,7 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.2
     ports:
-      - '127.0.0.1:9026:9026'
+      - '0.0.0.0:9026:9026'
     environment:
       KC_HTTP_PORT: 9026
       # Dev-only credentials. Do not reuse in production; wire secrets via a vault or env injection.
