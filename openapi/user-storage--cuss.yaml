@@ -1,26 +1,26 @@
 openapi: 3.1.0
 info:
   title: Customer Registration Service API
-  description: API for the two-stage customer registration process, as documented in
-    registration_flow.md.
+  description: API for the two-stage customer registration process, as documented in registration_flow.md.
   version: 1.0.0
 servers:
-  - url: http://localhost:8081
-    description: Local development server
+- url: http://localhost:8081
+  description: Local development server
 tags:
-  - name: Registration
-    description: Endpoints for customer registration and account activation.
+- name: Registration
+  description: Endpoints for customer registration and account activation.
 paths:
   /api/registration/register:
     post:
       tags:
-        - Registration
+      - Registration
+      operationId: registerCustomer
       summary: Stage 1 - Register a new customer and create a pending savings account.
       description: |
         Initiates the first stage of a new customer registration. It creates the client and a savings account in a pending state.
         This operation is idempotent based on the `externalId`. If a request with a previously used `externalId` is sent, the system will not create a new client and will respond appropriately.
       security:
-        - BearerAuth: [ ]
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -43,13 +43,14 @@ paths:
   /api/registration/approve-and-deposit:
     post:
       tags:
-        - Registration
+      - Registration
+      operationId: approveAndDeposit
       summary: Stage 2 - Approve, activate, and optionally deposit funds.
       description: |
         Initiates the second stage of the registration process. It approves and activates the savings account created in Stage 1.
         An optional initial deposit can be made.
       security:
-        - BearerAuth: [ ]
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -64,8 +65,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApproveAndDepositResponse'
         '400':
-          description: Bad Request - Invalid input data, e.g., savings account does not
-            exist or is already active.
+          description: Bad Request - Invalid input data, e.g., savings account does not exist or is already active.
         '401':
           description: Unauthorized - JWT token is missing or invalid.
         '403':
@@ -80,86 +80,100 @@ components:
     RegistrationRequest:
       type: object
       required:
-        - firstName
-        - lastName
-        - phone
-        - externalId
+      - firstName
+      - lastName
+      - phone
+      - externalId
       properties:
         firstName:
           type: string
           description: The customer's first name.
-          example: Brenda
+          examples:
+          - Brenda
         lastName:
           type: string
           description: The customer's last name.
-          example: Biya
+          examples:
+          - Biya
         email:
           type: string
           format: email
           description: The customer's email address.
-          example: brenda.biya@example.cm
+          examples:
+          - brenda.biya@example.cm
         phone:
           type: string
           description: The customer's mobile phone number.
-          example: "+237691111111"
+          examples:
+          - "+237691111111"
         externalId:
           type: string
-          description: A unique identifier from the external identity system. This is
-            used for idempotency.
-          example: external-id-001
+          description: A unique identifier from the external identity system. This is used for idempotency.
+          examples:
+          - external-id-001
         dateOfBirth:
           type: string
           format: date
           description: Format YYYY-MM-DD.
-          example: '1990-01-15'
+          examples:
+          - '1990-01-15'
     RegistrationResponse:
       type: object
       properties:
         success:
           type: boolean
-          example: true
+          examples:
+          - true
         status:
           type: string
-          example: success
+          examples:
+          - success
         fineractClientId:
           type: integer
           format: int64
-          example: 102
+          examples:
+          - 102
         savingsAccountId:
           type: integer
           format: int64
-          example: 205
+          examples:
+          - 205
     ApproveAndDepositRequest:
       type: object
       required:
-        - savingsAccountId
+      - savingsAccountId
       properties:
         savingsAccountId:
           type: integer
           format: int64
           description: The ID of the savings account obtained from the registration step.
-          example: 205
+          examples:
+          - 205
         depositAmount:
           type: number
           format: double
-          description: The amount to deposit. If not provided or zero, the account will
-            only be approved and activated.
-          example: 1000
+          description: The amount to deposit. If not provided or zero, the account will only be approved and activated.
+          examples:
+          - 1000
     ApproveAndDepositResponse:
       type: object
       properties:
         success:
           type: boolean
-          example: true
+          examples:
+          - true
         status:
           type: string
-          example: success
+          examples:
+          - success
         savingsAccountId:
           type: integer
           format: int64
-          example: 205
+          examples:
+          - 205
         transactionId:
           type: integer
           format: int64
           description: The ID of the deposit transaction, if a deposit was made.
-          example: 512
+          examples:
+          - 512
