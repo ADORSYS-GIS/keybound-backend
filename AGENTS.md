@@ -245,6 +245,17 @@ All backends:
     - **Handler**: `app/crates/backend-server/src/api/bff.rs` handles the request, checks the version, applies the patch, and calls the repository.
     - **Repository**: `app/crates/backend-repository/src/pg/kyc.rs` executes the update using Diesel DSL.
 
+### Phone Deposit Requests (BFF)
+- **Endpoints**:
+  - `POST /internal/deposits/phone`
+  - `GET /internal/deposits/{depositId}`
+- **Persistence**: Deposits are stored in `phone_deposit` with status, assigned contact, and expiry metadata.
+- **Ownership**: API enforces JWT user ownership at create/get time.
+- **Implementation**:
+  - **Handler**: `app/crates/backend-server/src/api/bff.rs` (`Deposits` trait impl).
+  - **Repository**: `app/crates/backend-repository/src/pg/kyc.rs` with Diesel DSL methods.
+  - **Migration**: `app/crates/backend-migrate/migrations/20260227110000_phone_deposit`.
+
 ### Background Worker for SMS Retries
 - **Description**: A background worker, powered by the `apalis` crate, handles the retrying of SMS messages.
 - **Concurrency Control**: Uses Redis for distributed locking to ensure that only one worker instance processes the SMS queue at a time.

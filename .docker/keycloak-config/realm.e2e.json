@@ -5,6 +5,7 @@
   "displayNameHtml": "<b>Keybound</b> E2E",
   "registrationAllowed": false,
   "rememberMe": false,
+  "sslRequired":"none",
   "loginWithEmailAllowed": true,
   "resetPasswordAllowed": false,
   "requiredActions": [
@@ -17,117 +18,11 @@
       "priority": 10
     }
   ],
-  "browserFlow": "keybound-publickey-browser-flow",
   "enabled": true,
-  "authenticationFlows": [
-    {
-      "alias": "keybound-publickey-browser-flow",
-      "description": "Public-key browser login flow",
-      "providerId": "basic-flow",
-      "topLevel": true,
-      "builtIn": false,
-      "authenticationExecutions": [
-        {
-          "authenticator": "ingest-signed-device-blob",
-          "requirement": "REQUIRED",
-          "priority": 10
-        },
-        {
-          "authenticator": "verify-signed-blob",
-          "requirement": "REQUIRED",
-          "priority": 20
-        },
-        {
-          "authenticator": "collect-phone-form",
-          "requirement": "REQUIRED",
-          "priority": 30
-        },
-        {
-          "authenticator": "check-user-by-phone",
-          "requirement": "REQUIRED",
-          "priority": 40
-        },
-        {
-          "authenticator": "route-enrollment-path",
-          "requirement": "REQUIRED",
-          "priority": 50
-        },
-        {
-          "authenticatorFlow": true,
-          "flowAlias": "keybound-publickey-approval-subflow",
-          "requirement": "CONDITIONAL",
-          "priority": 60
-        },
-        {
-          "authenticatorFlow": true,
-          "flowAlias": "keybound-publickey-otp-subflow",
-          "requirement": "CONDITIONAL",
-          "priority": 70
-        }
-      ]
-    },
-    {
-      "alias": "keybound-publickey-approval-subflow",
-      "description": "Approval path for known users that already have device credentials",
-      "providerId": "basic-flow",
-      "topLevel": false,
-      "builtIn": false,
-      "authenticationExecutions": [
-        {
-          "authenticator": "condition-approval-path",
-          "requirement": "REQUIRED",
-          "priority": 10
-        },
-        {
-          "authenticator": "keybound-start-approval-request",
-          "requirement": "REQUIRED",
-          "priority": 20
-        },
-        {
-          "authenticator": "keybound-wait-approval",
-          "requirement": "REQUIRED",
-          "priority": 30
-        },
-        {
-          "authenticator": "persist-device-credential",
-          "requirement": "REQUIRED",
-          "priority": 40
-        }
-      ]
-    },
-    {
-      "alias": "keybound-publickey-otp-subflow",
-      "description": "OTP path for new users or users without active device credentials",
-      "providerId": "basic-flow",
-      "topLevel": false,
-      "builtIn": false,
-      "authenticationExecutions": [
-        {
-          "authenticator": "condition-otp-path",
-          "requirement": "REQUIRED",
-          "priority": 10
-        },
-        {
-          "authenticator": "send-validate-otp-sms",
-          "requirement": "REQUIRED",
-          "priority": 20
-        },
-        {
-          "authenticator": "find-or-create-user",
-          "requirement": "REQUIRED",
-          "priority": 30
-        },
-        {
-          "authenticator": "persist-device-credential",
-          "requirement": "REQUIRED",
-          "priority": 40
-        }
-      ]
-    }
-  ],
   "components": {
     "org.keycloak.storage.UserStorageProvider": [
       {
+        "id": "backend-user-storage",
         "name": "backend-user-storage",
         "providerId": "backend-user-storage",
         "config": {
@@ -150,47 +45,20 @@
       "name": "Keybound Vite Web",
       "enabled": true,
       "protocol": "openid-connect",
-      "protocolMappers": [
-        {
-          "name": "device-binding",
-          "protocol": "openid-connect",
-          "protocolMapper": "device-binding-mapper",
-          "consentRequired": false,
-          "config": {}
-        }
-      ],
       "publicClient": true,
-      "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": [
-        "http://localhost:5173/popup-callback.html",
-        "http://localhost:5173/callback"
-      ],
-      "webOrigins": [
-        "http://localhost:5173"
-      ],
-      "baseUrl": "http://localhost:5173"
+      "redirectUris": []
     },
     {
       "clientId": "resource-server",
       "name": "Keybound Resource Server",
       "enabled": true,
       "protocol": "openid-connect",
-      "protocolMappers": [
-        {
-          "name": "device-binding",
-          "protocol": "openid-connect",
-          "protocolMapper": "device-binding-mapper",
-          "consentRequired": false,
-          "config": {}
-        }
-      ],
       "publicClient": false,
       "serviceAccountsEnabled": true,
       "authorizationServicesEnabled": true,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [],
-      "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false
     },
     {

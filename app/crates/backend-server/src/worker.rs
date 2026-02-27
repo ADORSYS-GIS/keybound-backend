@@ -294,21 +294,18 @@ async fn process_fineract_provisioning_job(
         .or_else(|| value_as_string(&identity_data, "phoneNumber"))
         .unwrap_or_default();
 
-    let date_of_birth = value_as_string(&identity_data, "date_of_birth")
-        .or_else(|| value_as_string(&identity_data, "dateOfBirth"))
-        .and_then(|d| d.parse::<chrono::NaiveDate>().ok());
-
-    let req = RegistrationRequest {
-        first_name,
-        last_name,
-        email,
-        phone,
-        national_id: value_as_string(&identity_data, "national_id")
-            .or_else(|| value_as_string(&identity_data, "nationalId")),
-        date_of_birth,
-        gender: value_as_string(&identity_data, "gender"),
-        address: None,
+    let fullname = format!("{first_name} {last_name}").trim().to_owned();
+    let fullname = if !fullname.is_empty() {
+        fullname
+    } else if !user.username.trim().is_empty() {
+        user.username.clone()
+    } else if !email.trim().is_empty() {
+        email
+    } else {
+        phone
     };
+
+    let req = RegistrationRequest { fullname };
 
     let url = format!("{}/api/registration/register", state.config.cuss.api_url);
     let body = serde_json::to_value(&req).map_err(|e| Box::new(e) as BoxDynError)?;

@@ -147,6 +147,24 @@ pub struct KycReviewDecisionRow {
     pub reviewer_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::phone_deposit)]
+pub struct PhoneDepositRow {
+    pub deposit_id: String,
+    pub user_id: String,
+    pub amount: f64,
+    pub currency: String,
+    pub reason: Option<String>,
+    pub reference: Option<String>,
+    pub status: String,
+    pub staff_id: String,
+    pub staff_full_name: String,
+    pub staff_phone_number: String,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 impl diesel::associations::HasTable for UserRow {
     type Table = crate::schema::app_user::table;
 
@@ -227,6 +245,14 @@ impl diesel::associations::HasTable for KycReviewDecisionRow {
     }
 }
 
+impl diesel::associations::HasTable for PhoneDepositRow {
+    type Table = crate::schema::phone_deposit::table;
+
+    fn table() -> Self::Table {
+        crate::schema::phone_deposit::table
+    }
+}
+
 impl<'a> diesel::Identifiable for &'a UserRow {
     type Id = &'a str;
 
@@ -304,5 +330,13 @@ impl<'a> diesel::Identifiable for &'a KycReviewDecisionRow {
 
     fn id(self) -> Self::Id {
         self.id
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a PhoneDepositRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.deposit_id.as_str()
     }
 }

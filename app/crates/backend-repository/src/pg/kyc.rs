@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 const IDENTITY_STEP_TYPE: &str = "IDENTITY";
 const REVIEW_STATUS_PENDING: &str = "PENDING";
 const REVIEW_STATUS_DONE: &str = "DONE";
+const DEPOSIT_STATUS_CONTACT_PROVIDED: &str = "CONTACT_PROVIDED";
+const STAFF_REALM: &str = "staff";
 
 #[derive(Clone)]
 pub struct KycRepository {
@@ -68,6 +70,107 @@ impl KycRepository {
             .filter(|segment| !segment.is_empty())
             .unwrap_or(object_key)
             .to_string()
+    }
+
+    fn build_contact_full_name(
+        first_name: Option<String>,
+        last_name: Option<String>,
+        username: String,
+    ) -> String {
+        let first = first_name.unwrap_or_default().trim().to_owned();
+        let last = last_name.unwrap_or_default().trim().to_owned();
+
+        if !first.is_empty() && !last.is_empty() {
+            format!("{first} {last}")
+        } else if !first.is_empty() {
+            first
+        } else if !last.is_empty() {
+            last
+        } else {
+            username
+        }
+    }
+
+    async fn select_deposit_staff_contact(
+        conn: &mut AsyncPgConnection,
+        user_id_val: &str,
+    ) -> RepoResult<(String, String, String)> {
+        type CandidateRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+        );
+
+        async fn fetch_candidate(
+            conn: &mut AsyncPgConnection,
+            user_id_val: &str,
+            prefer_staff_realm: bool,
+            exclude_user: bool,
+        ) -> Result<Option<CandidateRow>, Error> {
+            use backend_model::schema::app_user;
+
+            let mut query = app_user::table
+                .filter(app_user::disabled.eq(false))
+                .filter(app_user::phone_number.is_not_null())
+                .into_boxed();
+
+            if prefer_staff_realm {
+                query = query.filter(app_user::realm.eq(STAFF_REALM));
+            }
+            if exclude_user {
+                query = query.filter(app_user::user_id.ne(user_id_val));
+            }
+
+            query
+                .order(app_user::created_at.asc())
+                .select((
+                    app_user::user_id,
+                    app_user::first_name,
+                    app_user::last_name,
+                    app_user::username,
+                    app_user::phone_number,
+                ))
+                .first::<CandidateRow>(conn)
+                .await
+                .optional()
+                .map_err(Error::from)
+        }
+
+        let preferred = fetch_candidate(conn, user_id_val, true, true).await?;
+        let fallback = if preferred.is_none() {
+            fetch_candidate(conn, user_id_val, false, true).await?
+        } else {
+            None
+        };
+        let requester_fallback = if preferred.is_none() && fallback.is_none() {
+            fetch_candidate(conn, user_id_val, false, false).await?
+        } else {
+            None
+        };
+
+        let Some((staff_id, first_name, last_name, username, phone_number)) =
+            preferred.or(fallback).or(requester_fallback)
+        else {
+            return Err(Error::bad_request(
+                "STAFF_CONTACT_NOT_AVAILABLE",
+                "No active staff contact with phone number is available",
+            ));
+        };
+
+        let staff_phone_number = phone_number.ok_or_else(|| {
+            Error::internal(
+                "STAFF_CONTACT_INVALID",
+                "Staff contact is missing a phone number",
+            )
+        })?;
+
+        Ok((
+            staff_id,
+            Self::build_contact_full_name(first_name, last_name, username),
+            staff_phone_number,
+        ))
     }
 }
 
@@ -574,6 +677,57 @@ impl KycRepo for KycRepository {
             })
         })
         .await
+    }
+
+    async fn create_phone_deposit(
+        &self,
+        input: PhoneDepositCreateInput,
+    ) -> RepoResult<db::PhoneDepositRow> {
+        use backend_model::schema::phone_deposit;
+
+        let mut conn = self.get_conn().await?;
+        let (staff_id, staff_full_name, staff_phone_number) =
+            Self::select_deposit_staff_contact(&mut conn, &input.user_id).await?;
+
+        let now = Utc::now();
+        let row = db::PhoneDepositRow {
+            deposit_id: backend_id::phone_deposit_id()?,
+            user_id: input.user_id,
+            amount: input.amount,
+            currency: input.currency,
+            reason: input.reason,
+            reference: input.reference,
+            status: DEPOSIT_STATUS_CONTACT_PROVIDED.to_string(),
+            staff_id,
+            staff_full_name,
+            staff_phone_number,
+            expires_at: Some(now + chrono::Duration::hours(2)),
+            created_at: now,
+            updated_at: now,
+        };
+
+        diesel::insert_into(phone_deposit::table)
+            .values(&row)
+            .get_result::<db::PhoneDepositRow>(&mut conn)
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn get_phone_deposit(
+        &self,
+        deposit_id_val: &str,
+    ) -> RepoResult<Option<db::PhoneDepositRow>> {
+        use backend_model::schema::phone_deposit;
+
+        let mut conn = self.get_conn().await?;
+
+        phone_deposit::table
+            .filter(phone_deposit::deposit_id.eq(deposit_id_val))
+            .select(db::PhoneDepositRow::as_select())
+            .first::<db::PhoneDepositRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Error::from)
     }
 
     async fn list_staff_submissions(

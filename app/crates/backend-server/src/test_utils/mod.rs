@@ -8,8 +8,8 @@ use backend_core::{Config, Error, Result};
 use backend_repository::{
     DeviceRepo, KycRepo, KycReviewCaseRow, KycReviewDecisionRecord, KycStaffDocumentRow,
     KycStaffSubmissionDetailRow, KycStaffSubmissionSummaryRow, KycStepCreateInput,
-    MagicChallengeCreateInput, OtpChallengeCreateInput, RepoResult, UploadCompleteInput,
-    UploadCompleteResult, UploadIntentCreateInput, UserRepo,
+    MagicChallengeCreateInput, OtpChallengeCreateInput, PhoneDepositCreateInput, RepoResult,
+    UploadCompleteInput, UploadCompleteResult, UploadIntentCreateInput, UserRepo,
 };
 use mockall::mock;
 use std::sync::Arc;
@@ -152,6 +152,16 @@ mock! {
             &self,
             input: UploadCompleteInput,
         ) -> RepoResult<UploadCompleteResult>;
+
+        async fn create_phone_deposit(
+            &self,
+            input: PhoneDepositCreateInput,
+        ) -> RepoResult<backend_model::db::PhoneDepositRow>;
+
+        async fn get_phone_deposit(
+            &self,
+            deposit_id: &str,
+        ) -> RepoResult<Option<backend_model::db::PhoneDepositRow>>;
 
         async fn list_staff_submissions(
             &self,

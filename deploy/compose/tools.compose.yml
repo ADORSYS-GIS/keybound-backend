@@ -2,7 +2,7 @@ services:
   download-core-tools:
     image: alpine/curl
     environment:
-      KEYCLOAK_PLUGIN_VERSION: "0.2.0"
+      KEYCLOAK_PLUGIN_VERSION: "0.2.1"
       OPENAPI_GENERATOR_VERSION: "7.19.0"
     command:
     - /bin/sh

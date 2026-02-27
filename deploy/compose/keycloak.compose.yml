@@ -26,7 +26,7 @@ services:
       - |
         set -e
         cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers
-        /opt/keycloak/bin/kc.sh start-dev --import-realm
+        /opt/keycloak/bin/kc.sh start-dev --import-realm --log-level="WARN,com.ssegning.keycloak:debug"
     volumes:
       - ../../.docker/keycloak-config/:/opt/keycloak/data/import/:ro
       - downloaded_data:/downloaded

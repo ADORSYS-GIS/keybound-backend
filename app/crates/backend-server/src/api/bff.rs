@@ -5,10 +5,13 @@ use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_model::db;
 use backend_repository::{
-    KycStepCreateInput, MagicChallengeCreateInput, OtpChallengeCreateInput, UploadCompleteInput,
-    UploadIntentCreateInput,
+    KycStepCreateInput, MagicChallengeCreateInput, OtpChallengeCreateInput,
+    PhoneDepositCreateInput, UploadCompleteInput, UploadIntentCreateInput,
 };
 use chrono::{Duration, Utc};
+use gen_oas_server_bff::apis::deposits::{
+    Deposits, InternalCreatePhoneDepositResponse, InternalGetPhoneDepositResponse,
+};
 use gen_oas_server_bff::apis::notifications::{
     InternalIssueMagicEmailResponse, InternalIssueOtpResponse, InternalVerifyMagicEmailResponse,
     InternalVerifyOtpResponse, Notifications,
@@ -36,35 +39,75 @@ const MAGIC_RATE_LIMIT_WINDOW_MINUTES: i64 = 10;
 const MAGIC_RATE_LIMIT_MAX_ISSUES: i64 = 5;
 
 #[backend_core::async_trait]
-impl Steps<Error> for BackendApi {
+impl Deposits<Error> for BackendApi {
     type Claims = JwtToken;
 
-    async fn internal_start_session(
+    async fn internal_create_phone_deposit(
         &self,
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::InternalStartSessionRequest,
-    ) -> Result<InternalStartSessionResponse, Error> {
+        body: &models::CreatePhoneDepositRequest,
+    ) -> Result<InternalCreatePhoneDepositResponse, Error> {
         ensure_user_match(claims, &body.user_id)?;
 
-        let (session, step_ids) = self
+        let deposit = self
             .state
             .kyc
-            .start_or_resume_session(&body.user_id)
+            .create_phone_deposit(PhoneDepositCreateInput {
+                user_id: body.user_id.clone(),
+                amount: body.amount,
+                currency: body.currency.clone(),
+                reason: body.reason.clone(),
+                reference: body.reference.clone(),
+            })
             .await?;
 
-        Ok(InternalStartSessionResponse::Status201_Session(
-            models::KycSessionInternal::new(
-                session.id,
-                session.user_id,
-                parse_session_status(&session.status),
-                step_ids,
-                session.updated_at,
+        Ok(
+            InternalCreatePhoneDepositResponse::Status201_DepositRequestCreated(
+                phone_deposit_from_row(deposit)?,
             ),
+        )
+    }
+
+    async fn internal_get_phone_deposit(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::InternalGetPhoneDepositPathParams,
+    ) -> Result<InternalGetPhoneDepositResponse, Error> {
+        let user_id = Self::require_user_id(claims)?;
+
+        let Some(deposit) = self
+            .state
+            .kyc
+            .get_phone_deposit(&path_params.deposit_id)
+            .await?
+        else {
+            return Err(Error::not_found(
+                "DEPOSIT_NOT_FOUND",
+                "Deposit request not found",
+            ));
+        };
+
+        if deposit.user_id != user_id {
+            return Err(Error::unauthorized(
+                "Deposit request does not belong to authenticated user",
+            ));
+        }
+
+        Ok(InternalGetPhoneDepositResponse::Status200_DepositRequest(
+            phone_deposit_from_row(deposit)?,
         ))
     }
+}
+
+#[backend_core::async_trait]
+impl Steps<Error> for BackendApi {
+    type Claims = JwtToken;
 
     async fn internal_create_step(
         &self,
@@ -106,6 +149,33 @@ impl Steps<Error> for BackendApi {
         Ok(InternalGetStepResponse::Status200_Step(step_from_row(
             step,
         )?))
+    }
+
+    async fn internal_start_session(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::InternalStartSessionRequest,
+    ) -> Result<InternalStartSessionResponse, Error> {
+        ensure_user_match(claims, &body.user_id)?;
+
+        let (session, step_ids) = self
+            .state
+            .kyc
+            .start_or_resume_session(&body.user_id)
+            .await?;
+
+        Ok(InternalStartSessionResponse::Status201_Session(
+            models::KycSessionInternal::new(
+                session.id,
+                session.user_id,
+                parse_session_status(&session.status),
+                step_ids,
+                session.updated_at,
+            ),
+        ))
     }
 }
 
@@ -642,6 +712,15 @@ fn parse_step_type(step_type: &str) -> Result<models::StepType, Error> {
     })
 }
 
+fn parse_deposit_status(status: &str) -> Result<models::DepositStatus, Error> {
+    status.parse::<models::DepositStatus>().map_err(|_| {
+        Error::internal(
+            "INVALID_DEPOSIT_STATUS",
+            format!("Unsupported deposit status stored in database: {status}"),
+        )
+    })
+}
+
 fn step_from_row(row: db::KycStepRow) -> Result<models::KycStepInternal, Error> {
     Ok(models::KycStepInternal {
         id: row.id,
@@ -653,6 +732,22 @@ fn step_from_row(row: db::KycStepRow) -> Result<models::KycStepInternal, Error> 
         policy: json_to_object_map(&row.policy),
         created_at: row.created_at,
         updated_at: row.updated_at,
+    })
+}
+
+fn phone_deposit_from_row(row: db::PhoneDepositRow) -> Result<models::PhoneDepositResponse, Error> {
+    Ok(models::PhoneDepositResponse {
+        deposit_id: row.deposit_id,
+        status: parse_deposit_status(&row.status)?,
+        amount: row.amount,
+        currency: row.currency,
+        contact: models::StaffContact {
+            staff_id: row.staff_id,
+            full_name: row.staff_full_name,
+            phone_number: row.staff_phone_number,
+        },
+        expires_at: row.expires_at,
+        created_at: row.created_at,
     })
 }
 
@@ -728,8 +823,9 @@ mod tests {
         MockKycRepo, MockNotificationQueue, TestAppStateBuilder, create_fake_jwt,
     };
     use backend_model::db::{
-        KycMagicEmailChallengeRow, KycOtpChallengeRow, KycSessionRow, KycStepRow,
+        KycMagicEmailChallengeRow, KycOtpChallengeRow, KycSessionRow, KycStepRow, PhoneDepositRow,
     };
+    use gen_oas_server_bff::apis::deposits::Deposits;
     use gen_oas_server_bff::apis::notifications::Notifications;
     use gen_oas_server_bff::apis::steps::Steps;
     use mockall::predicate::*;
@@ -818,6 +914,124 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.meta().status_code, 401);
+    }
+
+    #[tokio::test]
+    async fn test_internal_create_phone_deposit_success() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo
+            .expect_create_phone_deposit()
+            .withf(|input| {
+                input.user_id == "user123" && input.amount == 2500.0 && input.currency == "XAF"
+            })
+            .returning(|_| {
+                Ok(PhoneDepositRow {
+                    deposit_id: "dep_123".to_string(),
+                    user_id: "user123".to_string(),
+                    amount: 2500.0,
+                    currency: "XAF".to_string(),
+                    reason: Some("wallet top-up".to_string()),
+                    reference: Some("ref-123".to_string()),
+                    status: "CONTACT_PROVIDED".to_string(),
+                    staff_id: "usr_staff_1".to_string(),
+                    staff_full_name: "Staff Agent".to_string(),
+                    staff_phone_number: "+237690000000".to_string(),
+                    expires_at: Some(Utc::now() + Duration::minutes(30)),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+            });
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let body = models::CreatePhoneDepositRequest {
+            user_id: "user123".to_string(),
+            amount: 2500.0,
+            currency: "XAF".to_string(),
+            reason: Some("wallet top-up".to_string()),
+            reference: Some("ref-123".to_string()),
+        };
+
+        let result = api
+            .internal_create_phone_deposit(
+                &Method::POST,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &body,
+            )
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            InternalCreatePhoneDepositResponse::Status201_DepositRequestCreated(response) => {
+                assert_eq!(response.deposit_id, "dep_123");
+                assert_eq!(response.status, models::DepositStatus::ContactProvided);
+                assert_eq!(response.contact.staff_id, "usr_staff_1");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_internal_get_phone_deposit_unauthorized_owner_mismatch() {
+        let mut kyc_repo = MockKycRepo::new();
+        kyc_repo
+            .expect_get_phone_deposit()
+            .with(eq("dep_123"))
+            .returning(|_| {
+                Ok(Some(PhoneDepositRow {
+                    deposit_id: "dep_123".to_string(),
+                    user_id: "other_user".to_string(),
+                    amount: 1500.0,
+                    currency: "XAF".to_string(),
+                    reason: None,
+                    reference: None,
+                    status: "CONTACT_PROVIDED".to_string(),
+                    staff_id: "usr_staff_1".to_string(),
+                    staff_full_name: "Staff Agent".to_string(),
+                    staff_phone_number: "+237690000000".to_string(),
+                    expires_at: Some(Utc::now() + Duration::minutes(30)),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                }))
+            });
+
+        let state = TestAppStateBuilder::new()
+            .with_kyc(Arc::new(kyc_repo))
+            .build()
+            .await;
+        let api = BackendApi::new(
+            Arc::new(state.clone()),
+            state.oidc_state.clone(),
+            state.signature_state.clone(),
+        );
+
+        let claims = create_fake_jwt("user123");
+        let path_params = models::InternalGetPhoneDepositPathParams {
+            deposit_id: "dep_123".to_string(),
+        };
+
+        let result = api
+            .internal_get_phone_deposit(
+                &Method::GET,
+                &Host::from(http::uri::Authority::from_static("localhost")),
+                &CookieJar::new(),
+                &claims,
+                &path_params,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().meta().status_code, 401);
     }
 
     #[tokio::test]

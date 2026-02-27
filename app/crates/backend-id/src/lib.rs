@@ -60,3 +60,7 @@ pub fn kyc_upload_id() -> Result<String> {
 pub fn kyc_evidence_id() -> Result<String> {
     prefixed("evi")
 }
+
+pub fn phone_deposit_id() -> Result<String> {
+    prefixed("dep")
+}

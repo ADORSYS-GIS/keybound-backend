@@ -143,6 +143,24 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    phone_deposit (deposit_id) {
+        deposit_id -> Text,
+        user_id -> Text,
+        amount -> Float8,
+        currency -> Text,
+        reason -> Nullable<Text>,
+        reference -> Nullable<Text>,
+        status -> Text,
+        staff_id -> Text,
+        staff_full_name -> Text,
+        staff_phone_number -> Text,
+        expires_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
 diesel::joinable!(device -> app_user (user_id));
 diesel::joinable!(kyc_session -> app_user (user_id));
 diesel::joinable!(kyc_step -> kyc_session (session_id));
@@ -156,6 +174,7 @@ diesel::joinable!(kyc_review_queue -> kyc_session (session_id));
 diesel::joinable!(kyc_review_queue -> kyc_step (step_id));
 diesel::joinable!(kyc_review_decision -> kyc_session (session_id));
 diesel::joinable!(kyc_review_decision -> kyc_step (step_id));
+diesel::joinable!(phone_deposit -> app_user (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     app_user,
@@ -168,4 +187,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     kyc_evidence,
     kyc_review_queue,
     kyc_review_decision,
+    phone_deposit,
 );

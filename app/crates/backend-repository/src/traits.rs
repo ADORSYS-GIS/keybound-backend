@@ -98,6 +98,15 @@ pub struct UploadCompleteResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct PhoneDepositCreateInput {
+    pub user_id: String,
+    pub amount: f64,
+    pub currency: String,
+    pub reason: Option<String>,
+    pub reference: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct KycStaffSubmissionSummaryRow {
     pub submission_id: String,
     pub user_id: String,
@@ -229,6 +238,16 @@ pub trait KycRepo: Send + Sync {
         &self,
         input: UploadCompleteInput,
     ) -> RepoResult<UploadCompleteResult>;
+
+    async fn create_phone_deposit(
+        &self,
+        input: PhoneDepositCreateInput,
+    ) -> RepoResult<backend_model::db::PhoneDepositRow>;
+
+    async fn get_phone_deposit(
+        &self,
+        deposit_id: &str,
+    ) -> RepoResult<Option<backend_model::db::PhoneDepositRow>>;
 
     async fn list_staff_submissions(
         &self,
