@@ -48,40 +48,9 @@ components:
     RegistrationRequest:
       type: object
       required:
-      - firstName
-      - lastName
-      - email
-      - phone
+      - fullname
       properties:
-        firstName:
-          type: string
-        lastName:
-          type: string
-        email:
-          type: string
-          format: email
-        phone:
-          type: string
-          description: Phone number must follow E.164 pattern.
-        nationalId:
-          type: string
-        dateOfBirth:
-          type: string
-          format: date
-        gender:
-          type: string
-        address:
-          $ref: '#/components/schemas/RegistrationRequestAddressDto'
-    RegistrationRequestAddressDto:
-      type: object
-      properties:
-        street:
-          type: string
-        city:
-          type: string
-        postalCode:
-          type: string
-        country:
+        fullname:
           type: string
     RegistrationResponse:
       type: object
