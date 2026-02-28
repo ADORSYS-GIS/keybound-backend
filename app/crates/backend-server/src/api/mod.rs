@@ -41,13 +41,6 @@ impl BackendApi {
     pub(crate) fn require_user_id(context: &JwtToken) -> AppResult<String> {
         Ok(context.user_id().to_owned())
     }
-
-    #[instrument]
-    pub(crate) fn normalize_page_limit(page: Option<i32>, limit: Option<i32>) -> (i32, i32) {
-        let page = page.unwrap_or(1).max(1);
-        let limit = limit.unwrap_or(20).clamp(1, 100);
-        (page, limit)
-    }
 }
 
 pub(crate) fn kc_error(code: &str, message: &str) -> gen_oas_server_kc::models::Error {

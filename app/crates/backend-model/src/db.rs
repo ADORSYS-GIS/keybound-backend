@@ -27,6 +27,7 @@ pub struct DeviceRow {
     pub user_id: String,
     pub jkt: String,
     pub public_jwk: String,
+    pub device_record_id: String,
     pub status: String,
     pub label: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -34,135 +35,47 @@ pub struct DeviceRow {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_session)]
-pub struct KycSessionRow {
+#[diesel(table_name = crate::schema::sm_instance)]
+pub struct SmInstanceRow {
     pub id: String,
-    pub user_id: String,
+    pub kind: String,
+    pub user_id: Option<String>,
+    pub idempotency_key: String,
     pub status: String,
+    pub context: Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_step)]
-pub struct KycStepRow {
-    pub id: String,
-    pub session_id: String,
-    pub user_id: String,
-    pub step_type: String,
-    pub status: String,
-    pub data: Value,
-    pub policy: Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub submitted_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_otp_challenge)]
-pub struct KycOtpChallengeRow {
-    pub otp_ref: String,
-    pub step_id: String,
-    pub msisdn: String,
-    pub channel: String,
-    pub otp_hash: String,
-    pub expires_at: DateTime<Utc>,
-    pub tries_left: i32,
-    pub created_at: DateTime<Utc>,
-    pub verified_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_magic_email_challenge)]
-pub struct KycMagicEmailChallengeRow {
-    pub token_ref: String,
-    pub step_id: String,
-    pub email: String,
-    pub token_hash: String,
-    pub expires_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
-    pub verified_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_upload)]
-pub struct KycUploadRow {
-    pub upload_id: String,
-    pub step_id: String,
-    pub user_id: String,
-    pub purpose: String,
-    pub asset_type: String,
-    pub mime: String,
-    pub size_bytes: i64,
-    pub bucket: String,
-    pub object_key: String,
-    pub method: String,
-    pub url: String,
-    pub headers: Value,
-    pub multipart: Option<Value>,
-    pub expires_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
-    pub etag: Option<String>,
-    pub computed_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_evidence)]
-pub struct KycEvidenceRow {
-    pub evidence_id: String,
-    pub step_id: String,
-    pub asset_type: String,
-    pub bucket: String,
-    pub object_key: String,
-    pub sha256: Option<String>,
+#[diesel(table_name = crate::schema::sm_event)]
+pub struct SmEventRow {
+    pub id: String,
+    pub instance_id: String,
+    pub kind: String,
+    pub actor_type: String,
+    pub actor_id: Option<String>,
+    pub payload: Value,
     pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_review_queue)]
-pub struct KycReviewQueueRow {
-    pub id: i64,
-    pub session_id: String,
-    pub step_id: String,
+#[diesel(table_name = crate::schema::sm_step_attempt)]
+pub struct SmStepAttemptRow {
+    pub id: String,
+    pub instance_id: String,
+    pub step_name: String,
+    pub attempt_no: i32,
     pub status: String,
-    pub assigned_to: Option<String>,
-    pub claimed_at: Option<DateTime<Utc>>,
-    pub lock_expires_at: Option<DateTime<Utc>>,
-    pub priority: i32,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::kyc_review_decision)]
-pub struct KycReviewDecisionRow {
-    pub id: i64,
-    pub session_id: String,
-    pub step_id: String,
-    pub outcome: String,
-    pub reason_code: String,
-    pub comment: Option<String>,
-    pub decided_at: DateTime<Utc>,
-    pub reviewer_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::phone_deposit)]
-pub struct PhoneDepositRow {
-    pub deposit_id: String,
-    pub user_id: String,
-    pub amount: f64,
-    pub currency: String,
-    pub reason: Option<String>,
-    pub reference: Option<String>,
-    pub status: String,
-    pub staff_id: String,
-    pub staff_full_name: String,
-    pub staff_phone_number: String,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub external_ref: Option<String>,
+    pub input: Value,
+    pub output: Option<Value>,
+    pub error: Option<Value>,
+    pub queued_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub next_retry_at: Option<DateTime<Utc>>,
 }
 
 impl diesel::associations::HasTable for UserRow {
@@ -181,75 +94,27 @@ impl diesel::associations::HasTable for DeviceRow {
     }
 }
 
-impl diesel::associations::HasTable for KycSessionRow {
-    type Table = crate::schema::kyc_session::table;
+impl diesel::associations::HasTable for SmInstanceRow {
+    type Table = crate::schema::sm_instance::table;
 
     fn table() -> Self::Table {
-        crate::schema::kyc_session::table
+        crate::schema::sm_instance::table
     }
 }
 
-impl diesel::associations::HasTable for KycStepRow {
-    type Table = crate::schema::kyc_step::table;
+impl diesel::associations::HasTable for SmEventRow {
+    type Table = crate::schema::sm_event::table;
 
     fn table() -> Self::Table {
-        crate::schema::kyc_step::table
+        crate::schema::sm_event::table
     }
 }
 
-impl diesel::associations::HasTable for KycOtpChallengeRow {
-    type Table = crate::schema::kyc_otp_challenge::table;
+impl diesel::associations::HasTable for SmStepAttemptRow {
+    type Table = crate::schema::sm_step_attempt::table;
 
     fn table() -> Self::Table {
-        crate::schema::kyc_otp_challenge::table
-    }
-}
-
-impl diesel::associations::HasTable for KycMagicEmailChallengeRow {
-    type Table = crate::schema::kyc_magic_email_challenge::table;
-
-    fn table() -> Self::Table {
-        crate::schema::kyc_magic_email_challenge::table
-    }
-}
-
-impl diesel::associations::HasTable for KycUploadRow {
-    type Table = crate::schema::kyc_upload::table;
-
-    fn table() -> Self::Table {
-        crate::schema::kyc_upload::table
-    }
-}
-
-impl diesel::associations::HasTable for KycEvidenceRow {
-    type Table = crate::schema::kyc_evidence::table;
-
-    fn table() -> Self::Table {
-        crate::schema::kyc_evidence::table
-    }
-}
-
-impl diesel::associations::HasTable for KycReviewQueueRow {
-    type Table = crate::schema::kyc_review_queue::table;
-
-    fn table() -> Self::Table {
-        crate::schema::kyc_review_queue::table
-    }
-}
-
-impl diesel::associations::HasTable for KycReviewDecisionRow {
-    type Table = crate::schema::kyc_review_decision::table;
-
-    fn table() -> Self::Table {
-        crate::schema::kyc_review_decision::table
-    }
-}
-
-impl diesel::associations::HasTable for PhoneDepositRow {
-    type Table = crate::schema::phone_deposit::table;
-
-    fn table() -> Self::Table {
-        crate::schema::phone_deposit::table
+        crate::schema::sm_step_attempt::table
     }
 }
 
@@ -269,7 +134,7 @@ impl<'a> diesel::Identifiable for &'a DeviceRow {
     }
 }
 
-impl<'a> diesel::Identifiable for &'a KycSessionRow {
+impl<'a> diesel::Identifiable for &'a SmInstanceRow {
     type Id = &'a str;
 
     fn id(self) -> Self::Id {
@@ -277,7 +142,7 @@ impl<'a> diesel::Identifiable for &'a KycSessionRow {
     }
 }
 
-impl<'a> diesel::Identifiable for &'a KycStepRow {
+impl<'a> diesel::Identifiable for &'a SmEventRow {
     type Id = &'a str;
 
     fn id(self) -> Self::Id {
@@ -285,58 +150,10 @@ impl<'a> diesel::Identifiable for &'a KycStepRow {
     }
 }
 
-impl<'a> diesel::Identifiable for &'a KycOtpChallengeRow {
+impl<'a> diesel::Identifiable for &'a SmStepAttemptRow {
     type Id = &'a str;
 
     fn id(self) -> Self::Id {
-        self.otp_ref.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a KycMagicEmailChallengeRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.token_ref.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a KycUploadRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.upload_id.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a KycEvidenceRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.evidence_id.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a KycReviewQueueRow {
-    type Id = i64;
-
-    fn id(self) -> Self::Id {
-        self.id
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a KycReviewDecisionRow {
-    type Id = i64;
-
-    fn id(self) -> Self::Id {
-        self.id
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a PhoneDepositRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.deposit_id.as_str()
+        self.id.as_str()
     }
 }

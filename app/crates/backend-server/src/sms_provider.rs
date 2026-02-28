@@ -40,3 +40,49 @@ impl SmsProvider for SnsSmsProvider {
         Ok(())
     }
 }
+
+pub struct ApiSmsProvider {
+    client: reqwest::Client,
+    base_url: String,
+    auth_token: Option<String>,
+}
+
+impl ApiSmsProvider {
+    pub fn new(client: reqwest::Client, base_url: String, auth_token: Option<String>) -> Self {
+        Self {
+            client,
+            base_url,
+            auth_token,
+        }
+    }
+}
+
+#[async_trait]
+impl SmsProvider for ApiSmsProvider {
+    async fn send_otp(&self, phone: &str, otp: &str) -> Result<()> {
+        let url = format!("{}/otp", self.base_url.trim_end_matches('/'));
+        let mut req = self.client.post(url).json(&serde_json::json!({
+            "phone": phone,
+            "otp": otp,
+        }));
+
+        if let Some(token) = &self.auth_token {
+            req = req.bearer_auth(token);
+        }
+
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| backend_core::Error::Server(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(backend_core::Error::Server(format!(
+                "SMS API returned {status}: {body}"
+            )));
+        }
+
+        Ok(())
+    }
+}

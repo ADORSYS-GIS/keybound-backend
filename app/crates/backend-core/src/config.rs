@@ -90,6 +90,26 @@ pub struct AwsS3 {
     pub presign_ttl_seconds: u64,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageType {
+    S3,
+    Fs,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FsStorage {
+    pub base_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Storage {
+    #[serde(rename = "type")]
+    pub r#type: StorageType,
+    #[serde(default)]
+    pub fs: Option<FsStorage>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsSns {
     /// Optional region override for SNS.
@@ -105,11 +125,20 @@ pub struct AwsSns {
 pub enum SmsProviderType {
     Console,
     Sns,
+    Api,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SmsConfig {
     pub provider: SmsProviderType,
+    #[serde(default)]
+    pub api: Option<SmsApi>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SmsApi {
+    pub base_url: String,
+    pub auth_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -123,6 +152,8 @@ pub struct Config {
     #[serde(default)]
     pub redis: Redis,
     pub s3: Option<AwsS3>,
+    #[serde(default)]
+    pub storage: Option<Storage>,
     pub sns: Option<AwsSns>,
     pub sms: Option<SmsConfig>,
 

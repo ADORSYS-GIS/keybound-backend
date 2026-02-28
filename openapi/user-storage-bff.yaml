@@ -287,6 +287,12 @@ components:
       description: Page size (default 20).
 
   schemas:
+    DepositProvider:
+      type: string
+      enum:
+        - MTN_CM
+        - ORANGE_CM
+
     DepositStatus:
       type: string
       enum:
@@ -303,6 +309,8 @@ components:
         userId:
           type: string
           description: User initiating the deposit
+        provider:
+          $ref: "#/components/schemas/DepositProvider"
         amount:
           type: number
           minimum: 0.01

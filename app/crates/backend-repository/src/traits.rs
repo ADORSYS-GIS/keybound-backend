@@ -4,30 +4,55 @@ use serde_json::Value;
 pub type RepoResult<T> = backend_core::Result<T>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KycSubmissionFilter {
-    pub status: Option<String>,
-    pub search: Option<String>,
+pub struct PageFilter {
     pub page: i32,
     pub limit: i32,
 }
 
-impl KycSubmissionFilter {
+impl PageFilter {
+    pub fn normalized(self) -> Self {
+        Self {
+            page: self.page.max(1),
+            limit: self.limit.clamp(1, 100),
+        }
+    }
+
+    pub fn offset(&self) -> i64 {
+        i64::from((self.page - 1) * self.limit)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmInstanceFilter {
+    pub kind: Option<String>,
+    pub status: Option<String>,
+    pub user_id: Option<String>,
+    pub created_from: Option<DateTime<Utc>>,
+    pub created_to: Option<DateTime<Utc>>,
+    pub page: i32,
+    pub limit: i32,
+}
+
+impl SmInstanceFilter {
     pub fn normalized(self) -> Self {
         let page = self.page.max(1);
         let limit = self.limit.clamp(1, 100);
-
+        let kind = self.kind.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
         let status = self
             .status
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty());
-        let search = self
-            .search
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty());
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
+        let user_id = self
+            .user_id
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
 
         Self {
+            kind,
             status,
-            search,
+            user_id,
+            created_from: self.created_from,
+            created_to: self.created_to,
             page,
             limit,
         }
@@ -39,271 +64,137 @@ impl KycSubmissionFilter {
 }
 
 #[derive(Debug, Clone)]
-pub struct KycStepCreateInput {
-    pub session_id: String,
-    pub user_id: String,
-    pub step_type: String,
-    pub policy: Value,
-}
-
-#[derive(Debug, Clone)]
-pub struct OtpChallengeCreateInput {
-    pub step_id: String,
-    pub msisdn: String,
-    pub channel: String,
-    pub otp_hash: String,
-    pub expires_at: DateTime<Utc>,
-    pub tries_left: i32,
-}
-
-#[derive(Debug, Clone)]
-pub struct MagicChallengeCreateInput {
-    pub step_id: String,
-    pub email: String,
-    pub token_hash: String,
-    pub expires_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UploadIntentCreateInput {
-    pub step_id: String,
-    pub user_id: String,
-    pub purpose: String,
-    pub asset_type: String,
-    pub mime: String,
-    pub size_bytes: i64,
-    pub bucket: String,
-    pub object_key: String,
-    pub method: String,
-    pub url: String,
-    pub headers: Value,
-    pub multipart: Option<Value>,
-    pub expires_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UploadCompleteInput {
-    pub upload_id: String,
-    pub user_id: String,
-    pub bucket: String,
-    pub object_key: String,
-    pub etag: Option<String>,
-    pub computed_sha256: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UploadCompleteResult {
-    pub evidence: backend_model::db::KycEvidenceRow,
-    pub moved_to_pending_review: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct PhoneDepositCreateInput {
-    pub user_id: String,
-    pub amount: f64,
-    pub currency: String,
-    pub reason: Option<String>,
-    pub reference: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct KycStaffSubmissionSummaryRow {
-    pub submission_id: String,
-    pub user_id: String,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub email: Option<String>,
-    pub phone_number: Option<String>,
-    pub status: String,
-    pub submitted_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct KycStaffSubmissionDetailRow {
-    pub submission_id: String,
-    pub user_id: String,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub email: Option<String>,
-    pub phone_number: Option<String>,
-    pub date_of_birth: Option<String>,
-    pub nationality: Option<String>,
-    pub status: String,
-    pub submitted_at: Option<DateTime<Utc>>,
-    pub reviewed_at: Option<DateTime<Utc>>,
-    pub reviewed_by: Option<String>,
-    pub rejection_reason: Option<String>,
-    pub review_notes: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct KycStaffDocumentRow {
+pub struct SmInstanceCreateInput {
     pub id: String,
-    pub submission_id: String,
-    pub document_type: String,
-    pub file_name: String,
-    pub mime_type: String,
-    pub bucket: String,
-    pub object_key: String,
-    pub uploaded_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct KycReviewEvidenceRow {
-    pub asset_type: String,
-    pub evidence_id: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct KycReviewCaseRow {
-    pub case_id: String,
-    pub user_id: String,
-    pub step_id: String,
+    pub kind: String,
+    pub user_id: Option<String>,
+    pub idempotency_key: String,
     pub status: String,
-    pub submitted_at: DateTime<Utc>,
-    pub first_name: String,
-    pub middle_name: Option<String>,
-    pub last_name: String,
-    pub evidence: Vec<KycReviewEvidenceRow>,
+    pub context: Value,
 }
 
 #[derive(Debug, Clone)]
-pub struct KycReviewDecisionRecord {
-    pub case_id: String,
-    pub decision: String,
-    pub decided_at: DateTime<Utc>,
+pub struct SmEventCreateInput {
+    pub id: String,
+    pub instance_id: String,
+    pub kind: String,
+    pub actor_type: String,
+    pub actor_id: Option<String>,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmStepAttemptCreateInput {
+    pub id: String,
+    pub instance_id: String,
+    pub step_name: String,
+    pub attempt_no: i32,
+    pub status: String,
+    pub external_ref: Option<String>,
+    pub input: Value,
+    pub output: Option<Value>,
+    pub error: Option<Value>,
+    pub queued_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub next_retry_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmStepAttemptPatch {
+    pub status: Option<String>,
+    pub output: Option<Option<Value>>,
+    pub error: Option<Option<Value>>,
+    pub queued_at: Option<Option<DateTime<Utc>>>,
+    pub started_at: Option<Option<DateTime<Utc>>>,
+    pub finished_at: Option<Option<DateTime<Utc>>>,
+    pub next_retry_at: Option<Option<DateTime<Utc>>>,
 }
 
 #[backend_core::async_trait]
-pub trait KycRepo: Send + Sync {
-    async fn start_or_resume_session(
+pub trait StateMachineRepo: Send + Sync {
+    async fn create_instance(
+        &self,
+        input: SmInstanceCreateInput,
+    ) -> RepoResult<backend_model::db::SmInstanceRow>;
+
+    async fn get_instance(
+        &self,
+        instance_id: &str,
+    ) -> RepoResult<Option<backend_model::db::SmInstanceRow>>;
+
+    async fn get_instance_by_idempotency_key(
+        &self,
+        idempotency_key: &str,
+    ) -> RepoResult<Option<backend_model::db::SmInstanceRow>>;
+
+    async fn list_instances(
+        &self,
+        filter: SmInstanceFilter,
+    ) -> RepoResult<(Vec<backend_model::db::SmInstanceRow>, i64)>;
+
+    async fn update_instance_status(
+        &self,
+        instance_id: &str,
+        status: &str,
+        completed_at: Option<DateTime<Utc>>,
+    ) -> RepoResult<()>;
+
+    async fn update_instance_context(&self, instance_id: &str, context: Value) -> RepoResult<()>;
+
+    async fn append_event(&self, input: SmEventCreateInput) -> RepoResult<backend_model::db::SmEventRow>;
+
+    async fn list_events(&self, instance_id: &str) -> RepoResult<Vec<backend_model::db::SmEventRow>>;
+
+    async fn create_step_attempt(
+        &self,
+        input: SmStepAttemptCreateInput,
+    ) -> RepoResult<backend_model::db::SmStepAttemptRow>;
+
+    async fn patch_step_attempt(
+        &self,
+        attempt_id: &str,
+        patch: SmStepAttemptPatch,
+    ) -> RepoResult<backend_model::db::SmStepAttemptRow>;
+
+    /// Atomically claim a queued attempt for execution.
+    /// Returns None if the attempt was not in QUEUED state (already running/finished/cancelled).
+    async fn claim_step_attempt(
+        &self,
+        attempt_id: &str,
+    ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
+
+    async fn list_step_attempts(
+        &self,
+        instance_id: &str,
+    ) -> RepoResult<Vec<backend_model::db::SmStepAttemptRow>>;
+
+    async fn get_latest_step_attempt(
+        &self,
+        instance_id: &str,
+        step_name: &str,
+    ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
+
+    async fn get_step_attempt_by_external_ref(
+        &self,
+        instance_id: &str,
+        step_name: &str,
+        external_ref: &str,
+    ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
+
+    async fn cancel_other_attempts_for_step(
+        &self,
+        instance_id: &str,
+        step_name: &str,
+        keep_attempt_id: &str,
+    ) -> RepoResult<()>;
+
+    async fn next_attempt_no(&self, instance_id: &str, step_name: &str) -> RepoResult<i32>;
+
+    async fn select_deposit_staff_contact(
         &self,
         user_id: &str,
-    ) -> RepoResult<(backend_model::db::KycSessionRow, Vec<String>)>;
-
-    async fn create_step(
-        &self,
-        input: KycStepCreateInput,
-    ) -> RepoResult<backend_model::db::KycStepRow>;
-
-    async fn get_step(&self, step_id: &str) -> RepoResult<Option<backend_model::db::KycStepRow>>;
-
-    async fn count_recent_otp_challenges(
-        &self,
-        step_id: &str,
-        since: DateTime<Utc>,
-    ) -> RepoResult<i64>;
-
-    async fn create_otp_challenge(
-        &self,
-        input: OtpChallengeCreateInput,
-    ) -> RepoResult<backend_model::db::KycOtpChallengeRow>;
-
-    async fn get_otp_challenge(
-        &self,
-        step_id: &str,
-        otp_ref: &str,
-    ) -> RepoResult<Option<backend_model::db::KycOtpChallengeRow>>;
-
-    async fn mark_otp_verified(&self, step_id: &str, otp_ref: &str) -> RepoResult<()>;
-
-    async fn decrement_otp_tries(&self, step_id: &str, otp_ref: &str) -> RepoResult<i32>;
-
-    async fn count_recent_magic_challenges(
-        &self,
-        step_id: &str,
-        since: DateTime<Utc>,
-    ) -> RepoResult<i64>;
-
-    async fn create_magic_challenge(
-        &self,
-        input: MagicChallengeCreateInput,
-    ) -> RepoResult<backend_model::db::KycMagicEmailChallengeRow>;
-
-    async fn get_magic_challenge(
-        &self,
-        token_ref: &str,
-    ) -> RepoResult<Option<backend_model::db::KycMagicEmailChallengeRow>>;
-
-    async fn mark_magic_verified(&self, token_ref: &str) -> RepoResult<()>;
-
-    async fn update_step_status(&self, step_id: &str, status: &str) -> RepoResult<()>;
-
-    async fn create_upload_intent(
-        &self,
-        input: UploadIntentCreateInput,
-    ) -> RepoResult<backend_model::db::KycUploadRow>;
-
-    async fn complete_upload_and_register_evidence(
-        &self,
-        input: UploadCompleteInput,
-    ) -> RepoResult<UploadCompleteResult>;
-
-    async fn create_phone_deposit(
-        &self,
-        input: PhoneDepositCreateInput,
-    ) -> RepoResult<backend_model::db::PhoneDepositRow>;
-
-    async fn get_phone_deposit(
-        &self,
-        deposit_id: &str,
-    ) -> RepoResult<Option<backend_model::db::PhoneDepositRow>>;
-
-    async fn list_staff_submissions(
-        &self,
-        filter: KycSubmissionFilter,
-    ) -> RepoResult<(Vec<KycStaffSubmissionSummaryRow>, i64)>;
-
-    async fn get_staff_submission(
-        &self,
-        submission_id: &str,
-    ) -> RepoResult<Option<KycStaffSubmissionDetailRow>>;
-
-    async fn list_staff_submission_documents(
-        &self,
-        submission_id: &str,
-    ) -> RepoResult<Vec<KycStaffDocumentRow>>;
-
-    async fn get_staff_submission_document(
-        &self,
-        submission_id: &str,
-        document_id: &str,
-    ) -> RepoResult<Option<KycStaffDocumentRow>>;
-
-    async fn approve_submission(
-        &self,
-        submission_id: String,
-        reviewer_id: Option<String>,
-        notes: Option<String>,
-    ) -> RepoResult<bool>;
-
-    async fn reject_submission(
-        &self,
-        submission_id: String,
-        reviewer_id: Option<String>,
-        reason: String,
-        notes: Option<String>,
-    ) -> RepoResult<bool>;
-
-    async fn request_submission_info(&self, submission_id: &str, message: &str)
-    -> RepoResult<bool>;
-
-    async fn list_review_cases(
-        &self,
-        page: i32,
-        limit: i32,
-    ) -> RepoResult<(Vec<KycReviewCaseRow>, i64)>;
-
-    async fn get_review_case(&self, case_id: &str) -> RepoResult<Option<KycReviewCaseRow>>;
-
-    async fn decide_review_case(
-        &self,
-        case_id: String,
-        outcome: String,
-        reason_code: String,
-        comment: Option<String>,
-        reviewer_id: Option<String>,
-    ) -> RepoResult<Option<KycReviewDecisionRecord>>;
+    ) -> RepoResult<(String, String, String)>;
 }
 
 #[backend_core::async_trait]

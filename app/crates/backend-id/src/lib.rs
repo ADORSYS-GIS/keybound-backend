@@ -64,3 +64,15 @@ pub fn kyc_evidence_id() -> Result<String> {
 pub fn phone_deposit_id() -> Result<String> {
     prefixed("dep")
 }
+
+pub fn sm_instance_id() -> Result<String> {
+    prefixed("smi")
+}
+
+pub fn sm_event_id() -> Result<String> {
+    prefixed("sme")
+}
+
+pub fn sm_attempt_id() -> Result<String> {
+    prefixed("sma")
+}

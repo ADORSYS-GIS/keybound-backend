@@ -1,16 +1,16 @@
 use crate::file_storage::{EncryptionMode, FileStorage, PresignedUpload};
-use crate::sms_provider::SmsProvider;
 use crate::state::AppState;
+use crate::state_machine::jobs::StateMachineStepJob;
+use crate::state_machine::queue::StateMachineQueue;
 use crate::worker::{NotificationJob, NotificationQueue, ProvisioningQueue, WorkerHttpClient};
 use backend_auth::{OidcState, SignatureState};
 use backend_core::async_trait;
-use backend_core::{Config, Error, Result};
+use backend_core::{Config, Error};
 use backend_repository::{
-    DeviceRepo, KycRepo, KycReviewCaseRow, KycReviewDecisionRecord, KycStaffDocumentRow,
-    KycStaffSubmissionDetailRow, KycStaffSubmissionSummaryRow, KycStepCreateInput,
-    MagicChallengeCreateInput, OtpChallengeCreateInput, PhoneDepositCreateInput, RepoResult,
-    UploadCompleteInput, UploadCompleteResult, UploadIntentCreateInput, UserRepo,
+    DeviceRepo, RepoResult, SmEventCreateInput, SmInstanceCreateInput, SmInstanceFilter,
+    SmStepAttemptCreateInput, SmStepAttemptPatch, StateMachineRepo, UserRepo,
 };
+use bytes::Bytes;
 use mockall::mock;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +42,15 @@ mock! {
     pub ProvisioningQueue {}
     #[async_trait]
     impl ProvisioningQueue for ProvisioningQueue {
-        async fn enqueue_fineract_provisioning(&self, user_id: &str) -> backend_core::Result<()>;
+        async fn enqueue_fineract_provisioning(&self, _user_id: &str) -> backend_core::Result<()>;
+    }
+}
+
+mock! {
+    pub StateMachineQueue {}
+    #[async_trait]
+    impl StateMachineQueue for StateMachineQueue {
+        async fn enqueue(&self, job: StateMachineStepJob) -> backend_core::Result<()>;
     }
 }
 
@@ -52,15 +60,16 @@ mock! {
     impl FileStorage for FileStorage {
         async fn head_object(&self, bucket: &str, key: &str) -> std::result::Result<(), Error>;
 
-        async fn presign_get_object(
+        async fn upload(
             &self,
             bucket: &str,
             key: &str,
-            expires_in: Duration,
-            content_disposition: Option<String>,
-        ) -> std::result::Result<String, Error>;
+            mime_type: &str,
+            encryption: EncryptionMode,
+            body: Bytes,
+        ) -> std::result::Result<(), Error>;
 
-        async fn presign_put_object(
+        async fn upload_presigned(
             &self,
             bucket: &str,
             key: &str,
@@ -68,162 +77,117 @@ mock! {
             encryption: EncryptionMode,
             expires_in: Duration,
         ) -> std::result::Result<PresignedUpload, Error>;
+
+        async fn download(&self, bucket: &str, key: &str) -> std::result::Result<Bytes, Error>;
+
+        async fn download_presigned(
+            &self,
+            bucket: &str,
+            key: &str,
+            expires_in: Duration,
+            content_disposition: Option<String>,
+        ) -> std::result::Result<String, Error>;
     }
 }
 
 mock! {
-    pub KycRepo {}
+    pub StateMachineRepo {}
     #[async_trait]
-    impl KycRepo for KycRepo {
-        async fn start_or_resume_session(
+    impl StateMachineRepo for StateMachineRepo {
+        async fn create_instance(
             &self,
-            user_id: &str,
-        ) -> RepoResult<(backend_model::db::KycSessionRow, Vec<String>)>;
+            input: SmInstanceCreateInput,
+        ) -> RepoResult<backend_model::db::SmInstanceRow>;
 
-        async fn create_step(
+        async fn get_instance(
             &self,
-            input: KycStepCreateInput,
-        ) -> RepoResult<backend_model::db::KycStepRow>;
+            instance_id: &str,
+        ) -> RepoResult<Option<backend_model::db::SmInstanceRow>>;
 
-        async fn get_step(
+        async fn get_instance_by_idempotency_key(
             &self,
-            step_id: &str,
-        ) -> RepoResult<Option<backend_model::db::KycStepRow>>;
+            idempotency_key: &str,
+        ) -> RepoResult<Option<backend_model::db::SmInstanceRow>>;
 
-        async fn count_recent_otp_challenges(
+        async fn list_instances(
             &self,
-            step_id: &str,
-            since: chrono::DateTime<chrono::Utc>,
-        ) -> RepoResult<i64>;
+            filter: SmInstanceFilter,
+        ) -> RepoResult<(Vec<backend_model::db::SmInstanceRow>, i64)>;
 
-        async fn create_otp_challenge(
+        async fn update_instance_status(
             &self,
-            input: OtpChallengeCreateInput,
-        ) -> RepoResult<backend_model::db::KycOtpChallengeRow>;
-
-        async fn get_otp_challenge(
-            &self,
-            step_id: &str,
-            otp_ref: &str,
-        ) -> RepoResult<Option<backend_model::db::KycOtpChallengeRow>>;
-
-        async fn mark_otp_verified(
-            &self,
-            step_id: &str,
-            otp_ref: &str,
+            instance_id: &str,
+            status: &str,
+            completed_at: Option<chrono::DateTime<chrono::Utc>>,
         ) -> RepoResult<()>;
 
-        async fn decrement_otp_tries(
+        async fn update_instance_context(
             &self,
-            step_id: &str,
-            otp_ref: &str,
+            instance_id: &str,
+            context: serde_json::Value,
+        ) -> RepoResult<()>;
+
+        async fn append_event(
+            &self,
+            input: SmEventCreateInput,
+        ) -> RepoResult<backend_model::db::SmEventRow>;
+
+        async fn list_events(
+            &self,
+            instance_id: &str,
+        ) -> RepoResult<Vec<backend_model::db::SmEventRow>>;
+
+        async fn create_step_attempt(
+            &self,
+            input: SmStepAttemptCreateInput,
+        ) -> RepoResult<backend_model::db::SmStepAttemptRow>;
+
+        async fn patch_step_attempt(
+            &self,
+            attempt_id: &str,
+            patch: SmStepAttemptPatch,
+        ) -> RepoResult<backend_model::db::SmStepAttemptRow>;
+
+        async fn claim_step_attempt(
+            &self,
+            attempt_id: &str,
+        ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
+
+        async fn list_step_attempts(
+            &self,
+            instance_id: &str,
+        ) -> RepoResult<Vec<backend_model::db::SmStepAttemptRow>>;
+
+        async fn get_latest_step_attempt(
+            &self,
+            instance_id: &str,
+            step_name: &str,
+        ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
+
+        async fn get_step_attempt_by_external_ref(
+            &self,
+            instance_id: &str,
+            step_name: &str,
+            external_ref: &str,
+        ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
+
+        async fn cancel_other_attempts_for_step(
+            &self,
+            instance_id: &str,
+            step_name: &str,
+            keep_attempt_id: &str,
+        ) -> RepoResult<()>;
+
+        async fn next_attempt_no(
+            &self,
+            instance_id: &str,
+            step_name: &str,
         ) -> RepoResult<i32>;
 
-        async fn count_recent_magic_challenges(
+        async fn select_deposit_staff_contact(
             &self,
-            step_id: &str,
-            since: chrono::DateTime<chrono::Utc>,
-        ) -> RepoResult<i64>;
-
-        async fn create_magic_challenge(
-            &self,
-            input: MagicChallengeCreateInput,
-        ) -> RepoResult<backend_model::db::KycMagicEmailChallengeRow>;
-
-        async fn get_magic_challenge(
-            &self,
-            token_ref: &str,
-        ) -> RepoResult<Option<backend_model::db::KycMagicEmailChallengeRow>>;
-
-        async fn mark_magic_verified(&self, token_ref: &str) -> RepoResult<()>;
-
-        async fn update_step_status(
-            &self,
-            step_id: &str,
-            status: &str,
-        ) -> RepoResult<()>;
-
-        async fn create_upload_intent(
-            &self,
-            input: UploadIntentCreateInput,
-        ) -> RepoResult<backend_model::db::KycUploadRow>;
-
-        async fn complete_upload_and_register_evidence(
-            &self,
-            input: UploadCompleteInput,
-        ) -> RepoResult<UploadCompleteResult>;
-
-        async fn create_phone_deposit(
-            &self,
-            input: PhoneDepositCreateInput,
-        ) -> RepoResult<backend_model::db::PhoneDepositRow>;
-
-        async fn get_phone_deposit(
-            &self,
-            deposit_id: &str,
-        ) -> RepoResult<Option<backend_model::db::PhoneDepositRow>>;
-
-        async fn list_staff_submissions(
-            &self,
-            filter: backend_repository::KycSubmissionFilter,
-        ) -> RepoResult<(Vec<KycStaffSubmissionSummaryRow>, i64)>;
-
-        async fn get_staff_submission(
-            &self,
-            submission_id: &str,
-        ) -> RepoResult<Option<KycStaffSubmissionDetailRow>>;
-
-        async fn list_staff_submission_documents(
-            &self,
-            submission_id: &str,
-        ) -> RepoResult<Vec<KycStaffDocumentRow>>;
-
-        async fn get_staff_submission_document(
-            &self,
-            submission_id: &str,
-            document_id: &str,
-        ) -> RepoResult<Option<KycStaffDocumentRow>>;
-
-        async fn approve_submission(
-            &self,
-            submission_id: String,
-            reviewer_id: Option<String>,
-            notes: Option<String>,
-        ) -> RepoResult<bool>;
-
-        async fn reject_submission(
-            &self,
-            submission_id: String,
-            reviewer_id: Option<String>,
-            reason: String,
-            notes: Option<String>,
-        ) -> RepoResult<bool>;
-
-        async fn request_submission_info(
-            &self,
-            submission_id: &str,
-            message: &str,
-        ) -> RepoResult<bool>;
-
-        async fn list_review_cases(
-            &self,
-            page: i32,
-            limit: i32,
-        ) -> RepoResult<(Vec<KycReviewCaseRow>, i64)>;
-
-        async fn get_review_case(
-            &self,
-            case_id: &str,
-        ) -> RepoResult<Option<KycReviewCaseRow>>;
-
-        async fn decide_review_case(
-            &self,
-            case_id: String,
-            outcome: String,
-            reason_code: String,
-            comment: Option<String>,
-            reviewer_id: Option<String>,
-        ) -> RepoResult<Option<KycReviewDecisionRecord>>;
+            user_id: &str,
+        ) -> RepoResult<(String, String, String)>;
     }
 }
 
@@ -298,19 +262,11 @@ mock! {
     }
 }
 
-mock! {
-    pub SmsProvider {}
-    #[async_trait]
-    impl SmsProvider for SmsProvider {
-        async fn send_otp(&self, phone: &str, otp: &str) -> Result<()>;
-    }
-}
-
 pub struct TestAppStateBuilder {
-    pub kyc: Option<Arc<dyn KycRepo>>,
+    pub sm: Option<Arc<dyn StateMachineRepo>>,
     pub user: Option<Arc<dyn UserRepo>>,
     pub device: Option<Arc<dyn DeviceRepo>>,
-    pub sms: Option<Arc<dyn SmsProvider>>,
+    pub sm_queue: Option<Arc<dyn StateMachineQueue>>,
     pub notification_queue: Option<Arc<dyn NotificationQueue>>,
     pub provisioning_queue: Option<Arc<dyn ProvisioningQueue>>,
     pub worker_http_client: Option<Arc<dyn WorkerHttpClient>>,
@@ -321,10 +277,10 @@ pub struct TestAppStateBuilder {
 impl Default for TestAppStateBuilder {
     fn default() -> Self {
         Self {
-            kyc: None,
+            sm: None,
             user: None,
             device: None,
-            sms: None,
+            sm_queue: None,
             notification_queue: None,
             provisioning_queue: None,
             worker_http_client: None,
@@ -339,8 +295,8 @@ impl TestAppStateBuilder {
         Self::default()
     }
 
-    pub fn with_kyc(mut self, kyc: Arc<dyn KycRepo>) -> Self {
-        self.kyc = Some(kyc);
+    pub fn with_sm(mut self, sm: Arc<dyn StateMachineRepo>) -> Self {
+        self.sm = Some(sm);
         self
     }
 
@@ -354,8 +310,8 @@ impl TestAppStateBuilder {
         self
     }
 
-    pub fn with_sms(mut self, sms: Arc<dyn SmsProvider>) -> Self {
-        self.sms = Some(sms);
+    pub fn with_sm_queue(mut self, q: Arc<dyn StateMachineQueue>) -> Self {
+        self.sm_queue = Some(q);
         self
     }
 
@@ -384,9 +340,8 @@ impl TestAppStateBuilder {
         self
     }
 
-    pub async fn build(self) -> AppState {
+    pub fn build(self) -> AppState {
         let config = self.config.unwrap_or_else(|| {
-            // Minimal config for testing
             serde_yaml::from_str(
                 r#"
 server:
@@ -435,11 +390,12 @@ cuss:
         });
 
         AppState {
-            kyc: self.kyc.unwrap_or_else(|| Arc::new(MockKycRepo::new())),
+            sm: self.sm.unwrap_or_else(|| Arc::new(MockStateMachineRepo::new())),
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
-            device: self
-                .device
-                .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
+            device: self.device.unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
+            sm_queue: self
+                .sm_queue
+                .unwrap_or_else(|| Arc::new(MockStateMachineQueue::new())),
             notification_queue: self
                 .notification_queue
                 .unwrap_or_else(|| Arc::new(MockNotificationQueue::new())),
@@ -458,11 +414,12 @@ cuss:
 }
 
 pub fn create_fake_jwt(user_id: &str) -> backend_auth::JwtToken {
-    backend_auth::JwtToken::new(backend_auth::Claims {
-        sub: user_id.to_string(),
-        name: Some("Test User".to_string()),
-        iss: "http://localhost:8081/realms/test".to_string(),
-        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-        preferred_username: Some("testuser".to_string()),
-    })
+    let claims = backend_auth::Claims {
+        sub: user_id.to_owned(),
+        name: None,
+        iss: "http://localhost/test".to_owned(),
+        exp: usize::MAX,
+        preferred_username: None,
+    };
+    backend_auth::JwtToken::new(claims)
 }

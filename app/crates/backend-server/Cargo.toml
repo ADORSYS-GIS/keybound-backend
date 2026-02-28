@@ -40,6 +40,7 @@ serde_yaml = { workspace = true }
 redis = { workspace = true }
 apalis = { workspace = true }
 apalis-redis = { workspace = true }
+bytes = { workspace = true }
 
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }

@@ -1,7 +1,7 @@
 pub mod device;
-pub mod kyc;
+pub mod state_machine;
 pub mod user;
 
 pub use device::DeviceRepository;
-pub use kyc::KycRepository;
+pub use state_machine::StateMachineRepository;
 pub use user::UserRepository;

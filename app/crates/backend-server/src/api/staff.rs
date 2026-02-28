@@ -1,865 +1,424 @@
 use super::BackendApi;
+use crate::state_machine::engine::Engine;
+use crate::state_machine::types::*;
 use axum_extra::extract::CookieJar;
 use backend_auth::JwtToken;
 use backend_core::Error;
-use backend_repository::{KycReviewCaseRow, KycSubmissionFilter};
-use gen_oas_server_staff::apis::kyc_review::{
-    ApiKycStaffSubmissionsGetResponse, ApiKycStaffSubmissionsSubmissionIdApprovePostResponse,
-    ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse,
-    ApiKycStaffSubmissionsSubmissionIdGetResponse,
-    ApiKycStaffSubmissionsSubmissionIdRejectPostResponse,
-    ApiKycStaffSubmissionsSubmissionIdRequestInfoPostResponse, KycReview,
-    StaffReviewCasesCaseIdDecisionPostResponse, StaffReviewCasesCaseIdGetResponse,
-    StaffReviewQueueGetResponse,
+use backend_repository::{SmInstanceFilter, SmStepAttemptCreateInput};
+use gen_oas_server_staff::apis::kyc_state_machines::{
+    KycStateMachines, StaffKycDepositsInstanceIdApprovePostResponse,
+    StaffKycDepositsInstanceIdConfirmPaymentPostResponse, StaffKycInstancesGetResponse,
+    StaffKycInstancesInstanceIdGetResponse, StaffKycInstancesInstanceIdRetryPostResponse,
+    StaffKycReportsSummaryGetResponse,
 };
 use gen_oas_server_staff::models;
 use headers::Host;
 use http::Method;
-use tracing::{info, warn};
+use serde_json::{Value, json};
 
 #[backend_core::async_trait]
-impl KycReview<Error> for BackendApi {
+impl KycStateMachines<Error> for BackendApi {
     type Claims = JwtToken;
 
-    async fn api_kyc_staff_submissions_get(
+    async fn staff_kyc_instances_get(
         &self,
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
         _claims: &Self::Claims,
-        query_params: &models::ApiKycStaffSubmissionsGetQueryParams,
-    ) -> Result<ApiKycStaffSubmissionsGetResponse, Error> {
-        let (page, limit) = Self::normalize_page_limit(query_params.page, query_params.limit);
-        let filter = KycSubmissionFilter {
-            status: query_params.status.map(|status| status.to_string()),
-            search: query_params.search.clone(),
+        query_params: &models::StaffKycInstancesGetQueryParams,
+    ) -> Result<StaffKycInstancesGetResponse, Error> {
+        let page = query_params.page.unwrap_or(1).max(1);
+        let limit = query_params.limit.unwrap_or(20).clamp(1, 100);
+
+        let filter = SmInstanceFilter {
+            kind: query_params.kind.map(|k| k.to_string()),
+            status: query_params.status.map(|s| s.to_string()),
+            user_id: query_params.user_id.clone(),
+            created_from: query_params.created_from,
+            created_to: query_params.created_to,
             page,
             limit,
         };
 
-        let (rows, total_count) = self.state.kyc.list_staff_submissions(filter).await?;
+        let (rows, total) = self.state.sm.list_instances(filter).await?;
 
-        let items = rows
-            .into_iter()
-            .map(|row| models::KycSubmissionSummary {
-                submission_id: Some(row.submission_id),
-                user_id: Some(row.user_id),
-                first_name: row.first_name,
-                last_name: row.last_name,
-                email: row.email,
-                phone_number: row.phone_number,
-                kyc_tier: None,
-                kyc_status: parse_staff_status(&row.status),
-                submitted_at: row.submitted_at.map(|ts| ts.to_rfc3339()),
-            })
-            .collect::<Vec<_>>();
+        // Best-effort: compute current step + last error using attempts.
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            let attempts = self.state.sm.list_step_attempts(&row.id).await?;
+            let (current_step, last_error) = summarize_instance(&row.kind, &attempts);
 
-        Ok(
-            ApiKycStaffSubmissionsGetResponse::Status200_PageOfKYCSubmissions(
-                models::KycSubmissionsResponse {
-                    items: Some(items),
-                    total: Some(i32::try_from(total_count).unwrap_or(i32::MAX)),
-                    page: Some(page),
-                    page_size: Some(limit),
-                },
-            ),
-        )
-    }
-
-    async fn api_kyc_staff_submissions_submission_id_approve_post(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::ApiKycStaffSubmissionsSubmissionIdApprovePostPathParams,
-        body: &models::KycApprovalRequest,
-    ) -> Result<ApiKycStaffSubmissionsSubmissionIdApprovePostResponse, Error> {
-        let reviewer_id = Self::require_user_id(claims)?;
-
-        let updated = self
-            .state
-            .kyc
-            .approve_submission(
-                path_params.submission_id.clone(),
-                Some(reviewer_id),
-                body.notes.clone(),
-            )
-            .await?;
-
-        if !updated {
-            return Ok(
-                ApiKycStaffSubmissionsSubmissionIdApprovePostResponse::Status400_ValidationFailed,
-            );
+            items.push(models::KycInstanceSummary {
+                instance_id: row.id,
+                kind: parse_kind(&row.kind),
+                user_id: row.user_id,
+                status: parse_status(&row.status),
+                current_step,
+                last_error: last_error.and_then(json_to_object),
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            });
         }
 
-        info!(
-            submission_id = %path_params.submission_id,
-            new_tier = body.new_tier,
-            notes = body.notes.as_deref(),
-            "staff approved KYC, enqueuing fineract provisioning job"
-        );
-
-        if let Some(submission) = self
-            .state
-            .kyc
-            .get_staff_submission(&path_params.submission_id)
-            .await?
-        {
-            if let Err(err) = self
-                .state
-                .provisioning_queue
-                .enqueue_fineract_provisioning(&submission.user_id)
-                .await
-            {
-                warn!(
-                    submission_id = %path_params.submission_id,
-                    error = %err,
-                    "failed to enqueue fineract provisioning job"
-                );
-            }
-        }
-
-        Ok(ApiKycStaffSubmissionsSubmissionIdApprovePostResponse::Status200_KYCApproved)
-    }
-
-    async fn api_kyc_staff_submissions_submission_id_documents_document_id_download_url_post(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-        path_params: &models::ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostPathParams,
-        body: &Option<models::PresignedDownloadUrlRequest>,
-    ) -> Result<ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse, Error>
-    {
-        let document = self
-            .state
-            .kyc
-            .get_staff_submission_document(&path_params.submission_id, &path_params.document_id)
-            .await?;
-
-        let Some(document) = document else {
-            return Ok(ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse::Status404_SubmissionOrDocumentNotFound);
-        };
-
-        if let Err(err) = self
-            .state
-            .s3
-            .head_object(&document.bucket, &document.object_key)
-            .await
-        {
-            let message = err.to_string();
-            if message.contains("NotFound")
-                || message.contains("NoSuchKey")
-                || message.contains("404")
-            {
-                return Ok(ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse::Status410_DocumentNoLongerAvailable);
-            }
-            return Err(Error::s3(message));
-        }
-
-        let expires_in = body
-            .as_ref()
-            .and_then(|request| request.expires_in_seconds)
-            .unwrap_or(300)
-            .clamp(60, 3600);
-
-        let content_disposition = body
-            .as_ref()
-            .and_then(|request| request.response_content_disposition.clone());
-
-        let url = self
-            .state
-            .s3
-            .presign_get_object(
-                &document.bucket,
-                &document.object_key,
-                std::time::Duration::from_secs(expires_in as u64),
-                content_disposition,
-            )
-            .await?;
-
-        Ok(ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse::Status200_PresignedDownloadURLCreated(models::PresignedDownloadUrlResponse {
-            url,
-            expires_at: chrono::Utc::now() + chrono::Duration::seconds(i64::from(expires_in)),
-            document_id: Some(document.id),
-            file_name: Some(document.file_name),
-            mime_type: Some(document.mime_type),
-        }))
-    }
-
-    async fn api_kyc_staff_submissions_submission_id_get(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-        path_params: &models::ApiKycStaffSubmissionsSubmissionIdGetPathParams,
-        query_params: &models::ApiKycStaffSubmissionsSubmissionIdGetQueryParams,
-    ) -> Result<ApiKycStaffSubmissionsSubmissionIdGetResponse, Error> {
-        let (page, limit) = Self::normalize_page_limit(query_params.page, query_params.limit);
-
-        let detail = self
-            .state
-            .kyc
-            .get_staff_submission(&path_params.submission_id)
-            .await?;
-
-        let Some(detail) = detail else {
-            return Ok(ApiKycStaffSubmissionsSubmissionIdGetResponse::Status404_SubmissionNotFound);
-        };
-
-        let documents = self
-            .state
-            .kyc
-            .list_staff_submission_documents(&path_params.submission_id)
-            .await?;
-
-        let total_documents = i32::try_from(documents.len()).unwrap_or(i32::MAX);
-        let start = usize::try_from((page - 1).saturating_mul(limit)).unwrap_or(0);
-        let page_size = usize::try_from(limit).unwrap_or(0);
-        let paged_documents = documents
-            .into_iter()
-            .skip(start)
-            .take(page_size)
-            .map(|doc| models::KycDocumentDto {
-                id: Some(doc.id),
-                r_type: Some(doc.document_type),
-                file_name: Some(doc.file_name),
-                mime_type: Some(doc.mime_type),
-                url: None,
-                uploaded_at: Some(doc.uploaded_at.to_rfc3339()),
-            })
-            .collect::<Vec<_>>();
-
-        Ok(
-            ApiKycStaffSubmissionsSubmissionIdGetResponse::Status200_DetailedSubmission(
-                models::KycSubmissionDetailResponse {
-                    submission_id: Some(detail.submission_id),
-                    user_id: Some(detail.user_id),
-                    first_name: detail.first_name,
-                    last_name: detail.last_name,
-                    email: detail.email,
-                    phone_number: detail.phone_number,
-                    date_of_birth: detail.date_of_birth,
-                    nationality: detail.nationality,
-                    kyc_tier: None,
-                    kyc_status: parse_staff_status(&detail.status),
-                    documents: Some(paged_documents),
-                    submitted_at: detail.submitted_at.map(|ts| ts.to_rfc3339()),
-                    reviewed_at: detail.reviewed_at.map(|ts| ts.to_rfc3339()),
-                    reviewed_by: detail.reviewed_by,
-                    rejection_reason: detail.rejection_reason,
-                    review_notes: detail.review_notes,
-                    page: Some(page),
-                    page_size: Some(limit),
-                    total_documents: Some(total_documents),
-                },
-            ),
-        )
-    }
-
-    async fn api_kyc_staff_submissions_submission_id_reject_post(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::ApiKycStaffSubmissionsSubmissionIdRejectPostPathParams,
-        body: &models::KycRejectionRequest,
-    ) -> Result<ApiKycStaffSubmissionsSubmissionIdRejectPostResponse, Error> {
-        let reviewer_id = Self::require_user_id(claims)?;
-
-        let updated = self
-            .state
-            .kyc
-            .reject_submission(
-                path_params.submission_id.clone(),
-                Some(reviewer_id),
-                body.reason.clone(),
-                body.notes.clone(),
-            )
-            .await?;
-
-        if updated {
-            Ok(ApiKycStaffSubmissionsSubmissionIdRejectPostResponse::Status200_KYCRejected)
-        } else {
-            Ok(ApiKycStaffSubmissionsSubmissionIdRejectPostResponse::Status400_ValidationFailed)
-        }
-    }
-
-    async fn api_kyc_staff_submissions_submission_id_request_info_post(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-        path_params: &models::ApiKycStaffSubmissionsSubmissionIdRequestInfoPostPathParams,
-        body: &models::KycRequestInfoRequest,
-    ) -> Result<ApiKycStaffSubmissionsSubmissionIdRequestInfoPostResponse, Error> {
-        let updated = self
-            .state
-            .kyc
-            .request_submission_info(&path_params.submission_id, &body.message)
-            .await?;
-
-        if updated {
-            Ok(ApiKycStaffSubmissionsSubmissionIdRequestInfoPostResponse::Status200_AdditionalInfoRequested)
-        } else {
-            Ok(ApiKycStaffSubmissionsSubmissionIdRequestInfoPostResponse::Status400_ValidationFailed)
-        }
-    }
-
-    async fn staff_review_cases_case_id_decision_post(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::StaffReviewCasesCaseIdDecisionPostPathParams,
-        body: &models::ReviewDecision,
-    ) -> Result<StaffReviewCasesCaseIdDecisionPostResponse, Error> {
-        let reviewer_id = Self::require_user_id(claims)?;
-        let record = self
-            .state
-            .kyc
-            .decide_review_case(
-                path_params.case_id.clone(),
-                body.decision.to_string(),
-                body.reason_code.to_string(),
-                body.comment.clone(),
-                Some(reviewer_id),
-            )
-            .await?;
-
-        let Some(record) = record else {
-            return Err(Error::not_found(
-                "REVIEW_CASE_NOT_FOUND",
-                "Review case not found",
-            ));
-        };
-
-        if record.decision == models::ReviewDecisionOutcome::Approve.to_string()
-            && let Some(submission) = self.state.kyc.get_staff_submission(&record.case_id).await?
-            && let Err(err) = self
-                .state
-                .provisioning_queue
-                .enqueue_fineract_provisioning(&submission.user_id)
-                .await
-        {
-            warn!(
-                case_id = %record.case_id,
-                error = %err,
-                "failed to enqueue fineract provisioning job"
-            );
-        }
-
-        let decision = parse_review_outcome(&record.decision)?;
-        Ok(
-            StaffReviewCasesCaseIdDecisionPostResponse::Status200_DecisionRecorded(
-                models::ReviewDecisionResult::new(record.case_id, decision, record.decided_at),
-            ),
-        )
-    }
-
-    async fn staff_review_cases_case_id_get(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-        path_params: &models::StaffReviewCasesCaseIdGetPathParams,
-    ) -> Result<StaffReviewCasesCaseIdGetResponse, Error> {
-        let row = self.state.kyc.get_review_case(&path_params.case_id).await?;
-        let Some(row) = row else {
-            return Err(Error::not_found(
-                "REVIEW_CASE_NOT_FOUND",
-                "Review case not found",
-            ));
-        };
-
-        Ok(StaffReviewCasesCaseIdGetResponse::Status200_Case(
-            review_case_from_row(row)?,
-        ))
-    }
-
-    async fn staff_review_queue_get(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        _claims: &Self::Claims,
-        query_params: &models::StaffReviewQueueGetQueryParams,
-    ) -> Result<StaffReviewQueueGetResponse, Error> {
-        let (page, limit) = Self::normalize_page_limit(query_params.page, query_params.limit);
-
-        let (rows, total_count) = self.state.kyc.list_review_cases(page, limit).await?;
-        let items = rows
-            .into_iter()
-            .map(review_case_from_row)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(StaffReviewQueueGetResponse::Status200_PaginatedListOfCases(
-            models::ReviewQueueResponse::new(
-                models::PaginationMeta::new(
-                    page,
-                    limit,
-                    i32::try_from(total_count).unwrap_or(i32::MAX),
-                ),
+        Ok(StaffKycInstancesGetResponse::Status200_PageOfInstances(
+            models::KycInstancesResponse {
                 items,
+                total: i32::try_from(total).unwrap_or(i32::MAX),
+                page,
+                page_size: limit,
+            },
+        ))
+    }
+
+    async fn staff_kyc_instances_instance_id_get(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        _claims: &Self::Claims,
+        path_params: &models::StaffKycInstancesInstanceIdGetPathParams,
+    ) -> Result<StaffKycInstancesInstanceIdGetResponse, Error> {
+        let Some(instance) = self.state.sm.get_instance(&path_params.instance_id).await? else {
+            return Ok(StaffKycInstancesInstanceIdGetResponse::Status404_InstanceNotFound);
+        };
+
+        let attempts = self.state.sm.list_step_attempts(&instance.id).await?;
+        let events = self.state.sm.list_events(&instance.id).await?;
+
+        let step_states = build_step_states(&instance.kind, &attempts)?;
+        let event_dtos = events
+            .into_iter()
+            .map(|e| models::KycEvent {
+                id: e.id,
+                kind: e.kind,
+                actor_type: e.actor_type,
+                actor_id: e.actor_id,
+                payload: json_to_object(e.payload).unwrap_or_default(),
+                created_at: e.created_at,
+            })
+            .collect::<Vec<_>>();
+
+        let context = json_to_object(instance.context).unwrap_or_default();
+
+        Ok(
+            StaffKycInstancesInstanceIdGetResponse::Status200_InstanceDetail(
+                models::KycInstanceDetail {
+                    instance_id: instance.id,
+                    kind: parse_kind(&instance.kind),
+                    user_id: instance.user_id,
+                    status: parse_status(&instance.status),
+                    context,
+                    steps: step_states,
+                    events: event_dtos,
+                    created_at: instance.created_at,
+                    updated_at: instance.updated_at,
+                    completed_at: instance.completed_at,
+                },
             ),
+        )
+    }
+
+    async fn staff_kyc_instances_instance_id_retry_post(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        _claims: &Self::Claims,
+        path_params: &models::StaffKycInstancesInstanceIdRetryPostPathParams,
+        body: &models::RetryRequest,
+    ) -> Result<StaffKycInstancesInstanceIdRetryPostResponse, Error> {
+        let Some(instance) = self.state.sm.get_instance(&path_params.instance_id).await? else {
+            return Ok(StaffKycInstancesInstanceIdRetryPostResponse::Status404_InstanceNotFound);
+        };
+
+        let step_name = body.step_name.trim();
+        if step_name.is_empty() {
+            return Err(Error::bad_request("INVALID_STEP", "stepName is required"));
+        }
+
+        let attempt_no = self
+            .state
+            .sm
+            .next_attempt_no(&instance.id, step_name)
+            .await?;
+        let now = chrono::Utc::now();
+
+        let is_async = matches!(
+            step_name,
+            STEP_PHONE_ISSUE_OTP
+                | STEP_DEPOSIT_REGISTER_CUSTOMER
+                | STEP_DEPOSIT_APPROVE_AND_DEPOSIT
+        );
+        let status = if is_async {
+            ATTEMPT_STATUS_QUEUED
+        } else {
+            ATTEMPT_STATUS_RUNNING
+        };
+
+        let attempt = self
+            .state
+            .sm
+            .create_step_attempt(SmStepAttemptCreateInput {
+                id: backend_id::sm_attempt_id()?,
+                instance_id: instance.id.clone(),
+                step_name: step_name.to_owned(),
+                attempt_no,
+                status: status.to_owned(),
+                external_ref: None,
+                input: json!({"retry_mode": body.mode.to_string()}),
+                output: None,
+                error: None,
+                queued_at: if is_async { Some(now) } else { None },
+                started_at: if is_async { None } else { Some(now) },
+                finished_at: None,
+                next_retry_at: None,
+            })
+            .await?;
+
+        self.state
+            .sm
+            .cancel_other_attempts_for_step(&instance.id, step_name, &attempt.id)
+            .await?;
+
+        if is_async {
+            self.state
+                .sm_queue
+                .enqueue(crate::state_machine::jobs::StateMachineStepJob {
+                    instance_id: instance.id.clone(),
+                    step_name: step_name.to_owned(),
+                    attempt_id: attempt.id.clone(),
+                })
+                .await
+                .map_err(|err| Error::internal("SM_ENQUEUE_FAILED", err.to_string()))?;
+        }
+
+        Ok(StaffKycInstancesInstanceIdRetryPostResponse::Status200_RetryAccepted(
+            models::RetryResponse {
+                instance_id: instance.id,
+                step_name: step_name.to_owned(),
+                attempt_id: attempt.id,
+            },
+        ))
+    }
+
+    async fn staff_kyc_deposits_instance_id_confirm_payment_post(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::StaffKycDepositsInstanceIdConfirmPaymentPostPathParams,
+        body: &models::ConfirmPaymentRequest,
+    ) -> Result<StaffKycDepositsInstanceIdConfirmPaymentPostResponse, Error> {
+        let Some(instance) = self.state.sm.get_instance(&path_params.instance_id).await? else {
+            return Ok(StaffKycDepositsInstanceIdConfirmPaymentPostResponse::Status404_InstanceNotFound);
+        };
+        if instance.kind != KIND_KYC_FIRST_DEPOSIT {
+            return Err(Error::bad_request(
+                "INVALID_INSTANCE_KIND",
+                "Instance is not a first-deposit KYC",
+            ));
+        }
+
+        // Persist context update.
+        let mut ctx = instance.context;
+        let payment = json!({
+            "confirmed_at": body.confirmed_at.unwrap_or_else(chrono::Utc::now),
+            "note": body.note,
+            "provider_txn_id": body.provider_txn_id,
+        });
+        if let Some(obj) = ctx.as_object_mut() {
+            obj.insert("payment".to_owned(), payment.clone());
+        }
+        self.state.sm.update_instance_context(&instance.id, ctx).await?;
+
+        let reviewer_id = BackendApi::require_user_id(claims).ok();
+        let engine = Engine::new(self.state.clone());
+        engine
+            .staff_confirm_deposit_payment(&instance.id, reviewer_id, payment)
+            .await?;
+
+        Ok(StaffKycDepositsInstanceIdConfirmPaymentPostResponse::Status200_PaymentConfirmationRecorded)
+    }
+
+    async fn staff_kyc_deposits_instance_id_approve_post(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::StaffKycDepositsInstanceIdApprovePostPathParams,
+        body: &models::DepositApproveRequest,
+    ) -> Result<StaffKycDepositsInstanceIdApprovePostResponse, Error> {
+        let Some(instance) = self.state.sm.get_instance(&path_params.instance_id).await? else {
+            return Ok(StaffKycDepositsInstanceIdApprovePostResponse::Status404_InstanceNotFound);
+        };
+        if instance.kind != KIND_KYC_FIRST_DEPOSIT {
+            return Err(Error::bad_request(
+                "INVALID_INSTANCE_KIND",
+                "Instance is not a first-deposit KYC",
+            ));
+        }
+
+        // Persist approval context.
+        let mut ctx = instance.context;
+        let approval = json!({
+            "first_name": body.first_name,
+            "last_name": body.last_name,
+            "deposit_amount": body.deposit_amount,
+        });
+        if let Some(obj) = ctx.as_object_mut() {
+            obj.insert("approval".to_owned(), approval.clone());
+        }
+        self.state.sm.update_instance_context(&instance.id, ctx).await?;
+
+        let reviewer_id = BackendApi::require_user_id(claims).ok();
+        let engine = Engine::new(self.state.clone());
+        engine
+            .staff_approve_deposit(&instance.id, reviewer_id, approval)
+            .await?;
+
+        Ok(StaffKycDepositsInstanceIdApprovePostResponse::Status200_ApprovalRecorded)
+    }
+
+    async fn staff_kyc_reports_summary_get(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        _claims: &Self::Claims,
+    ) -> Result<StaffKycReportsSummaryGetResponse, Error> {
+        // Minimal summary. (Future: SQL aggregation.)
+        let (rows, _total) = self
+            .state
+            .sm
+            .list_instances(SmInstanceFilter {
+                kind: None,
+                status: None,
+                user_id: None,
+                created_from: None,
+                created_to: None,
+                page: 1,
+                limit: 100,
+            })
+            .await?;
+
+        let mut by_kind = std::collections::HashMap::<String, i32>::new();
+        let mut by_status = std::collections::HashMap::<String, i32>::new();
+        for row in rows {
+            *by_kind.entry(row.kind).or_insert(0) += 1;
+            *by_status.entry(row.status).or_insert(0) += 1;
+        }
+
+        Ok(StaffKycReportsSummaryGetResponse::Status200_SummaryReport(
+            models::ReportSummary {
+                by_kind,
+                by_status,
+                failures_last24h: 0,
+            },
         ))
     }
 }
 
-fn parse_staff_status(raw: &str) -> Option<models::KycStatus> {
-    raw.parse::<models::KycStatus>().ok()
+fn parse_kind(raw: &str) -> models::InstanceKind {
+    raw.parse().unwrap_or(models::InstanceKind::KycPhoneOtp)
 }
 
-fn parse_review_outcome(raw: &str) -> Result<models::ReviewDecisionOutcome, Error> {
-    raw.parse::<models::ReviewDecisionOutcome>().map_err(|_| {
-        Error::internal(
-            "INVALID_REVIEW_DECISION",
-            format!("Unsupported review decision outcome: {raw}"),
-        )
-    })
+fn parse_status(raw: &str) -> models::InstanceStatus {
+    raw.parse().unwrap_or(models::InstanceStatus::Active)
 }
 
-fn parse_identity_asset_type(raw: &str) -> Result<models::IdentityAssetType, Error> {
-    raw.parse::<models::IdentityAssetType>().map_err(|_| {
-        Error::internal(
-            "INVALID_ASSET_TYPE",
-            format!("Unsupported identity asset type: {raw}"),
-        )
-    })
+fn json_to_object(value: Value) -> Option<std::collections::HashMap<String, gen_oas_server_staff::types::Object>> {
+    let Value::Object(map) = value else { return None; };
+    Some(map.into_iter().map(|(k,v)| (k, gen_oas_server_staff::types::Object(v))).collect())
 }
 
-fn review_case_from_row(row: KycReviewCaseRow) -> Result<models::ReviewCase, Error> {
-    let evidence = row
-        .evidence
-        .into_iter()
-        .map(|entry| {
-            Ok(models::ReviewCaseEvidenceInner::new(
-                parse_identity_asset_type(&entry.asset_type)?,
-                entry.evidence_id,
-            ))
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
-
-    let status = parse_staff_status(&row.status).unwrap_or(models::KycStatus::PendingReview);
-
-    Ok(models::ReviewCase::new(
-        row.case_id,
-        row.user_id,
-        row.step_id,
-        status,
-        row.submitted_at,
-        models::ReviewCaseFullName::new(row.first_name, row.last_name),
-        evidence,
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_utils::{MockFileStorage, MockKycRepo, TestAppStateBuilder, create_fake_jwt};
-    use backend_repository::{
-        KycStaffDocumentRow, KycStaffSubmissionDetailRow, KycStaffSubmissionSummaryRow,
-    };
-    use chrono::Utc;
-    use mockall::predicate::*;
-    use std::sync::Arc;
-
-    #[tokio::test]
-    async fn test_api_kyc_staff_submissions_get_success() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_list_staff_submissions()
-            .returning(|filter| {
-                assert_eq!(filter.page, 1);
-                assert_eq!(filter.limit, 10);
-                Ok((
-                    vec![KycStaffSubmissionSummaryRow {
-                        submission_id: "sub123".to_string(),
-                        user_id: "user123".to_string(),
-                        first_name: Some("John".to_string()),
-                        last_name: Some("Doe".to_string()),
-                        email: Some("john@example.com".to_string()),
-                        phone_number: Some("+1234567890".to_string()),
-                        status: "PENDING_REVIEW".to_string(),
-                        submitted_at: Some(Utc::now()),
-                    }],
-                    1,
-                ))
-            });
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let query_params = models::ApiKycStaffSubmissionsGetQueryParams {
-            page: Some(1),
-            limit: Some(10),
-            status: None,
-            search: None,
-        };
-
-        let result = api
-            .api_kyc_staff_submissions_get(
-                &Method::GET,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &query_params,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        match result.unwrap() {
-            ApiKycStaffSubmissionsGetResponse::Status200_PageOfKYCSubmissions(resp) => {
-                assert_eq!(resp.total, Some(1));
-                let items = resp.items.unwrap();
-                assert_eq!(items.len(), 1);
-                assert_eq!(items[0].submission_id, Some("sub123".to_string()));
-            }
-            _ => panic!("Unexpected response"),
+fn summarize_instance(kind: &str, attempts: &[backend_model::db::SmStepAttemptRow]) -> (Option<String>, Option<Value>) {
+    let steps = steps_for_kind(kind);
+    let mut last_error = None;
+    for attempt in attempts.iter().rev() {
+        if attempt.status == ATTEMPT_STATUS_FAILED {
+            last_error = attempt.error.clone();
+            break;
         }
     }
 
-    #[tokio::test]
-    async fn test_api_kyc_staff_submissions_submission_id_approve_post_success() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_approve_submission()
-            .with(
-                eq("sub123".to_string()),
-                eq(Some("staff123".to_string())),
-                eq(Some("Looks good".to_string())),
-            )
-            .returning(|_, _, _| Ok(true));
-
-        kyc_repo
-            .expect_get_staff_submission()
-            .with(eq("sub123"))
-            .returning(|_| {
-                Ok(Some(KycStaffSubmissionDetailRow {
-                    submission_id: "sub123".to_string(),
-                    user_id: "user123".to_string(),
-                    first_name: Some("John".to_string()),
-                    last_name: Some("Doe".to_string()),
-                    email: Some("john@example.com".to_string()),
-                    phone_number: Some("+1234567890".to_string()),
-                    date_of_birth: None,
-                    nationality: None,
-                    status: "APPROVED".to_string(),
-                    submitted_at: Some(Utc::now()),
-                    reviewed_at: Some(Utc::now()),
-                    reviewed_by: Some("staff123".to_string()),
-                    rejection_reason: None,
-                    review_notes: Some("Looks good".to_string()),
-                }))
-            });
-
-        let mut provisioning_queue = crate::test_utils::MockProvisioningQueue::new();
-        provisioning_queue
-            .expect_enqueue_fineract_provisioning()
-            .with(eq("user123"))
-            .returning(|_| Ok(()));
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .with_provisioning_queue(Arc::new(provisioning_queue))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let path_params = models::ApiKycStaffSubmissionsSubmissionIdApprovePostPathParams {
-            submission_id: "sub123".to_string(),
-        };
-        let body = models::KycApprovalRequest {
-            new_tier: 1,
-            notes: Some("Looks good".to_string()),
-        };
-
-        let result = api
-            .api_kyc_staff_submissions_submission_id_approve_post(
-                &Method::POST,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &path_params,
-                &body,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        assert!(matches!(
-            result.unwrap(),
-            ApiKycStaffSubmissionsSubmissionIdApprovePostResponse::Status200_KYCApproved
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_api_kyc_staff_submissions_submission_id_reject_post_success() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_reject_submission()
-            .with(
-                eq("sub123".to_string()),
-                eq(Some("staff123".to_string())),
-                eq("Invalid ID".to_string()),
-                eq(Some("Please re-upload".to_string())),
-            )
-            .returning(|_, _, _, _| Ok(true));
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let path_params = models::ApiKycStaffSubmissionsSubmissionIdRejectPostPathParams {
-            submission_id: "sub123".to_string(),
-        };
-        let body = models::KycRejectionRequest {
-            reason: "Invalid ID".to_string(),
-            notes: Some("Please re-upload".to_string()),
-        };
-
-        let result = api
-            .api_kyc_staff_submissions_submission_id_reject_post(
-                &Method::POST,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &path_params,
-                &body,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        assert!(matches!(
-            result.unwrap(),
-            ApiKycStaffSubmissionsSubmissionIdRejectPostResponse::Status200_KYCRejected
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_api_kyc_staff_submissions_submission_id_request_info_post_success() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_request_submission_info()
-            .with(eq("sub123"), eq("Need more info"))
-            .returning(|_, _| Ok(true));
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let path_params = models::ApiKycStaffSubmissionsSubmissionIdRequestInfoPostPathParams {
-            submission_id: "sub123".to_string(),
-        };
-        let body = models::KycRequestInfoRequest {
-            message: "Need more info".to_string(),
-        };
-
-        let result = api
-            .api_kyc_staff_submissions_submission_id_request_info_post(
-                &Method::POST,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &path_params,
-                &body,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        assert!(matches!(
-            result.unwrap(),
-            ApiKycStaffSubmissionsSubmissionIdRequestInfoPostResponse::Status200_AdditionalInfoRequested
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_download_document_not_found() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_get_staff_submission_document()
-            .returning(|_, _| Ok(None));
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let path_params =
-            models::ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostPathParams {
-                submission_id: "sub123".to_string(),
-                document_id: "doc123".to_string(),
-            };
-
-        let result = api
-            .api_kyc_staff_submissions_submission_id_documents_document_id_download_url_post(
-                &Method::POST,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &path_params,
-                &None,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        assert!(matches!(
-            result.unwrap(),
-            ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse::Status404_SubmissionOrDocumentNotFound
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_download_document_expired() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_get_staff_submission_document()
-            .returning(|_, _| {
-                Ok(Some(KycStaffDocumentRow {
-                    id: "doc123".to_string(),
-                    submission_id: "sub123".to_string(),
-                    document_type: "IDENTITY".to_string(),
-                    file_name: "id.jpg".to_string(),
-                    mime_type: "image/jpeg".to_string(),
-                    bucket: "bucket".to_string(),
-                    object_key: "key".to_string(),
-                    uploaded_at: Utc::now(),
-                }))
-            });
-
-        let mut s3 = MockFileStorage::new();
-        s3.expect_head_object()
-            .returning(|_, _| Err(Error::s3("NotFound")));
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .with_s3(Arc::new(s3))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let path_params =
-            models::ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostPathParams {
-                submission_id: "sub123".to_string(),
-                document_id: "doc123".to_string(),
-            };
-
-        let result = api
-            .api_kyc_staff_submissions_submission_id_documents_document_id_download_url_post(
-                &Method::POST,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &path_params,
-                &None,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        assert!(matches!(
-            result.unwrap(),
-            ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse::Status410_DocumentNoLongerAvailable
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_download_document_success() {
-        let mut kyc_repo = MockKycRepo::new();
-        kyc_repo
-            .expect_get_staff_submission_document()
-            .returning(|_, _| {
-                Ok(Some(KycStaffDocumentRow {
-                    id: "doc123".to_string(),
-                    submission_id: "sub123".to_string(),
-                    document_type: "IDENTITY".to_string(),
-                    file_name: "id.jpg".to_string(),
-                    mime_type: "image/jpeg".to_string(),
-                    bucket: "bucket".to_string(),
-                    object_key: "key".to_string(),
-                    uploaded_at: Utc::now(),
-                }))
-            });
-
-        let mut s3 = MockFileStorage::new();
-        s3.expect_head_object().returning(|_, _| Ok(()));
-        s3.expect_presign_get_object()
-            .returning(|_, _, _, _| Ok("http://presigned-url".to_string()));
-
-        let state = TestAppStateBuilder::new()
-            .with_kyc(Arc::new(kyc_repo))
-            .with_s3(Arc::new(s3))
-            .build()
-            .await;
-        let api = BackendApi::new(
-            Arc::new(state.clone()),
-            state.oidc_state.clone(),
-            state.signature_state.clone(),
-        );
-
-        let path_params =
-            models::ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostPathParams {
-                submission_id: "sub123".to_string(),
-                document_id: "doc123".to_string(),
-            };
-
-        let result = api
-            .api_kyc_staff_submissions_submission_id_documents_document_id_download_url_post(
-                &Method::POST,
-                &Host::from(http::uri::Authority::from_static("localhost")),
-                &CookieJar::new(),
-                &create_fake_jwt("staff123"),
-                &path_params,
-                &None,
-            )
-            .await;
-
-        assert!(result.is_ok());
-        match result.unwrap() {
-            ApiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPostResponse::Status200_PresignedDownloadURLCreated(
-                resp,
-            ) => {
-                assert_eq!(resp.url, "http://presigned-url");
-                assert_eq!(resp.document_id, Some("doc123".to_string()));
-            }
-            _ => panic!("Unexpected response"),
+    for step in steps {
+        let latest = attempts
+            .iter()
+            .filter(|a| a.step_name == step)
+            .max_by_key(|a| a.attempt_no);
+        if latest.is_none() {
+            return (Some(step.to_owned()), last_error);
         }
+        if let Some(latest) = latest
+            && latest.status != ATTEMPT_STATUS_SUCCEEDED
+        {
+            return (Some(step.to_owned()), last_error);
+        }
+    }
+
+    (None, last_error)
+}
+
+fn steps_for_kind(kind: &str) -> Vec<&'static str> {
+    match kind {
+        KIND_KYC_FIRST_DEPOSIT => vec![
+            STEP_DEPOSIT_AWAIT_PAYMENT,
+            STEP_DEPOSIT_AWAIT_APPROVAL,
+            STEP_DEPOSIT_REGISTER_CUSTOMER,
+            STEP_DEPOSIT_APPROVE_AND_DEPOSIT,
+            STEP_MARK_COMPLETE,
+        ],
+        _ => vec![
+            STEP_PHONE_ISSUE_OTP,
+            STEP_PHONE_VERIFY_OTP,
+            STEP_MARK_COMPLETE,
+        ],
+    }
+}
+
+fn build_step_states(
+    kind: &str,
+    attempts: &[backend_model::db::SmStepAttemptRow],
+) -> Result<Vec<models::StepState>, Error> {
+    let steps = steps_for_kind(kind);
+    let mut out = Vec::with_capacity(steps.len());
+    for step in steps {
+        let mut step_attempts = attempts
+            .iter()
+            .filter(|a| a.step_name == step)
+            .cloned()
+            .collect::<Vec<_>>();
+        step_attempts.sort_by_key(|a| a.attempt_no);
+        let latest = step_attempts.last().cloned();
+
+        out.push(models::StepState {
+            step_name: step.to_owned(),
+            latest_attempt: latest.clone().map(attempt_to_dto),
+            attempts: step_attempts.into_iter().map(attempt_to_dto).collect(),
+        });
+    }
+    Ok(out)
+}
+
+fn attempt_to_dto(row: backend_model::db::SmStepAttemptRow) -> models::StepAttempt {
+    models::StepAttempt {
+        id: row.id,
+        step_name: row.step_name,
+        attempt_no: row.attempt_no,
+        status: row
+            .status
+            .parse()
+            .unwrap_or(models::StepAttemptStatus::Queued),
+        external_ref: row.external_ref,
+        input: json_to_object(row.input).unwrap_or_default(),
+        output: row.output.and_then(json_to_object),
+        error: row.error.and_then(json_to_object),
+        queued_at: row.queued_at,
+        started_at: row.started_at,
+        finished_at: row.finished_at,
+        next_retry_at: row.next_retry_at,
     }
 }

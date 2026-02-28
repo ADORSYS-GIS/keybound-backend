@@ -1,8 +1,8 @@
 use crate::traits::*;
 use backend_core::{Error, async_trait};
-use backend_model::kc::device_record_id;
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
+use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -113,14 +113,14 @@ impl DeviceRepo for DeviceRepository {
 
     async fn update_device_status(
         &self,
-        device_id_val: &str,
+        record_id_val: &str,
         status_val: &str,
     ) -> RepoResult<db::DeviceRow> {
         use backend_model::schema::device::dsl::*;
 
         let mut conn = self.get_conn().await?;
 
-        diesel::update(device.filter(device_id.eq(device_id_val)))
+        diesel::update(device.filter(device_record_id.eq(record_id_val)))
             .set(status.eq(status_val))
             .get_result::<db::DeviceRow>(&mut conn)
             .await
@@ -139,7 +139,7 @@ impl DeviceRepo for DeviceRepository {
         device
             .filter(device_id.eq(device_id_val))
             .filter(jkt.eq(jkt_val))
-            .select((user_id, device_id))
+            .select((user_id, device_record_id))
             .first::<(String, String)>(&mut conn)
             .await
             .optional()
@@ -151,32 +151,80 @@ impl DeviceRepo for DeviceRepository {
 
         let mut conn = self.get_conn().await?;
 
-        let sorted_jwk: std::collections::BTreeMap<_, _> = req.public_jwk.iter().collect();
+        // Canonicalize by sorting keys and serializing deterministically.
+        // This ensures stable device_record_id across platforms and retries.
+        let mut sorted_jwk: std::collections::BTreeMap<String, serde_json::Value> =
+            std::collections::BTreeMap::new();
+        for (k, v) in &req.public_jwk {
+            sorted_jwk.insert(k.clone(), v.0.clone());
+        }
         let public_jwk_str = serde_json::to_string(&sorted_jwk).map_err(|e| {
             Error::Server(format!(
                 "Failed to serialize public_jwk for device bind: {e}"
             ))
         })?;
 
+        let record_id = backend_model::kc::device_record_id(&req.device_id, &public_jwk_str);
         let now = chrono::Utc::now();
         let new_device = db::DeviceRow {
             device_id: req.device_id.clone(),
             user_id: req.user_id.clone(),
             jkt: req.jkt.clone(),
             public_jwk: public_jwk_str.clone(),
+            device_record_id: record_id.clone(),
             status: "ACTIVE".to_string(),
             label: None, // Label is not provided in EnrollmentBindRequest
             created_at: now,
             last_seen_at: Some(now),
         };
 
-        diesel::insert_into(device)
+        // Enforce uniqueness on both device_id and jkt deterministically.
+        // Even with API-level prechecks, we can still race at write time.
+        let conflicting = device
+            .filter(device_id.eq(&req.device_id).or(jkt.eq(&req.jkt)))
+            .select(db::DeviceRow::as_select())
+            .first::<db::DeviceRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::<Error>::into)?;
+        if let Some(existing) = conflicting
+            && existing.user_id != req.user_id
+        {
+            return Err(Error::conflict(
+                "DEVICE_ALREADY_BOUND",
+                "Device already bound to a different user",
+            ));
+        }
+
+        let insert_res = diesel::insert_into(device)
             .values(&new_device)
             .execute(&mut conn)
-            .await
-            .map_err(Into::<Error>::into)?;
+            .await;
 
-        Ok(device_record_id(&req.device_id, &public_jwk_str))
+        if let Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) = insert_res {
+            // Resolve race: read the winning row and decide deterministically.
+            let winner = device
+                .filter(device_id.eq(&req.device_id).or(jkt.eq(&req.jkt)))
+                .select(db::DeviceRow::as_select())
+                .first::<db::DeviceRow>(&mut conn)
+                .await
+                .optional()
+                .map_err(Into::<Error>::into)?;
+
+            if let Some(winner) = winner {
+                if winner.user_id != req.user_id {
+                    return Err(Error::conflict(
+                        "DEVICE_ALREADY_BOUND",
+                        "Device already bound to a different user",
+                    ));
+                }
+                return Ok(winner.device_record_id);
+            }
+        } else {
+            insert_res.map_err(Into::<Error>::into)?;
+        }
+
+        Ok(record_id)
     }
 
     async fn count_user_devices(&self, user_id_val: &str) -> RepoResult<i64> {

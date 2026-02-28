@@ -1,4 +1,5 @@
-use crate::file_storage::{FileStorage, S3FileStorage};
+use crate::file_storage::{FileStorage, FsFileStorage, S3FileStorage};
+use crate::state_machine::queue::{RedisStateMachineQueue, StateMachineQueue};
 use crate::worker::{
     NotificationQueue, ProvisioningQueue, RedisNotificationQueue, RedisProvisioningQueue,
     WorkerHttpClient,
@@ -6,7 +7,8 @@ use crate::worker::{
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
 use backend_repository::{
-    DeviceRepo, DeviceRepository, KycRepo, KycRepository, UserRepo, UserRepository,
+    DeviceRepo, DeviceRepository, StateMachineRepo, StateMachineRepository, UserRepo,
+    UserRepository,
 };
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -16,9 +18,10 @@ use tracing::info;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub kyc: Arc<dyn KycRepo>,
+    pub sm: Arc<dyn StateMachineRepo>,
     pub user: Arc<dyn UserRepo>,
     pub device: Arc<dyn DeviceRepo>,
+    pub sm_queue: Arc<dyn StateMachineQueue>,
     pub notification_queue: Arc<dyn NotificationQueue>,
     pub provisioning_queue: Arc<dyn ProvisioningQueue>,
     pub s3: Arc<dyn FileStorage>,
@@ -31,9 +34,10 @@ pub struct AppState {
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
-            .field("kyc", &"<KycRepository>")
+            .field("sm", &"<StateMachineRepository>")
             .field("user", &"<UserRepository>")
             .field("device", &"<DeviceRepository>")
+            .field("sm_queue", &"<StateMachineQueue>")
             .field("s3", &"<FileStorage>")
             .field("config", &self.config)
             .field("oidc_state", &"<OidcState>")
@@ -54,24 +58,42 @@ impl AppState {
             .load()
             .await;
 
-        let s3_client = {
-            let mut builder = aws_sdk_s3::config::Builder::from(&shared_config);
-            if let Some(s3_cfg) = &cfg.s3 {
-                if let Some(region) = &s3_cfg.region {
-                    builder = builder.region(aws_types::region::Region::new(region.clone()));
-                }
-                if let Some(endpoint) = &s3_cfg.endpoint {
-                    builder = builder.endpoint_url(endpoint);
-                }
-                if s3_cfg.force_path_style.unwrap_or(false) {
-                    builder = builder.force_path_style(true);
-                }
+        let s3: Arc<dyn FileStorage> = match cfg.storage.as_ref().map(|s| &s.r#type) {
+            Some(backend_core::StorageType::Fs) => {
+                let base_dir = cfg
+                    .storage
+                    .as_ref()
+                    .and_then(|s| s.fs.as_ref())
+                    .map(|fs| fs.base_dir.clone())
+                    .ok_or_else(|| {
+                        backend_core::Error::Server(
+                            "storage.type=fs requires storage.fs.base_dir".to_owned(),
+                        )
+                    })?;
+                Arc::new(FsFileStorage::new(base_dir.into()))
             }
-            aws_sdk_s3::Client::from_conf(builder.build())
+            _ => {
+                let s3_client = {
+                    let mut builder = aws_sdk_s3::config::Builder::from(&shared_config);
+                    if let Some(s3_cfg) = &cfg.s3 {
+                        if let Some(region) = &s3_cfg.region {
+                            builder =
+                                builder.region(aws_types::region::Region::new(region.clone()));
+                        }
+                        if let Some(endpoint) = &s3_cfg.endpoint {
+                            builder = builder.endpoint_url(endpoint);
+                        }
+                        if s3_cfg.force_path_style.unwrap_or(false) {
+                            builder = builder.force_path_style(true);
+                        }
+                    }
+                    aws_sdk_s3::Client::from_conf(builder.build())
+                };
+                Arc::new(S3FileStorage::new(s3_client))
+            }
         };
-        let s3: Arc<dyn FileStorage> = Arc::new(S3FileStorage::new(s3_client));
 
-        let kyc: Arc<dyn KycRepo> = Arc::new(KycRepository::new(pool.clone()));
+        let sm: Arc<dyn StateMachineRepo> = Arc::new(StateMachineRepository::new(pool.clone()));
         let user: Arc<dyn UserRepo> = Arc::new(UserRepository::new(pool.clone()));
         let device: Arc<dyn DeviceRepo> = Arc::new(DeviceRepository::new(pool.clone()));
 
@@ -94,13 +116,16 @@ impl AppState {
         let worker_http_client: Arc<dyn WorkerHttpClient> =
             Arc::new(reqwest::Client::builder().build()?);
 
+        let sm_queue: Arc<dyn StateMachineQueue> =
+            Arc::new(RedisStateMachineQueue::new(cfg.redis.url.clone()));
         let notification_queue = Arc::new(RedisNotificationQueue::new(cfg.redis.url.clone()));
         let provisioning_queue = Arc::new(RedisProvisioningQueue::new(cfg.redis.url.clone()));
 
         Ok(Self {
-            kyc,
+            sm,
             user,
             device,
+            sm_queue,
             notification_queue,
             provisioning_queue,
             s3,

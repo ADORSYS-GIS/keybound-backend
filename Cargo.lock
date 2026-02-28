@@ -1029,6 +1029,7 @@ dependencies = [
  "backend-migrate",
  "backend-model",
  "backend-repository",
+ "bytes",
  "chrono",
  "diesel",
  "diesel-async",

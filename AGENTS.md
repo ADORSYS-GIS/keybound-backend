@@ -6,6 +6,14 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - BFF: `/bff/*`
 - Staff: `/staff/*`
 
+## Revamp Status (2026-02-27)
+- Legacy KYC SQL tables (`kyc_*`, `phone_deposit`) are replaced by a generic persisted state-machine store:
+  - `sm_instance`, `sm_event`, `sm_step_attempt`
+- Two KYC processes are implemented as state machines:
+  - `KYC_PHONE_OTP`
+  - `KYC_FIRST_DEPOSIT` (staff confirms payment then approves; worker calls CUSS `registerCustomer` then `approveAndDeposit`)
+- Staff OpenAPI (`openapi/user-storage--staff.yaml`) is rewritten to expose state-machine observability and controls.
+
 `app/bins/backend` starts the server; `app/crates/backend-server` is a library crate.
 
 ## Core Architecture
@@ -14,6 +22,7 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - Controllers: `app/crates/backend-server/src/api/mod.rs` (and submodules)
 - API modules: `api/bff.rs`, `api/kc.rs`, `api/staff.rs`
 - Repository: `app/crates/backend-repository/src/pg/mod.rs` (and submodules)
+  - State machines: `app/crates/backend-repository/src/pg/state_machine.rs`
 
 ## Crate Roles (under `app/crates/`)
 - `backend-core`: config + shared `Error`/`Result`
@@ -131,10 +140,8 @@ impl UserRepo for UserRepository {
 ```
 
 The repository implementation is split into domain-specific modules under `src/pg/`:
-- `approval.rs`: Approval-related operations.
 - `device.rs`: Device binding and lookup.
-- `kyc.rs`: KYC profile and document management.
-- `sms.rs`: SMS queue and retry logic.
+- `state_machine.rs`: Generic state machine persistence (`sm_*` tables).
 - `user.rs`: User management and search.
 
 ## SMS Provider Architecture

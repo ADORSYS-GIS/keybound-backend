@@ -1,233 +1,143 @@
 openapi: 3.1.0
 info:
-  title: Customer Registration Staff Review API
-  version: 0.1.3
-  description: KYC review endpoints available only to staff reviewers.
+  title: KYC Staff State Machine API
+  version: 1.0.0
+  description: Staff-only endpoints to observe, operate, retry, and report on KYC state machines.
+
 servers:
-  - url: 'https://api.example.com'
-    description: Example production server
+  - url: "https://api.example.com"
+
 tags:
-  - name: KYC Review
-    description: Endpoints for review staff to operate on KYC submissions.
+  - name: KYC State Machines
+    description: Observe and operate on KYC state machines.
+
 security:
   - BearerAuth: [ ]
+
 paths:
-  /api/kyc/staff/submissions:
+  /api/kyc/instances:
     get:
-      operationId: apiKycStaffSubmissionsGet
-      tags:
-        - KYC Review
-      summary: List submissions
-      description: Return paginated KYC submissions filtered by status or search text, so reviewers can scan pending/processed work with optional filters.
+      operationId: staffKycInstancesGet
+      tags: [ KYC State Machines ]
+      summary: List state machine instances
       security:
         - BearerAuth: [ ]
       parameters:
-        - $ref: '#/components/parameters/StatusFilter'
-        - $ref: '#/components/parameters/SearchQuery'
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Limit'
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Status"
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/CreatedFrom"
+        - $ref: "#/components/parameters/CreatedTo"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
       responses:
-        '200':
-          description: Page of KYC submissions.
+        "200":
+          description: Page of instances
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/KycSubmissionsResponse'
-        '401':
-          description: Unauthorized.
-  '/api/kyc/staff/submissions/{submissionId}':
-    get:
-      operationId: apiKycStaffSubmissionsSubmissionIdGet
-      tags:
-        - KYC Review
-      summary: Get submission
-      description: Return detailed submission for a single customer, including the latest state and evidence list to support review decisions.
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: '#/components/parameters/SubmissionId'
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Detailed submission.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/KycSubmissionDetailResponse'
-        '401':
-          description: Unauthorized.
-        '404':
-          description: Submission not found.
-  '/api/kyc/staff/submissions/{submissionId}/approve':
-    post:
-      operationId: apiKycStaffSubmissionsSubmissionIdApprovePost
-      tags:
-        - KYC Review
-      summary: Approve KYC
-      description: Records an approval ticket for the submission and optionally triggers downstream tier migration.
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: '#/components/parameters/SubmissionId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/KycApprovalRequest'
-      responses:
-        '200':
-          description: KYC approved.
-        '400':
-          description: Validation failed.
-        '401':
-          description: Unauthorized.
-  '/api/kyc/staff/submissions/{submissionId}/reject':
-    post:
-      operationId: apiKycStaffSubmissionsSubmissionIdRejectPost
-      tags:
-        - KYC Review
-      summary: Reject KYC
-      description: Logs a rejection reason and notes, maintaining the rejection history for compliance.
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: '#/components/parameters/SubmissionId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/KycRejectionRequest'
-      responses:
-        '200':
-          description: KYC rejected.
-        '400':
-          description: Validation failed.
-        '401':
-          description: Unauthorized.
-  '/api/kyc/staff/submissions/{submissionId}/request-info':
-    post:
-      operationId: apiKycStaffSubmissionsSubmissionIdRequestInfoPost
-      tags:
-        - KYC Review
-      summary: Request more info
-      description: Sends a request for additional customer data so the user can complete missing evidence.
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: '#/components/parameters/SubmissionId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/KycRequestInfoRequest'
-      responses:
-        '200':
-          description: Additional info requested.
-        '400':
-          description: Validation failed.
-        '401':
-          description: Unauthorized.
-  '/api/kyc/staff/submissions/{submissionId}/documents/{documentId}/download-url':
-    post:
-      operationId: apiKycStaffSubmissionsSubmissionIdDocumentsDocumentIdDownloadUrlPost
-      tags:
-        - KYC Review
-      summary: Get presigned download URL for a document
-      description: Returns a short-lived presigned URL to download a document from S3 so staff tooling can download stored evidence securely.
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: '#/components/parameters/SubmissionId'
-        - $ref: '#/components/parameters/DocumentId'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PresignedDownloadUrlRequest'
-      responses:
-        '200':
-          description: Presigned download URL created.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PresignedDownloadUrlResponse'
-        '401':
-          description: Unauthorized.
-        '404':
-          description: Submission or document not found.
-        '410':
-          description: Document no longer available (e.g., deleted or expired).
-        '429':
-          description: Too many requests.
+                $ref: "#/components/schemas/KycInstancesResponse"
 
-  /staff/review/queue:
+  /api/kyc/instances/{instanceId}:
     get:
-      operationId: staffReviewQueueGet
-      tags:
-        - KYC Review
-      summary: Get pending review queue
-      description: Produces a paginated queue view of pending review cases so reviewers can claim cases based on oldest submissions.
+      operationId: staffKycInstancesInstanceIdGet
+      tags: [ KYC State Machines ]
+      summary: Get instance details
       security:
         - BearerAuth: [ ]
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Limit'
+        - $ref: "#/components/parameters/InstanceId"
       responses:
-        '200':
-          description: Paginated list of cases
+        "200":
+          description: Instance detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReviewQueueResponse'
+                $ref: "#/components/schemas/KycInstanceDetail"
+        "404":
+          description: Instance not found
 
-  /staff/review/cases/{caseId}:
-    get:
-      operationId: staffReviewCasesCaseIdGet
-      tags:
-        - KYC Review
-      summary: Get a single review case (includes evidence refs)
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: '#/components/parameters/CaseId'
-      description: Fetches a case record with its evidence references so the reviewer can inspect all attachments. `caseId` is the submission identifier (IDENTITY step id).
-      responses:
-        '200':
-          description: Case
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReviewCase'
-
-  /staff/review/cases/{caseId}/decision:
+  /api/kyc/instances/{instanceId}/retry:
     post:
-      operationId: staffReviewCasesCaseIdDecisionPost
-      tags:
-        - KYC Review
-      summary: Approve or reject a case
+      operationId: staffKycInstancesInstanceIdRetryPost
+      tags: [ KYC State Machines ]
+      summary: Retry a step
       security:
         - BearerAuth: [ ]
       parameters:
-        - $ref: '#/components/parameters/CaseId'
-      description: Persists the reviewer's decision and reason, updating the case status and notifying downstream systems. `caseId` is the submission identifier (IDENTITY step id).
+        - $ref: "#/components/parameters/InstanceId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReviewDecision'
+              $ref: "#/components/schemas/RetryRequest"
       responses:
-        '200':
-          description: Decision recorded
+        "200":
+          description: Retry accepted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReviewDecisionResult'
+                $ref: "#/components/schemas/RetryResponse"
+        "404":
+          description: Instance not found
+
+  /api/kyc/deposits/{instanceId}/confirm-payment:
+    post:
+      operationId: staffKycDepositsInstanceIdConfirmPaymentPost
+      tags: [ KYC State Machines ]
+      summary: Confirm deposit payment received
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmPaymentRequest"
+      responses:
+        "200":
+          description: Payment confirmation recorded
+        "404":
+          description: Instance not found
+
+  /api/kyc/deposits/{instanceId}/approve:
+    post:
+      operationId: staffKycDepositsInstanceIdApprovePost
+      tags: [ KYC State Machines ]
+      summary: Approve deposit KYC (starts provisioning)
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositApproveRequest"
+      responses:
+        "200":
+          description: Approval recorded
+        "404":
+          description: Instance not found
+
+  /api/kyc/reports/summary:
+    get:
+      operationId: staffKycReportsSummaryGet
+      tags: [ KYC State Machines ]
+      summary: Summary report
+      security:
+        - BearerAuth: [ ]
+      responses:
+        "200":
+          description: Summary report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportSummary"
 
 components:
   securitySchemes:
@@ -235,327 +145,247 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
   parameters:
+    InstanceId:
+      name: instanceId
+      in: path
+      required: true
+      schema:
+        type: string
+    Kind:
+      name: kind
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/InstanceKind"
+    Status:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/InstanceStatus"
+    UserId:
+      name: userId
+      in: query
+      required: false
+      schema:
+        type: string
+    CreatedFrom:
+      name: createdFrom
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    CreatedTo:
+      name: createdTo
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
     Page:
       name: page
       in: query
       required: false
       schema:
         type: integer
-        default: 1
         minimum: 1
-      description: Page number (default 1).
+        default: 1
     Limit:
       name: limit
       in: query
       required: false
       schema:
         type: integer
-        default: 20
         minimum: 1
-      description: Page size (default 20).
-    StatusFilter:
-      name: status
-      in: query
-      required: false
-      schema:
-        $ref: '#/components/schemas/KycStatus'
-      description: Optional status filter for review queues and submissions.
-    SearchQuery:
-      name: search
-      in: query
-      required: false
-      schema:
-        $ref: '#/components/schemas/SearchText'
-      description: Optional text to search across names and emails.
-    SubmissionId:
-      name: submissionId
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/SubmissionId'
-      description: Submission ID (IDENTITY step ID).
-    DocumentId:
-      name: documentId
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/DocumentId'
-      description: Document ID.
-    CaseId:
-      name: caseId
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/CaseId'
-      description: Case ID (same as submission ID).
-  schemas:
-    SearchText:
-      type: string
-    SubmissionId:
-      type: string
-    DocumentId:
-      type: string
-    CaseId:
-      type: string
-    KycSubmissionsResponse:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/KycSubmissionSummary'
-        total:
-          type: integer
-        page:
-          type: integer
-        pageSize:
-          type: integer
-    KycSubmissionSummary:
-      type: object
-      properties:
-        submissionId:
-          type: string
-        userId:
-          type: string
-        firstName:
-          type: string
-        lastName:
-          type: string
-        email:
-          type: string
-          format: email
-        phoneNumber:
-          type: string
-        kycTier:
-          type: integer
-        kycStatus:
-          $ref: '#/components/schemas/KycStatus'
-        submittedAt:
-          type: string
-    KycSubmissionDetailResponse:
-      type: object
-      properties:
-        submissionId:
-          type: string
-        userId:
-          type: string
-        firstName:
-          type: string
-        lastName:
-          type: string
-        email:
-          type: string
-          format: email
-        phoneNumber:
-          type: string
-        dateOfBirth:
-          type: string
-        nationality:
-          type: string
-        kycTier:
-          type: integer
-        kycStatus:
-          $ref: '#/components/schemas/KycStatus'
-        documents:
-          type: array
-          items:
-            $ref: '#/components/schemas/KycDocumentDto'
-        submittedAt:
-          type: string
-        reviewedAt:
-          type: string
-        reviewedBy:
-          type: string
-        rejectionReason:
-          type: string
-        reviewNotes:
-          type: string
-        page:
-          type: integer
-        pageSize:
-          type: integer
-        totalDocuments:
-          type: integer
-    KycDocumentDto:
-      type: object
-      properties:
-        id:
-          type: string
-        type:
-          type: string
-        fileName:
-          type: string
-        mimeType:
-          type: string
-        url:
-          type: string
-          format: uri
-        uploadedAt:
-          type: string
-    KycApprovalRequest:
-      type: object
-      required:
-        - newTier
-      properties:
-        newTier:
-          type: integer
-          minimum: 1
-          maximum: 3
-        notes:
-          type: string
-    KycRejectionRequest:
-      type: object
-      required:
-        - reason
-      properties:
-        reason:
-          type: string
-          maxLength: 100
-        notes:
-          type: string
-          maxLength: 500
-    KycRequestInfoRequest:
-      type: object
-      required:
-        - message
-      properties:
-        message:
-          type: string
-          maxLength: 500
-    PresignedDownloadUrlRequest:
-      type: object
-      properties:
-        expiresInSeconds:
-          type: integer
-          minimum: 60
-          maximum: 3600
-          default: 300
-          description: URL TTL in seconds (default 300, max 3600).
-        responseContentDisposition:
-          type: string
-          description: >
-            Optional content disposition override (e.g. "attachment; filename=\"id-front.jpg\"").
+        maximum: 100
+        default: 20
 
-    PresignedDownloadUrlResponse:
-      type: object
-      required:
-        - url
-        - expiresAt
-      properties:
-        url:
-          type: string
-          format: uri
-          description: Presigned S3 URL for downloading the document.
-        expiresAt:
-          type: string
-          format: date-time
-          description: Absolute expiration timestamp for the URL.
-        documentId:
-          type: string
-        fileName:
-          type: string
-        mimeType:
-          type: string
-    PaginationMeta:
-      type: object
-      additionalProperties: false
-      properties:
-        page:
-          type: integer
-        pageSize:
-          type: integer
-        total:
-          type: integer
-      required: [ page, pageSize, total ]
-    ReviewQueueResponse:
+  schemas:
+    InstanceKind:
+      type: string
+      enum:
+        - KYC_PHONE_OTP
+        - KYC_FIRST_DEPOSIT
+
+    InstanceStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - WAITING_INPUT
+        - RUNNING
+        - COMPLETED
+        - FAILED
+        - CANCELLED
+
+    StepAttemptStatus:
+      type: string
+      enum:
+        - QUEUED
+        - RUNNING
+        - SUCCEEDED
+        - FAILED
+        - CANCELLED
+
+    KycInstanceSummary:
       type: object
       additionalProperties: false
       properties:
-        pagination:
-          $ref: '#/components/schemas/PaginationMeta'
+        instanceId: { type: string }
+        kind: { $ref: "#/components/schemas/InstanceKind" }
+        userId: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/InstanceStatus" }
+        currentStep: { type: string, nullable: true }
+        lastError:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [ instanceId, kind, status, createdAt, updatedAt ]
+
+    KycInstancesResponse:
+      type: object
+      additionalProperties: false
+      properties:
         items:
           type: array
-          items:
-            $ref: '#/components/schemas/ReviewCase'
-      required: [ pagination, items ]
-    ReviewCase:
+          items: { $ref: "#/components/schemas/KycInstanceSummary" }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+      required: [ items, total, page, pageSize ]
+
+    KycEvent:
       type: object
       additionalProperties: false
       properties:
-        caseId: { type: string }
-        userId: { type: string }
-        stepId: { type: string }
-        status:
-          $ref: '#/components/schemas/KycStatus'
-        submittedAt: { type: string, format: date-time }
-        fullName:
+        id: { type: string }
+        kind: { type: string }
+        actorType: { type: string }
+        actorId: { type: string, nullable: true }
+        payload:
           type: object
-          additionalProperties: false
-          properties:
-            firstName: { type: string }
-            middleName: { type: string }
-            lastName: { type: string }
-          required: [ firstName, lastName ]
-        evidence:
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+      required: [ id, kind, actorType, payload, createdAt ]
+
+    StepAttempt:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        stepName: { type: string }
+        attemptNo: { type: integer }
+        status: { $ref: "#/components/schemas/StepAttemptStatus" }
+        externalRef: { type: string, nullable: true }
+        input:
+          type: object
+          additionalProperties: true
+        output:
+          type: object
+          nullable: true
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+        queuedAt: { type: string, format: date-time, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        nextRetryAt: { type: string, format: date-time, nullable: true }
+      required: [ id, stepName, attemptNo, status, input ]
+
+    StepState:
+      type: object
+      additionalProperties: false
+      properties:
+        stepName: { type: string }
+        latestAttempt: { $ref: "#/components/schemas/StepAttempt", nullable: true }
+        attempts:
           type: array
-          items:
-            type: object
-            additionalProperties: false
-            properties:
-              assetType:
-                $ref: '#/components/schemas/IdentityAssetType'
-              evidenceId: { type: string }
-            required: [ assetType, evidenceId ]
-      required: [ caseId, userId, stepId, status, submittedAt, fullName, evidence ]
-    ReviewDecision:
+          items: { $ref: "#/components/schemas/StepAttempt" }
+      required: [ stepName, attempts ]
+
+    KycInstanceDetail:
       type: object
       additionalProperties: false
       properties:
-        decision:
-          $ref: '#/components/schemas/ReviewDecisionOutcome'
-        reasonCode:
-          $ref: '#/components/schemas/ReviewReasonCode'
-        comment: { type: string, maxLength: 500 }
-      required: [ decision, reasonCode ]
-    ReviewDecisionResult:
+        instanceId: { type: string }
+        kind: { $ref: "#/components/schemas/InstanceKind" }
+        userId: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/InstanceStatus" }
+        context:
+          type: object
+          additionalProperties: true
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/StepState" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/KycEvent" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+      required: [ instanceId, kind, status, context, steps, events, createdAt, updatedAt ]
+
+    RetryMode:
+      type: string
+      enum:
+        - RESET_ATTEMPT
+        - NEW_ATTEMPT
+
+    RetryRequest:
       type: object
       additionalProperties: false
       properties:
-        caseId: { type: string }
-        decision:
-          $ref: '#/components/schemas/ReviewDecisionOutcome'
-        decidedAt: { type: string, format: date-time }
-      required: [ caseId, decision, decidedAt ]
-    IdentityAssetType:
-      type: string
-      enum:
-        - SELFIE_CLOSEUP
-        - SELFIE_WITH_ID
-        - ID_FRONT
-        - ID_BACK
-    ReviewDecisionOutcome:
-      type: string
-      enum:
-        - APPROVE
-        - REJECT
-    ReviewReasonCode:
-      type: string
-      enum:
-        - OK
-        - BLURRY
-        - MISSING_FACE
-        - ID_NOT_READABLE
-        - ID_MISMATCH
-        - FRAUD_SUSPECTED
-        - OTHER
-    KycStatus:
-      type: string
-      enum:
-        - NOT_STARTED
-        - IN_PROGRESS
-        - CAPTURED
-        - PENDING_REVIEW
-        - VERIFIED
-        - REJECTED
-        - FAILED
+        stepName: { type: string }
+        mode: { $ref: "#/components/schemas/RetryMode" }
+      required: [ stepName, mode ]
+
+    RetryResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        instanceId: { type: string }
+        stepName: { type: string }
+        attemptId: { type: string }
+      required: [ instanceId, stepName, attemptId ]
+
+    ConfirmPaymentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        confirmedAt: { type: string, format: date-time, nullable: true }
+        note: { type: string, nullable: true }
+        providerTxnId: { type: string, nullable: true }
+      required: [ ]
+
+    DepositApproveRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        depositAmount:
+          type: number
+          minimum: 0.01
+      required: [ firstName, lastName, depositAmount ]
+
+    ReportSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        byKind:
+          type: object
+          additionalProperties:
+            type: integer
+        byStatus:
+          type: object
+          additionalProperties:
+            type: integer
+        failuresLast24h: { type: integer }
+      required: [ byKind, byStatus, failuresLast24h ]
+
