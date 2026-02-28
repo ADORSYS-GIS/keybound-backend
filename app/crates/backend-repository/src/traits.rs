@@ -27,6 +27,7 @@ pub struct SmInstanceFilter {
     pub kind: Option<String>,
     pub status: Option<String>,
     pub user_id: Option<String>,
+    pub phone_number: Option<String>,
     pub created_from: Option<DateTime<Utc>>,
     pub created_to: Option<DateTime<Utc>>,
     pub page: i32,
@@ -46,11 +47,16 @@ impl SmInstanceFilter {
             .user_id
             .map(|v| v.trim().to_owned())
             .filter(|v| !v.is_empty());
+        let phone_number = self
+            .phone_number
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
 
         Self {
             kind,
             status,
             user_id,
+            phone_number,
             created_from: self.created_from,
             created_to: self.created_to,
             page,

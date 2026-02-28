@@ -24,11 +24,13 @@ async fn sm_instance_idempotency_and_active_uniqueness() -> Result<()> {
 
     {
         let mut conn = pool.get().await?;
+        let phone_number = "+237690000001";
         diesel::insert_into(app_user::table)
             .values((
                 app_user::user_id.eq(&user_id),
                 app_user::realm.eq("test"),
                 app_user::username.eq("test-user"),
+                app_user::phone_number.eq(Some(phone_number)),
                 app_user::disabled.eq(false),
                 app_user::email_verified.eq(true),
                 app_user::created_at.eq(Utc::now()),
@@ -90,6 +92,7 @@ async fn sm_instance_idempotency_and_active_uniqueness() -> Result<()> {
             kind: Some("KYC_PHONE_OTP".to_owned()),
             status: None,
             user_id: Some(user_id.clone()),
+            phone_number: None,
             created_from: None,
             created_to: None,
             page: 1,
@@ -98,6 +101,22 @@ async fn sm_instance_idempotency_and_active_uniqueness() -> Result<()> {
         .await?;
     assert!(total >= 1);
     assert!(!items.is_empty());
+
+    // Phone number filtering works.
+    let (phone_items, phone_total) = repo
+        .list_instances(SmInstanceFilter {
+            kind: Some("KYC_PHONE_OTP".to_owned()),
+            status: None,
+            user_id: None,
+            phone_number: Some("+237690000001".to_owned()),
+            created_from: None,
+            created_to: None,
+            page: 1,
+            limit: 10,
+        })
+        .await?;
+    assert!(phone_total >= 1);
+    assert!(!phone_items.is_empty());
 
     // Cleanup.
     {
@@ -191,4 +210,3 @@ async fn sm_step_attempt_lifecycle() -> Result<()> {
 
     Ok(())
 }
-

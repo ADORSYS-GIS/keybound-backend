@@ -26,6 +26,7 @@ paths:
         - $ref: "#/components/parameters/Kind"
         - $ref: "#/components/parameters/Status"
         - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/PhoneNumber"
         - $ref: "#/components/parameters/CreatedFrom"
         - $ref: "#/components/parameters/CreatedTo"
         - $ref: "#/components/parameters/Page"
@@ -167,6 +168,12 @@ components:
         $ref: "#/components/schemas/InstanceStatus"
     UserId:
       name: userId
+      in: query
+      required: false
+      schema:
+        type: string
+    PhoneNumber:
+      name: phoneNumber
       in: query
       required: false
       schema:
@@ -388,4 +395,3 @@ components:
             type: integer
         failuresLast24h: { type: integer }
       required: [ byKind, byStatus, failuresLast24h ]
-

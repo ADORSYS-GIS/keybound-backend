@@ -110,7 +110,7 @@ impl StateMachineRepo for StateMachineRepository {
         &self,
         filter: SmInstanceFilter,
     ) -> RepoResult<(Vec<db::SmInstanceRow>, i64)> {
-        use backend_model::schema::sm_instance;
+        use backend_model::schema::{app_user, sm_instance};
 
         let filter = filter.normalized();
         let mut conn = self.get_conn().await?;
@@ -129,6 +129,22 @@ impl StateMachineRepo for StateMachineRepository {
         if let Some(user_id) = filter.user_id.as_ref() {
             count_query = count_query.filter(sm_instance::user_id.eq(user_id));
             rows_query = rows_query.filter(sm_instance::user_id.eq(user_id));
+        }
+        if let Some(phone_number) = filter.phone_number.as_ref() {
+            let user_ids = app_user::table
+                .filter(app_user::phone_number.eq(phone_number))
+                .select(app_user::user_id)
+                .load::<String>(&mut conn)
+                .await
+                .map_err(Error::from)?;
+
+            if user_ids.is_empty() {
+                return Ok((Vec::new(), 0));
+            }
+
+            let user_ids_nullable = user_ids.into_iter().map(Some).collect::<Vec<Option<String>>>();
+            count_query = count_query.filter(sm_instance::user_id.eq_any(user_ids_nullable.clone()));
+            rows_query = rows_query.filter(sm_instance::user_id.eq_any(user_ids_nullable));
         }
         if let Some(from) = filter.created_from {
             count_query = count_query.filter(sm_instance::created_at.ge(from));
