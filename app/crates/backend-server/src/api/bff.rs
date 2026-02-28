@@ -25,7 +25,7 @@ use gen_oas_server_bff::apis::uploads::{
 use gen_oas_server_bff::models;
 use headers::Host;
 use http::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const OTP_RATE_LIMIT_WINDOW_MINUTES: i64 = 10;
 const OTP_RATE_LIMIT_MAX_ISSUES: i64 = 5;
