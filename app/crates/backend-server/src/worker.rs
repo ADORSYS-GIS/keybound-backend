@@ -7,11 +7,37 @@ use apalis::prelude::{BoxDynError, TaskSink, WorkerBuilder};
 use apalis_redis::{RedisConfig, RedisStorage};
 use async_trait::async_trait;
 use backend_core::SmsProviderType;
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::info;
 
 const NOTIFICATION_QUEUE_NAMESPACE: &str = "backend:notifications";
+
+pub async fn ensure_redis_ready(redis_url: &str) -> backend_core::Result<()> {
+    let client = redis::Client::open(redis_url)
+        .map_err(|error| backend_core::Error::Server(format!("invalid redis url: {error}")))?;
+
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| {
+            backend_core::Error::Server(format!(
+                "failed to connect to redis at startup: {error}"
+            ))
+        })?;
+
+    let response: String = connection.ping().await.map_err(|error| {
+        backend_core::Error::Server(format!("failed to ping redis at startup: {error}"))
+    })?;
+    if response != "PONG" {
+        return Err(backend_core::Error::Server(format!(
+            "unexpected redis PING response at startup: {response}"
+        )));
+    }
+
+    Ok(())
+}
 
 #[async_trait]
 pub trait WorkerHttpClient: Send + Sync + std::fmt::Debug {

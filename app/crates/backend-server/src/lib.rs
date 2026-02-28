@@ -67,6 +67,12 @@ pub async fn serve(core_config: &Config) -> Result<()> {
 
 pub async fn run_worker(core_config: &Config) -> Result<()> {
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
+    let _conn = pool
+        .get()
+        .await
+        .map_err(|error| backend_core::Error::DieselPool(error.to_string()))?;
+    worker::ensure_redis_ready(&core_config.redis.url).await?;
+
     let state = Arc::new(state::AppState::from_config(core_config, pool).await?);
 
     let health_server = if core_config.runtime.mode == backend_core::RuntimeMode::Worker {
