@@ -142,8 +142,12 @@ impl StateMachineRepo for StateMachineRepository {
                 return Ok((Vec::new(), 0));
             }
 
-            let user_ids_nullable = user_ids.into_iter().map(Some).collect::<Vec<Option<String>>>();
-            count_query = count_query.filter(sm_instance::user_id.eq_any(user_ids_nullable.clone()));
+            let user_ids_nullable = user_ids
+                .into_iter()
+                .map(Some)
+                .collect::<Vec<Option<String>>>();
+            count_query =
+                count_query.filter(sm_instance::user_id.eq_any(user_ids_nullable.clone()));
             rows_query = rows_query.filter(sm_instance::user_id.eq_any(user_ids_nullable));
         }
         if let Some(from) = filter.created_from {
@@ -204,7 +208,10 @@ impl StateMachineRepo for StateMachineRepository {
         let now = Utc::now();
 
         diesel::update(sm_instance::table.filter(sm_instance::id.eq(instance_id)))
-            .set((sm_instance::context.eq(context), sm_instance::updated_at.eq(now)))
+            .set((
+                sm_instance::context.eq(context),
+                sm_instance::updated_at.eq(now),
+            ))
             .execute(&mut conn)
             .await
             .map_err(Error::from)?;
@@ -348,13 +355,19 @@ impl StateMachineRepo for StateMachineRepository {
         .map_err(Error::from)
     }
 
-    async fn list_step_attempts(&self, instance_id_val: &str) -> RepoResult<Vec<db::SmStepAttemptRow>> {
+    async fn list_step_attempts(
+        &self,
+        instance_id_val: &str,
+    ) -> RepoResult<Vec<db::SmStepAttemptRow>> {
         use backend_model::schema::sm_step_attempt;
 
         let mut conn = self.get_conn().await?;
         sm_step_attempt::table
             .filter(sm_step_attempt::instance_id.eq(instance_id_val))
-            .order((sm_step_attempt::step_name.asc(), sm_step_attempt::attempt_no.asc()))
+            .order((
+                sm_step_attempt::step_name.asc(),
+                sm_step_attempt::attempt_no.asc(),
+            ))
             .select(db::SmStepAttemptRow::as_select())
             .load::<db::SmStepAttemptRow>(&mut conn)
             .await

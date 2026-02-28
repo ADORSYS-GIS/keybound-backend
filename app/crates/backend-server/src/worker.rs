@@ -22,9 +22,7 @@ pub async fn ensure_redis_ready(redis_url: &str) -> backend_core::Result<()> {
         .get_multiplexed_async_connection()
         .await
         .map_err(|error| {
-            backend_core::Error::Server(format!(
-                "failed to connect to redis at startup: {error}"
-            ))
+            backend_core::Error::Server(format!("failed to connect to redis at startup: {error}"))
         })?;
 
     let response: String = connection.ping().await.map_err(|error| {
@@ -148,8 +146,7 @@ pub async fn run(state: Arc<AppState>) -> backend_core::Result<()> {
     let conn = apalis_redis::connect(redis_url.clone())
         .await
         .map_err(|error| backend_core::Error::Server(error.to_string()))?;
-    let sm_storage =
-        RedisStorage::new_with_config(conn, RedisConfig::new(sm_queue_namespace()));
+    let sm_storage = RedisStorage::new_with_config(conn, RedisConfig::new(sm_queue_namespace()));
 
     let conn = apalis_redis::connect(redis_url.clone())
         .await
@@ -228,7 +225,11 @@ async fn build_sms_provider(
                 let client = reqwest::Client::builder()
                     .build()
                     .map_err(|e| backend_core::Error::Server(e.to_string()))?;
-                Arc::new(ApiSmsProvider::new(client, api_cfg.base_url, api_cfg.auth_token))
+                Arc::new(ApiSmsProvider::new(
+                    client,
+                    api_cfg.base_url,
+                    api_cfg.auth_token,
+                ))
             }
         }
     } else {

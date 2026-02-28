@@ -75,19 +75,31 @@ fn json_to_object_map(value: &Value) -> Option<HashMap<String, Object>> {
 fn parse_session_status(instance_status: &str) -> models::KycSessionInternalStatus {
     match instance_status {
         INSTANCE_STATUS_COMPLETED => models::KycSessionInternalStatus::Completed,
-        INSTANCE_STATUS_FAILED | INSTANCE_STATUS_CANCELLED => models::KycSessionInternalStatus::Locked,
+        INSTANCE_STATUS_FAILED | INSTANCE_STATUS_CANCELLED => {
+            models::KycSessionInternalStatus::Locked
+        }
         _ => models::KycSessionInternalStatus::Open,
     }
 }
 
-fn parse_step_status(kind: &str, instance_status: &str, step_type: &str, attempts: &[backend_model::db::SmStepAttemptRow], context: &Value) -> models::KycStatus {
+fn parse_step_status(
+    kind: &str,
+    instance_status: &str,
+    step_type: &str,
+    attempts: &[backend_model::db::SmStepAttemptRow],
+    context: &Value,
+) -> models::KycStatus {
     if kind == KIND_KYC_PHONE_OTP && step_type == OTP_STEP_TYPE {
         if instance_status == INSTANCE_STATUS_COMPLETED {
             return models::KycStatus::Verified;
         }
 
         // If locked by try exhaustion.
-        if context.get("phone_locked").and_then(Value::as_bool).unwrap_or(false) {
+        if context
+            .get("phone_locked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             return models::KycStatus::Failed;
         }
 
@@ -205,7 +217,9 @@ impl Steps<Error> for BackendApi {
             ));
         }
         if session.user_id.as_deref() != Some(&body.user_id) {
-            return Err(Error::unauthorized("Session does not belong to authenticated user"));
+            return Err(Error::unauthorized(
+                "Session does not belong to authenticated user",
+            ));
         }
 
         let step_type = body.r_type.to_string();
@@ -221,12 +235,14 @@ impl Steps<Error> for BackendApi {
         // Idempotent: ensure stepIds contains the deterministic id.
         let mut ctx = session.context;
         let step_ids_val = ctx.get_mut("step_ids");
-        if let Some(Value::Array(ids)) = step_ids_val {
-            if !ids.iter().any(|v| v.as_str() == Some(&id)) {
+        if let Some(Value::Array(ids)) = step_ids_val
+            && !ids.iter().any(|v| v.as_str() == Some(&id)) {
                 ids.push(Value::String(id.clone()));
             }
-        }
-        self.state.sm.update_instance_context(&session.id, ctx.clone()).await?;
+        self.state
+            .sm
+            .update_instance_context(&session.id, ctx.clone())
+            .await?;
 
         // Derive status from current machine state.
         let attempts = self.state.sm.list_step_attempts(&session.id).await?;
@@ -255,10 +271,8 @@ impl Steps<Error> for BackendApi {
         claims: &Self::Claims,
         path_params: &models::InternalGetStepPathParams,
     ) -> Result<InternalGetStepResponse, Error> {
-        let (session_id, step_type) =
-            split_step_id(&path_params.step_id).ok_or_else(|| {
-                Error::bad_request("INVALID_STEP_ID", "Step id format is invalid")
-            })?;
+        let (session_id, step_type) = split_step_id(&path_params.step_id)
+            .ok_or_else(|| Error::bad_request("INVALID_STEP_ID", "Step id format is invalid"))?;
 
         let user_id = BackendApi::require_user_id(claims)?;
         let session = self
@@ -269,23 +283,33 @@ impl Steps<Error> for BackendApi {
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
         if session.user_id.as_deref() != Some(&user_id) {
-            return Err(Error::unauthorized("Step does not belong to authenticated user"));
+            return Err(Error::unauthorized(
+                "Step does not belong to authenticated user",
+            ));
         }
 
         let attempts = self.state.sm.list_step_attempts(&session.id).await?;
-        let status = parse_step_status(&session.kind, &session.status, &step_type, &attempts, &session.context);
+        let status = parse_step_status(
+            &session.kind,
+            &session.status,
+            &step_type,
+            &attempts,
+            &session.context,
+        );
 
-        Ok(InternalGetStepResponse::Status200_Step(models::KycStepInternal {
-            id: path_params.step_id.clone(),
-            session_id: session.id,
-            user_id,
-            r_type: parse_step_type(&step_type)?,
-            status,
-            data: None,
-            policy: None,
-            created_at: session.created_at,
-            updated_at: session.updated_at,
-        }))
+        Ok(InternalGetStepResponse::Status200_Step(
+            models::KycStepInternal {
+                id: path_params.step_id.clone(),
+                session_id: session.id,
+                user_id,
+                r_type: parse_step_type(&step_type)?,
+                status,
+                data: None,
+                policy: None,
+                created_at: session.created_at,
+                updated_at: session.updated_at,
+            },
+        ))
     }
 }
 
@@ -301,9 +325,8 @@ impl Notifications<Error> for BackendApi {
         claims: &Self::Claims,
         body: &models::IssueOtpRequest,
     ) -> Result<InternalIssueOtpResponse, Error> {
-        let (session_id, step_type) = split_step_id(&body.step_id).ok_or_else(|| {
-            Error::bad_request("INVALID_STEP_ID", "Step id format is invalid")
-        })?;
+        let (session_id, step_type) = split_step_id(&body.step_id)
+            .ok_or_else(|| Error::bad_request("INVALID_STEP_ID", "Step id format is invalid"))?;
         if step_type != OTP_STEP_TYPE {
             return Err(Error::bad_request("INVALID_STEP", "Expected PHONE step"));
         }
@@ -317,7 +340,9 @@ impl Notifications<Error> for BackendApi {
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
         if session.user_id.as_deref() != Some(&user_id) {
-            return Err(Error::unauthorized("Step does not belong to authenticated user"));
+            return Err(Error::unauthorized(
+                "Step does not belong to authenticated user",
+            ));
         }
 
         // Rate limit by counting recent ISSUE_OTP attempts.
@@ -363,9 +388,8 @@ impl Notifications<Error> for BackendApi {
         claims: &Self::Claims,
         body: &models::VerifyOtpInternalRequest,
     ) -> Result<InternalVerifyOtpResponse, Error> {
-        let (session_id, step_type) = split_step_id(&body.step_id).ok_or_else(|| {
-            Error::bad_request("INVALID_STEP_ID", "Step id format is invalid")
-        })?;
+        let (session_id, step_type) = split_step_id(&body.step_id)
+            .ok_or_else(|| Error::bad_request("INVALID_STEP_ID", "Step id format is invalid"))?;
         if step_type != OTP_STEP_TYPE {
             return Err(Error::bad_request("INVALID_STEP", "Expected PHONE step"));
         }
@@ -378,7 +402,9 @@ impl Notifications<Error> for BackendApi {
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
         if session.user_id.as_deref() != Some(&user_id) {
-            return Err(Error::unauthorized("Step does not belong to authenticated user"));
+            return Err(Error::unauthorized(
+                "Step does not belong to authenticated user",
+            ));
         }
 
         let attempt = self
@@ -503,7 +529,10 @@ impl Notifications<Error> for BackendApi {
             if let Some(obj) = ctx.as_object_mut() {
                 obj.insert("phone_locked".to_owned(), Value::Bool(true));
             }
-            self.state.sm.update_instance_context(&session.id, ctx).await?;
+            self.state
+                .sm
+                .update_instance_context(&session.id, ctx)
+                .await?;
             return Ok(InternalVerifyOtpResponse::Status200_VerificationOutcome(
                 models::VerifyOutcome::new(
                     false,
@@ -530,9 +559,8 @@ impl Notifications<Error> for BackendApi {
         claims: &Self::Claims,
         body: &models::IssueMagicEmailRequest,
     ) -> Result<InternalIssueMagicEmailResponse, Error> {
-        let (session_id, step_type) = split_step_id(&body.step_id).ok_or_else(|| {
-            Error::bad_request("INVALID_STEP_ID", "Step id format is invalid")
-        })?;
+        let (session_id, step_type) = split_step_id(&body.step_id)
+            .ok_or_else(|| Error::bad_request("INVALID_STEP_ID", "Step id format is invalid"))?;
         if step_type != MAGIC_STEP_TYPE {
             return Err(Error::bad_request("INVALID_STEP", "Expected EMAIL step"));
         }
@@ -545,7 +573,9 @@ impl Notifications<Error> for BackendApi {
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
         if session.user_id.as_deref() != Some(&user_id) {
-            return Err(Error::unauthorized("Step does not belong to authenticated user"));
+            return Err(Error::unauthorized(
+                "Step does not belong to authenticated user",
+            ));
         }
 
         let since = Utc::now() - Duration::minutes(MAGIC_RATE_LIMIT_WINDOW_MINUTES);
@@ -760,12 +790,7 @@ impl Deposits<Error> for BackendApi {
         });
 
         let instance = engine
-            .ensure_active_instance(
-                KIND_KYC_FIRST_DEPOSIT,
-                Some(body.user_id.clone()),
-                key,
-                ctx,
-            )
+            .ensure_active_instance(KIND_KYC_FIRST_DEPOSIT, Some(body.user_id.clone()), key, ctx)
             .await?;
 
         // Ensure the first manual gate is open.
@@ -790,12 +815,7 @@ impl Deposits<Error> for BackendApi {
     ) -> Result<InternalGetPhoneDepositResponse, Error> {
         let user_id = BackendApi::require_user_id(claims)?;
 
-        let Some(instance) = self
-            .state
-            .sm
-            .get_instance(&path_params.deposit_id)
-            .await?
-        else {
+        let Some(instance) = self.state.sm.get_instance(&path_params.deposit_id).await? else {
             return Err(Error::not_found(
                 "DEPOSIT_NOT_FOUND",
                 "Deposit request not found",
@@ -894,14 +914,14 @@ impl Uploads<Error> for BackendApi {
             .head_object(&body.bucket, &body.object_key)
             .await;
 
-        Ok(InternalCompleteUploadResponse::Status200_EvidenceRegistered(
-            models::EvidenceRef::new(
+        Ok(
+            InternalCompleteUploadResponse::Status200_EvidenceRegistered(models::EvidenceRef::new(
                 backend_id::kyc_evidence_id()?,
                 body.upload_id.clone(),
                 "EVIDENCE".to_owned(),
                 Utc::now(),
-            ),
-        ))
+            )),
+        )
     }
 }
 

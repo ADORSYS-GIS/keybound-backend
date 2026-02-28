@@ -8,17 +8,14 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum RuntimeMode {
     Server,
     Worker,
+    #[default]
     Shared,
 }
 
-impl Default for RuntimeMode {
-    fn default() -> Self {
-        Self::Shared
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Runtime {

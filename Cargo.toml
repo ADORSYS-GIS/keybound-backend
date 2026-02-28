@@ -10,7 +10,7 @@ members = [
     "app/crates/backend-repository",
     "app/crates/backend-otlp",
     "app/crates/backend-server",
-    "app/gen/oas_server_cuss",
+    "app/gen/oas_client_cuss",
     "app/gen/oas_server_bff",
     "app/gen/oas_server_kc",
     "app/gen/oas_server_staff",
@@ -28,7 +28,7 @@ backend-repository = { path = "app/crates/backend-repository" }
 backend-otlp = { path = "app/crates/backend-otlp" }
 backend-server = { path = "app/crates/backend-server" }
 
-gen_oas_server_cuss = { path = "app/gen/oas_server_cuss" }
+gen_oas_client_cuss = { path = "app/gen/oas_client_cuss" }
 gen_oas_server_bff = { path = "app/gen/oas_server_bff" }
 gen_oas_server_kc = { path = "app/gen/oas_server_kc" }
 gen_oas_server_staff = { path = "app/gen/oas_server_staff" }

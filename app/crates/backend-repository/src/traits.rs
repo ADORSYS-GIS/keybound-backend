@@ -38,7 +38,10 @@ impl SmInstanceFilter {
     pub fn normalized(self) -> Self {
         let page = self.page.max(1);
         let limit = self.limit.clamp(1, 100);
-        let kind = self.kind.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
+        let kind = self
+            .kind
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
         let status = self
             .status
             .map(|v| v.trim().to_owned())
@@ -148,9 +151,15 @@ pub trait StateMachineRepo: Send + Sync {
 
     async fn update_instance_context(&self, instance_id: &str, context: Value) -> RepoResult<()>;
 
-    async fn append_event(&self, input: SmEventCreateInput) -> RepoResult<backend_model::db::SmEventRow>;
+    async fn append_event(
+        &self,
+        input: SmEventCreateInput,
+    ) -> RepoResult<backend_model::db::SmEventRow>;
 
-    async fn list_events(&self, instance_id: &str) -> RepoResult<Vec<backend_model::db::SmEventRow>>;
+    async fn list_events(
+        &self,
+        instance_id: &str,
+    ) -> RepoResult<Vec<backend_model::db::SmEventRow>>;
 
     async fn create_step_attempt(
         &self,

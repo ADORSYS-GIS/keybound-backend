@@ -1,0 +1,31 @@
+[licenses]
+unused-allowed-license = "warn"
+confidence-threshold = 0.95
+allow = [
+    "OpenSSL",
+    "Zlib",
+    "ISC",
+    "Unicode-3.0",
+    "MIT",
+    "Apache-2.0",
+    "EUPL-1.2",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+    "PostgreSQL",
+    "Unlicense"
+]
+
+[advisories]
+ignore = [
+    "RUSTSEC-2020-0036",
+    "RUSTSEC-2023-0071",
+]
+
+[bans]
+skip = [
+    { name = "gen_oas_client_cuss" },
+    { name = "gen_oas_server_bff" },
+    { name = "gen_oas_server_kc" },
+    { name = "gen_oas_server_staff" },
+]

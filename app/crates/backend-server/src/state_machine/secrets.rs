@@ -21,4 +21,3 @@ pub fn verify_secret(plain: &str, hash: &str) -> Result<bool, Error> {
         .verify_password(plain.as_bytes(), &parsed)
         .is_ok())
 }
-

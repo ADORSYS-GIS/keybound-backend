@@ -6,4 +6,3 @@ pub struct StateMachineStepJob {
     pub step_name: String,
     pub attempt_id: String,
 }
-

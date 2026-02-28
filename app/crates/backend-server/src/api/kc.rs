@@ -52,9 +52,7 @@ impl Devices<Error> for BackendApi {
                     "NOT_FOUND",
                     "Device not found",
                 )),
-            })
-            .map_err(Into::into)
-    }
+            })}
 }
 
 #[backend_core::async_trait]
@@ -77,9 +75,7 @@ impl Users<Error> for BackendApi {
             .map(|row| {
                 let dto = UserRecordDto::from(row);
                 CreateUserResponse::Status201_Created(dto.into())
-            })
-            .map_err(Into::into)
-    }
+            })}
 
     async fn delete_user(
         &self,
@@ -99,9 +95,7 @@ impl Users<Error> for BackendApi {
                 } else {
                     DeleteUserResponse::Status404_NotFound(kc_error("NOT_FOUND", "User not found"))
                 }
-            })
-            .map_err(Into::into)
-    }
+            })}
 
     async fn get_user(
         &self,
@@ -123,9 +117,7 @@ impl Users<Error> for BackendApi {
                 None => {
                     GetUserResponse::Status404_NotFound(kc_error("NOT_FOUND", "User not found"))
                 }
-            })
-            .map_err(Into::into)
-    }
+            })}
 
     async fn search_users(
         &self,
@@ -149,9 +141,7 @@ impl Users<Error> for BackendApi {
                     users,
                     total_count: None,
                 })
-            })
-            .map_err(Into::into)
-    }
+            })}
 
     async fn update_user(
         &self,
@@ -175,9 +165,7 @@ impl Users<Error> for BackendApi {
                 None => {
                     UpdateUserResponse::Status404_NotFound(kc_error("NOT_FOUND", "User not found"))
                 }
-            })
-            .map_err(Into::into)
-    }
+            })}
 }
 
 #[backend_core::async_trait]
@@ -202,8 +190,8 @@ impl Enrollment<Error> for BackendApi {
             .find_device_binding(&req.device_id, &req.jkt)
             .await?;
 
-        if let Some((bound_user_id, _)) = existing {
-            if bound_user_id != req.user_id {
+        if let Some((bound_user_id, _)) = existing
+            && bound_user_id != req.user_id {
                 return Ok(
                     EnrollmentBindResponse::Status409_DeviceAlreadyBoundToADifferentUser(kc_error(
                         "CONFLICT",
@@ -211,7 +199,6 @@ impl Enrollment<Error> for BackendApi {
                     )),
                 );
             }
-        }
 
         self.state
             .device
@@ -223,7 +210,5 @@ impl Enrollment<Error> for BackendApi {
                     device_record_id: Some(record_id),
                     bound_user_id: Some(req.user_id),
                 })
-            })
-            .map_err(Into::into)
-    }
+            })}
 }

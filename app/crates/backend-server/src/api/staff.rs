@@ -194,13 +194,15 @@ impl KycStateMachines<Error> for BackendApi {
                 .map_err(|err| Error::internal("SM_ENQUEUE_FAILED", err.to_string()))?;
         }
 
-        Ok(StaffKycInstancesInstanceIdRetryPostResponse::Status200_RetryAccepted(
-            models::RetryResponse {
-                instance_id: instance.id,
-                step_name: step_name.to_owned(),
-                attempt_id: attempt.id,
-            },
-        ))
+        Ok(
+            StaffKycInstancesInstanceIdRetryPostResponse::Status200_RetryAccepted(
+                models::RetryResponse {
+                    instance_id: instance.id,
+                    step_name: step_name.to_owned(),
+                    attempt_id: attempt.id,
+                },
+            ),
+        )
     }
 
     async fn staff_kyc_deposits_instance_id_confirm_payment_post(
@@ -213,7 +215,9 @@ impl KycStateMachines<Error> for BackendApi {
         body: &models::ConfirmPaymentRequest,
     ) -> Result<StaffKycDepositsInstanceIdConfirmPaymentPostResponse, Error> {
         let Some(instance) = self.state.sm.get_instance(&path_params.instance_id).await? else {
-            return Ok(StaffKycDepositsInstanceIdConfirmPaymentPostResponse::Status404_InstanceNotFound);
+            return Ok(
+                StaffKycDepositsInstanceIdConfirmPaymentPostResponse::Status404_InstanceNotFound,
+            );
         };
         if instance.kind != KIND_KYC_FIRST_DEPOSIT {
             return Err(Error::bad_request(
@@ -232,7 +236,10 @@ impl KycStateMachines<Error> for BackendApi {
         if let Some(obj) = ctx.as_object_mut() {
             obj.insert("payment".to_owned(), payment.clone());
         }
-        self.state.sm.update_instance_context(&instance.id, ctx).await?;
+        self.state
+            .sm
+            .update_instance_context(&instance.id, ctx)
+            .await?;
 
         let reviewer_id = BackendApi::require_user_id(claims).ok();
         let engine = Engine::new(self.state.clone());
@@ -272,7 +279,10 @@ impl KycStateMachines<Error> for BackendApi {
         if let Some(obj) = ctx.as_object_mut() {
             obj.insert("approval".to_owned(), approval.clone());
         }
-        self.state.sm.update_instance_context(&instance.id, ctx).await?;
+        self.state
+            .sm
+            .update_instance_context(&instance.id, ctx)
+            .await?;
 
         let reviewer_id = BackendApi::require_user_id(claims).ok();
         let engine = Engine::new(self.state.clone());
@@ -331,12 +341,23 @@ fn parse_status(raw: &str) -> models::InstanceStatus {
     raw.parse().unwrap_or(models::InstanceStatus::Active)
 }
 
-fn json_to_object(value: Value) -> Option<std::collections::HashMap<String, gen_oas_server_staff::types::Object>> {
-    let Value::Object(map) = value else { return None; };
-    Some(map.into_iter().map(|(k,v)| (k, gen_oas_server_staff::types::Object(v))).collect())
+fn json_to_object(
+    value: Value,
+) -> Option<std::collections::HashMap<String, gen_oas_server_staff::types::Object>> {
+    let Value::Object(map) = value else {
+        return None;
+    };
+    Some(
+        map.into_iter()
+            .map(|(k, v)| (k, gen_oas_server_staff::types::Object(v)))
+            .collect(),
+    )
 }
 
-fn summarize_instance(kind: &str, attempts: &[backend_model::db::SmStepAttemptRow]) -> (Option<String>, Option<Value>) {
+fn summarize_instance(
+    kind: &str,
+    attempts: &[backend_model::db::SmStepAttemptRow],
+) -> (Option<String>, Option<Value>) {
     let steps = steps_for_kind(kind);
     let mut last_error = None;
     for attempt in attempts.iter().rev() {

@@ -50,7 +50,7 @@ aws-types = { workspace = true }
 gen_oas_server_bff = { workspace = true }
 gen_oas_server_kc = { workspace = true }
 gen_oas_server_staff = { workspace = true }
-gen_oas_server_cuss = { workspace = true }
+gen_oas_client_cuss = { workspace = true }
 
 openssl = { workspace = true }
 openssl-sys = { workspace = true }

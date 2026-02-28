@@ -44,7 +44,7 @@ impl DbFactory {
 
         // Run migrations synchronously
         let url = self.url.clone();
-        let _ = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let mut conn = PgConnection::establish(&url)
                 .map_err(|e| Error::Database(format!("Failed to connect for migrations: {}", e)))?;
 

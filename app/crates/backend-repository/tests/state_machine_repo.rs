@@ -1,7 +1,10 @@
 use anyhow::Result;
 use backend_migrate::connect_postgres_and_migrate;
 use backend_model::schema::{app_user, sm_instance};
-use backend_repository::{SmInstanceCreateInput, SmInstanceFilter, SmStepAttemptCreateInput, StateMachineRepo, StateMachineRepository};
+use backend_repository::{
+    SmInstanceCreateInput, SmInstanceFilter, SmStepAttemptCreateInput, StateMachineRepo,
+    StateMachineRepository,
+};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
@@ -12,7 +15,9 @@ async fn sm_instance_idempotency_and_active_uniqueness() -> Result<()> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(value) => value,
         Err(_) => {
-            eprintln!("Skipping backend-repository state machine test because DATABASE_URL is not set");
+            eprintln!(
+                "Skipping backend-repository state machine test because DATABASE_URL is not set"
+            );
             return Ok(());
         }
     };
@@ -137,7 +142,9 @@ async fn sm_step_attempt_lifecycle() -> Result<()> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(value) => value,
         Err(_) => {
-            eprintln!("Skipping backend-repository state machine test because DATABASE_URL is not set");
+            eprintln!(
+                "Skipping backend-repository state machine test because DATABASE_URL is not set"
+            );
             return Ok(());
         }
     };

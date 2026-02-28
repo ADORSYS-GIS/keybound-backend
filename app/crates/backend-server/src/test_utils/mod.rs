@@ -262,6 +262,7 @@ mock! {
     }
 }
 
+#[derive(Default)]
 pub struct TestAppStateBuilder {
     pub sm: Option<Arc<dyn StateMachineRepo>>,
     pub user: Option<Arc<dyn UserRepo>>,
@@ -274,21 +275,6 @@ pub struct TestAppStateBuilder {
     pub config: Option<Config>,
 }
 
-impl Default for TestAppStateBuilder {
-    fn default() -> Self {
-        Self {
-            sm: None,
-            user: None,
-            device: None,
-            sm_queue: None,
-            notification_queue: None,
-            provisioning_queue: None,
-            worker_http_client: None,
-            s3: None,
-            config: None,
-        }
-    }
-}
 
 impl TestAppStateBuilder {
     pub fn new() -> Self {
@@ -390,9 +376,13 @@ cuss:
         });
 
         AppState {
-            sm: self.sm.unwrap_or_else(|| Arc::new(MockStateMachineRepo::new())),
+            sm: self
+                .sm
+                .unwrap_or_else(|| Arc::new(MockStateMachineRepo::new())),
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
-            device: self.device.unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
+            device: self
+                .device
+                .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
             sm_queue: self
                 .sm_queue
                 .unwrap_or_else(|| Arc::new(MockStateMachineQueue::new())),

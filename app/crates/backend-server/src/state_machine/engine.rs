@@ -1,8 +1,8 @@
+use crate::sms_provider::SmsProvider;
 use crate::state::AppState;
 use crate::state_machine::jobs::StateMachineStepJob;
 use crate::state_machine::secrets::hash_secret;
 use crate::state_machine::types::*;
-use crate::sms_provider::SmsProvider;
 use backend_core::Error;
 use backend_repository::{
     SmEventCreateInput, SmInstanceCreateInput, SmStepAttemptCreateInput, SmStepAttemptPatch,
@@ -139,10 +139,10 @@ impl Engine {
         self.state
             .sm_queue
             .enqueue(StateMachineStepJob {
-            instance_id: instance_id.to_owned(),
-            step_name: STEP_PHONE_ISSUE_OTP.to_owned(),
-            attempt_id: attempt.id,
-        })
+                instance_id: instance_id.to_owned(),
+                step_name: STEP_PHONE_ISSUE_OTP.to_owned(),
+                attempt_id: attempt.id,
+            })
             .await
             .map_err(|err| Error::internal("SM_ENQUEUE_FAILED", err.to_string()))?;
 
@@ -204,10 +204,10 @@ impl Engine {
         self.state
             .sm_queue
             .enqueue(StateMachineStepJob {
-            instance_id: instance_id.to_owned(),
-            step_name: STEP_DEPOSIT_REGISTER_CUSTOMER.to_owned(),
-            attempt_id,
-        })
+                instance_id: instance_id.to_owned(),
+                step_name: STEP_DEPOSIT_REGISTER_CUSTOMER.to_owned(),
+                attempt_id,
+            })
             .await
             .map_err(|err| Error::internal("SM_ENQUEUE_FAILED", err.to_string()))?;
 
@@ -345,7 +345,8 @@ impl Engine {
         let Some(claimed_attempt) = self.state.sm.claim_step_attempt(&job.attempt_id).await? else {
             return Ok(());
         };
-        if claimed_attempt.instance_id != job.instance_id || claimed_attempt.step_name != job.step_name
+        if claimed_attempt.instance_id != job.instance_id
+            || claimed_attempt.step_name != job.step_name
         {
             return Err(Error::internal(
                 "SM_JOB_MISMATCH",
@@ -371,8 +372,7 @@ impl Engine {
                     .await?;
             }
             (KIND_KYC_FIRST_DEPOSIT, STEP_DEPOSIT_REGISTER_CUSTOMER) => {
-                self.run_deposit_register_customer(instance, job)
-                    .await?;
+                self.run_deposit_register_customer(instance, job).await?;
             }
             (KIND_KYC_FIRST_DEPOSIT, STEP_DEPOSIT_APPROVE_AND_DEPOSIT) => {
                 self.run_deposit_approve_and_deposit(instance, job).await?;
@@ -381,7 +381,10 @@ impl Engine {
             _ => {
                 return Err(Error::internal(
                     "SM_STEP_NOT_SUPPORTED",
-                    format!("Unsupported step {} for kind {}", job.step_name, instance.kind),
+                    format!(
+                        "Unsupported step {} for kind {}",
+                        job.step_name, instance.kind
+                    ),
                 ));
             }
         }
@@ -459,7 +462,9 @@ impl Engine {
         instance: backend_model::db::SmInstanceRow,
         job: StateMachineStepJob,
     ) -> Result<(), Error> {
-        use gen_oas_server_cuss::models::RegistrationRequest;
+        use gen_oas_client_cuss::apis::Error as CussApiError;
+        use gen_oas_client_cuss::apis::registration_api;
+        use gen_oas_client_cuss::models::RegistrationRequest;
 
         let user_id = instance
             .user_id
@@ -501,42 +506,40 @@ impl Engine {
             date_of_birth: None,
         };
 
-        let url = format!("{}/api/registration/register", self.state.config.cuss.api_url);
-        let body = serde_json::to_value(req)
-            .map_err(|e| Error::internal("CUS_REQ_SERIALIZE_FAILED", e.to_string()))?;
-        let (status, text) = self
-            .state
-            .worker_http_client
-            .post_json(&url, &body)
-            .await
-            .map_err(|err| Error::internal("CUS_HTTP_FAILED", err.to_string()))?;
-
-        if !status.is_success() {
-            let finished = Utc::now();
-            let _ = self
-                .state
-                .sm
-                .patch_step_attempt(
+        let config = self.cuss_client_config();
+        let resp = match registration_api::register_customer(&config, req).await {
+            Ok(response) => response,
+            Err(CussApiError::ResponseError(response_error)) => {
+                self.mark_attempt_failed(
                     &job.attempt_id,
-                    SmStepAttemptPatch {
-                        status: Some(ATTEMPT_STATUS_FAILED.to_owned()),
-                        output: Some(None),
-                        error: Some(Some(json!({"status": status.as_u16(), "body": text}))),
-                        queued_at: None,
-                        started_at: None,
-                        finished_at: Some(Some(finished)),
-                        next_retry_at: Some(None),
-                    },
+                    json!({
+                        "status": response_error.status.as_u16(),
+                        "body": response_error.content,
+                    }),
                 )
                 .await?;
-            return Err(Error::internal(
-                "CUS_REGISTER_FAILED",
-                format!("CUSS register failed: {status}"),
-            ));
-        }
+                return Err(Error::internal(
+                    "CUS_REGISTER_FAILED",
+                    format!("CUSS register failed: {}", response_error.status),
+                ));
+            }
+            Err(error) => {
+                self.mark_attempt_failed(
+                    &job.attempt_id,
+                    json!({
+                        "error": error.to_string(),
+                    }),
+                )
+                .await?;
+                return Err(Error::internal(
+                    "CUS_REGISTER_CALL_FAILED",
+                    error.to_string(),
+                ));
+            }
+        };
 
-        let resp: Value = serde_json::from_str(&text)
-            .map_err(|e| Error::internal("CUS_RESP_PARSE_FAILED", e.to_string()))?;
+        let resp = serde_json::to_value(resp)
+            .map_err(|e| Error::internal("CUS_RESP_SERIALIZE_FAILED", e.to_string()))?;
 
         let finished = Utc::now();
         let _ = self
@@ -558,16 +561,21 @@ impl Engine {
 
         // Queue next step.
         let next_attempt_id = self
-            .create_async_attempt(&instance.id, STEP_DEPOSIT_APPROVE_AND_DEPOSIT, json!({}), None)
+            .create_async_attempt(
+                &instance.id,
+                STEP_DEPOSIT_APPROVE_AND_DEPOSIT,
+                json!({}),
+                None,
+            )
             .await?;
 
         self.state
             .sm_queue
             .enqueue(StateMachineStepJob {
-            instance_id: instance.id.clone(),
-            step_name: STEP_DEPOSIT_APPROVE_AND_DEPOSIT.to_owned(),
-            attempt_id: next_attempt_id,
-        })
+                instance_id: instance.id.clone(),
+                step_name: STEP_DEPOSIT_APPROVE_AND_DEPOSIT.to_owned(),
+                attempt_id: next_attempt_id,
+            })
             .await
             .map_err(|err| Error::internal("SM_ENQUEUE_FAILED", err.to_string()))?;
 
@@ -579,7 +587,9 @@ impl Engine {
         instance: backend_model::db::SmInstanceRow,
         job: StateMachineStepJob,
     ) -> Result<(), Error> {
-        use gen_oas_server_cuss::models::ApproveAndDepositRequest;
+        use gen_oas_client_cuss::apis::Error as CussApiError;
+        use gen_oas_client_cuss::apis::registration_api;
+        use gen_oas_client_cuss::models::ApproveAndDepositRequest;
 
         // Get savingsAccountId from previous step output.
         let reg_attempt = self
@@ -592,7 +602,10 @@ impl Engine {
         let savings_account_id = reg_attempt
             .output
             .as_ref()
-            .and_then(|v| v.get("savingsAccountId").or_else(|| v.get("savings_account_id")))
+            .and_then(|v| {
+                v.get("savingsAccountId")
+                    .or_else(|| v.get("savings_account_id"))
+            })
             .and_then(Value::as_i64)
             .ok_or_else(|| Error::internal("SM_DEP_INVALID", "Missing savingsAccountId"))?;
 
@@ -611,45 +624,40 @@ impl Engine {
             deposit_amount: Some(deposit_amount),
         };
 
-        let url = format!(
-            "{}/api/registration/approve-and-deposit",
-            self.state.config.cuss.api_url
-        );
-        let body = serde_json::to_value(req)
-            .map_err(|e| Error::internal("CUS_REQ_SERIALIZE_FAILED", e.to_string()))?;
-        let (status, text) = self
-            .state
-            .worker_http_client
-            .post_json(&url, &body)
-            .await
-            .map_err(|err| Error::internal("CUS_HTTP_FAILED", err.to_string()))?;
-
-        if !status.is_success() {
-            let finished = Utc::now();
-            let _ = self
-                .state
-                .sm
-                .patch_step_attempt(
+        let config = self.cuss_client_config();
+        let resp = match registration_api::approve_and_deposit(&config, req).await {
+            Ok(response) => response,
+            Err(CussApiError::ResponseError(response_error)) => {
+                self.mark_attempt_failed(
                     &job.attempt_id,
-                    SmStepAttemptPatch {
-                        status: Some(ATTEMPT_STATUS_FAILED.to_owned()),
-                        output: Some(None),
-                        error: Some(Some(json!({"status": status.as_u16(), "body": text}))),
-                        queued_at: None,
-                        started_at: None,
-                        finished_at: Some(Some(finished)),
-                        next_retry_at: Some(None),
-                    },
+                    json!({
+                        "status": response_error.status.as_u16(),
+                        "body": response_error.content,
+                    }),
                 )
                 .await?;
-            return Err(Error::internal(
-                "CUS_APPROVE_DEPOSIT_FAILED",
-                format!("CUSS approve-and-deposit failed: {status}"),
-            ));
-        }
+                return Err(Error::internal(
+                    "CUS_APPROVE_DEPOSIT_FAILED",
+                    format!("CUSS approve-and-deposit failed: {}", response_error.status),
+                ));
+            }
+            Err(error) => {
+                self.mark_attempt_failed(
+                    &job.attempt_id,
+                    json!({
+                        "error": error.to_string(),
+                    }),
+                )
+                .await?;
+                return Err(Error::internal(
+                    "CUS_APPROVE_DEPOSIT_CALL_FAILED",
+                    error.to_string(),
+                ));
+            }
+        };
 
-        let resp: Value = serde_json::from_str(&text)
-            .map_err(|e| Error::internal("CUS_RESP_PARSE_FAILED", e.to_string()))?;
+        let resp = serde_json::to_value(resp)
+            .map_err(|e| Error::internal("CUS_RESP_SERIALIZE_FAILED", e.to_string()))?;
 
         let finished = Utc::now();
         let _ = self
@@ -697,6 +705,38 @@ impl Engine {
         self.state
             .sm
             .update_instance_status(instance_id, INSTANCE_STATUS_COMPLETED, Some(now))
+            .await?;
+        Ok(())
+    }
+
+    fn cuss_client_config(&self) -> gen_oas_client_cuss::apis::configuration::Configuration {
+        let mut config = gen_oas_client_cuss::apis::configuration::Configuration::new();
+        config.base_path = self.state.config.cuss.api_url.clone();
+        config.user_agent = Some("user-storage/1.0.0".to_owned());
+        config
+    }
+
+    async fn mark_attempt_failed(
+        &self,
+        attempt_id: &str,
+        error_payload: Value,
+    ) -> Result<(), Error> {
+        let finished = Utc::now();
+        let _ = self
+            .state
+            .sm
+            .patch_step_attempt(
+                attempt_id,
+                SmStepAttemptPatch {
+                    status: Some(ATTEMPT_STATUS_FAILED.to_owned()),
+                    output: Some(None),
+                    error: Some(Some(error_payload)),
+                    queued_at: None,
+                    started_at: None,
+                    finished_at: Some(Some(finished)),
+                    next_retry_at: Some(None),
+                },
+            )
             .await?;
         Ok(())
     }

@@ -42,8 +42,8 @@ up-single service: # Start a single service (pass service=...)
 
 generate: # Generate code from OpenAPI specs
 	docker compose -p {{project}} -f {{compose_file}} run --rm generate-code
-	cargo fmt -p gen_oas_server_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
-	cargo fix --allow-dirty -p gen_oas_server_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
+	cargo fmt -p gen_oas_client_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
+	cargo fix --allow-dirty -p gen_oas_client_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
 
 up-no-build: # Start services without rebuilding
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans {{c}}
@@ -87,3 +87,11 @@ dev *args: # Run the backend binary in dev profile (pass args to the CLI)
 
 prepare: # Build the backend binary in release mode
 	cargo build --release
+
+all-checks:
+	@echo "Running Rust formatting, lint, and checks"
+	cargo fmt
+	#cargo deny check
+	cargo fix --allow-dirty
+	cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings
+	cargo check --all-targets --all-features
