@@ -1,4 +1,4 @@
-# Azamra Tokenization Backend
+# Keybound Backend
 
 This repository powers the user/device storage side of the Keycloak device-binding flow. The service exposes three HTTP surfaces:
 
