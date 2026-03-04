@@ -78,6 +78,9 @@ Never use UUID for backend IDs.
 - KC signature middleware tests also live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
 - **Unit Tests**: `backend-server` has comprehensive unit tests for `state`, `api::{bff, staff}`, and `worker` using `test_utils` mocks.
 - **OAS3 Integration Tests**: `backend-server` OAS integration scenarios live in `app/crates/backend-server/src/api/it_tests.rs` and run with `--features it-tests`.
+- **Rust-native E2E Tests**: feature-gated scenarios use `--features e2e-tests`:
+  - `app/crates/backend-auth/tests/oidc_wiremock_e2e.rs` (OIDC discovery/JWKS via `wiremock`)
+  - `app/crates/backend-repository/tests/state_machine_repo_testcontainers.rs` (repository + migrations against ephemeral Postgres via `testcontainers`)
 
 #### Auth and Error Scenarios
 Required scenarios to keep covered in tests:
@@ -103,6 +106,8 @@ Suggested verification commands:
 - `cargo test -p backend-server` (runs all unit tests with mocks)
 - `just test-it` (runs OAS3 integration tests)
 - `cargo test -p backend-server --features it-tests api::it_tests::`
+- `cargo test -p backend-auth --features e2e-tests --test oidc_wiremock_e2e`
+- `cargo test -p backend-repository --features e2e-tests --test state_machine_repo_testcontainers`
 
 ## Caching
 - In-process cache uses `lru`.
@@ -216,7 +221,9 @@ Let's talk about all the rules we're having to work efficiently:
 - All crates and binaries under `backend/crates/*` and `backend/bins/*` must depend on third-party crates using `{ workspace = true }`.
 - If a crate needs optional capabilities, add `features = [...]` on the `{ workspace = true }` dependency in that leaf `Cargo.toml`.
 - Do not add `version = "..."` for third-party crates anywhere except the root `Cargo.toml`.
-- Integration test feature: use `it-tests` for feature-gated OAS integration suites (do not overload default/unit test paths with OAS matrix scenarios).
+- Integration test features:
+  - `it-tests` for feature-gated OAS integration suites (do not overload default/unit test paths with OAS matrix scenarios).
+  - `e2e-tests` for Rust-native external-dependency integration tests (`wiremock`, `testcontainers`) that should stay out of default/unit test paths.
 
 #### Code style
 

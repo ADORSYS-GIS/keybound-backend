@@ -8,6 +8,7 @@ authors.workspace = true
 
 [features]
 it-tests = []
+e2e-tests = ["dep:testcontainers", "dep:testcontainers-modules"]
 
 [dependencies]
 backend-core.workspace = true
@@ -19,6 +20,8 @@ diesel-async.workspace = true
 serde_json.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true
+testcontainers = { workspace = true, optional = true }
+testcontainers-modules = { workspace = true, optional = true, features = ["postgres"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 diesel = { workspace = true, features = ["pq-src"] }
@@ -32,3 +35,8 @@ gen_oas_server_kc.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 anyhow.workspace = true
 openssl = { workspace = true, features = ["vendored"] }
+
+[[test]]
+name = "state_machine_repo_testcontainers"
+path = "tests/state_machine_repo_testcontainers.rs"
+required-features = ["e2e-tests"]
