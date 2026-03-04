@@ -16,6 +16,31 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - OAS3 integration tests are implemented in `backend-server` under `app/crates/backend-server/src/api/it_tests.rs` and gated by the `it-tests` crate feature.
 - Local OAS integration test command is available via `just test-it`.
 - CI now runs both workspace tests and the OAS integration test suite.
+- Compose E2E runner is Rust-based (`app/crates/backend-e2e`), replacing the previous TypeScript runner:
+  - `just test-e2e-smoke` executes smoke scenarios.
+  - `just test-e2e-full` executes full scenarios.
+  - Scenario tracking source of truth is `.docker/e2e/CHECKLIST.md`.
+
+### Compose E2E Migration Snapshot (from `.docker/e2e/CHECKLIST.md`, 2026-03-04)
+- Overall checklist status:
+  - Implemented: `16`
+  - Partial: `2`
+  - Missing: `57`
+- Implemented areas:
+  - Compose infrastructure and runner flow (`test-e2e-smoke`, `test-e2e-full`, log capture on failure).
+  - Health endpoint and core Bearer auth enforcement (`401` cases + valid token pass-through).
+  - BFF phone deposit happy paths and phone OTP issue + successful verify path.
+- Partial areas:
+  - Staff instances listing (`staffKycInstancesGet`)
+  - Staff summary report aggregates (`staffKycReportsSummaryGet`)
+- Major missing groups:
+  - KC signature middleware matrix in Compose E2E.
+  - KC surface CRUD/device race/idempotency scenarios.
+  - BFF negative-path and remaining endpoint coverage (ownership denial, expiry, sessions/steps, email magic, uploads, OTP failure paths).
+  - Staff detail/retry/deposit approval flow coverage.
+  - Worker locking/retry/idempotency + CUSS failure path coverage.
+  - Cross-surface representative error mapping checks.
+- Keep this snapshot aligned with `.docker/e2e/CHECKLIST.md` whenever scenarios are added or marked complete.
 
 `app/bins/backend` starts the server; `app/crates/backend-server` is a library crate.
 
@@ -82,6 +107,9 @@ Never use UUID for backend IDs.
 - **Rust-native E2E Tests**: feature-gated scenarios use `--features e2e-tests`:
   - `app/crates/backend-auth/tests/oidc_wiremock_e2e.rs` (OIDC discovery/JWKS via `wiremock`)
   - `app/crates/backend-repository/tests/state_machine_repo_testcontainers.rs` (repository + migrations against ephemeral Postgres via `testcontainers`)
+- **Compose E2E Tests (Rust Runner)**: `backend-e2e` integration tests run against the Compose stack:
+  - `app/crates/backend-e2e/tests/smoke.rs`
+  - `app/crates/backend-e2e/tests/full.rs`
 
 #### Auth and Error Scenarios
 Required scenarios to keep covered in tests:
@@ -107,6 +135,8 @@ Suggested verification commands:
 - `cargo test -p backend-server` (runs all unit tests with mocks)
 - `just test-it` (runs OAS3 integration tests)
 - `cargo test -p backend-server --features it-tests api::it_tests::`
+- `cargo test -p backend-e2e --features e2e-tests --test smoke -- --nocapture`
+- `cargo test -p backend-e2e --features e2e-tests --test full -- --nocapture`
 - `just test-e2e-smoke` (runs Compose smoke e2e via Rust runner)
 - `just test-e2e-full` (runs Compose full e2e via Rust runner)
 - `cargo test -p backend-auth --features e2e-tests --test oidc_wiremock_e2e`
