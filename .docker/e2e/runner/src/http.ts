@@ -1,7 +1,20 @@
 import { request } from 'undici';
 
-function sleep(ms: number) {
+export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface JsonRequestOptions {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+}
+
+export interface JsonResponse<T> {
+  statusCode: number;
+  body: T | null;
+  text: string;
 }
 
 export async function waitForStatus(url: string, expectedStatus = 200, attempts = 30) {
@@ -22,16 +35,47 @@ export async function waitForStatus(url: string, expectedStatus = 200, attempts 
   throw new Error(`service at ${url} did not return ${expectedStatus} within timeout: ${lastError}`);
 }
 
-export async function getJson<T>(url: string): Promise<T> {
-  const res = await request(url);
-  const body = await res.body.text();
-  if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw new Error(`request to ${url} returned ${res.statusCode}: ${body}`);
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+export async function sendJson<T>(
+  opts: JsonRequestOptions,
+): Promise<JsonResponse<T>> {
+  const method = (opts.method ?? 'GET').toUpperCase();
+  const headers: Record<string, string> = {
+    ...JSON_HEADERS,
+    ...(opts.headers ?? {}),
+  };
+
+  const response = await request(opts.url, {
+    method,
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+
+  const text = await response.body.text();
+  let parsed: T | null = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as T;
+    } catch {
+      parsed = null;
+    }
   }
 
-  try {
-    return JSON.parse(body) as T;
-  } catch (err) {
-    throw new Error(`failed to parse JSON from ${url}: ${err}`);
+  return {
+    statusCode: response.statusCode,
+    body: parsed,
+    text,
+  };
+}
+
+export async function getJson<T>(url: string): Promise<T> {
+  const res = await sendJson<T>({ url, method: 'GET' });
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw new Error(`request to ${url} returned ${res.statusCode}: ${res.text}`);
   }
+  if (res.body === null) {
+    throw new Error(`request to ${url} returned empty body`);
+  }
+  return res.body;
 }

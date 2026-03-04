@@ -4,8 +4,8 @@ WORKDIR /app
 
 COPY package.json tsconfig.json vitest.config.ts ./
 
-RUN npm install
+RUN yarn install
 
 COPY src ./src
 
-CMD ["npm", "run", "test:smoke"]
+CMD ["yarn", "test:smoke"]

@@ -81,7 +81,7 @@ Users:
 From [openapi/user-storage-bff.yaml](../../openapi/user-storage-bff.yaml):
 
 Deposits:
-- [ ] `POST /internal/deposits/phone` (`internalCreatePhoneDeposit`) happy path.
+- [~] `POST /internal/deposits/phone` (`internalCreatePhoneDeposit`) happy path.
 - [ ] `POST /internal/deposits/phone` ownership/auth enforced (no bearer -> `401`).
 - [ ] `GET /internal/deposits/{depositId}` (`internalGetPhoneDeposit`) happy path.
 - [ ] `GET /internal/deposits/{depositId}` denies non-owner (`403` or `404`, whichever is specified).
@@ -93,8 +93,8 @@ Sessions / steps:
 - [ ] `GET /internal/kyc/steps/{stepId}` (`internalGetStep`) returns correct data/status transitions.
 
 Phone OTP:
-- [ ] `POST /internal/kyc/phone/otp/issue` (`internalIssueOtp`) issues challenge; SMS is sent (captured by stub/sink).
-- [ ] verify correct OTP -> step moves to verified state.
+- [~] `POST /internal/kyc/phone/otp/issue` (`internalIssueOtp`) issues challenge; SMS is sent (captured by stub/sink).
+- [~] verify correct OTP -> step moves to verified state.
 - [ ] verify wrong OTP -> deterministic error and `sm_step_attempt` increments.
 - [ ] verify expired OTP -> deterministic error.
 - [ ] rate limits / max attempts enforced (if configured).
@@ -113,7 +113,7 @@ Uploads:
 From [openapi/user-storage--staff.yaml](../../openapi/user-storage--staff.yaml):
 
 State-machine observability:
-- [ ] `GET /api/kyc/instances` (`staffKycInstancesGet`) returns instances with filters/pagination (as defined).
+- [~] `GET /api/kyc/instances` (`staffKycInstancesGet`) returns instances with filters/pagination (as defined).
 - [ ] `GET /api/kyc/instances/{instanceId}` (`staffKycInstancesInstanceIdGet`) returns instance + events + attempts.
 - [ ] `POST /api/kyc/instances/{instanceId}/retry` (`staffKycInstancesInstanceIdRetryPost`) schedules/retries and is observable.
 
@@ -122,7 +122,7 @@ Deposit flow (KYC_FIRST_DEPOSIT):
 - [ ] `POST /api/kyc/deposits/{instanceId}/approve` (`staffKycDepositsInstanceIdApprovePost`) triggers worker path and is observable.
 
 Reports:
-- [ ] `GET /api/kyc/reports/summary` (`staffKycReportsSummaryGet`) returns correct aggregates for known fixtures.
+- [~] `GET /api/kyc/reports/summary` (`staffKycReportsSummaryGet`) returns correct aggregates for known fixtures.
 
 ## Worker / Queue / Retry Scenarios
 
@@ -146,4 +146,3 @@ Across at least one BFF and one Staff endpoint:
 - [ ] not found maps to stable status + payload shape.
 - [ ] conflict maps to stable status + payload shape.
 - [ ] unexpected internal error maps to stable status + payload shape.
-

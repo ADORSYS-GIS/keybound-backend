@@ -1,11 +1,11 @@
 version: '3.9'
 
 include:
-  - deploy/compose/tools.compose.yml
-  - deploy/compose/postgres.compose.yml
-  - deploy/compose/redis.compose.yml
-  - deploy/compose/minio.compose.yml
-  - deploy/compose/keycloak.compose.yml
+  - ../../deploy/compose/tools.compose.yml
+  - ../../deploy/compose/postgres.compose.yml
+  - ../../deploy/compose/redis.compose.yml
+  - ../../deploy/compose/minio.compose.yml
+  - ../../deploy/compose/keycloak.compose.yml
 
 services:
   user-storage-server:
@@ -104,8 +104,7 @@ services:
       context: ../../.docker/e2e/runner
       dockerfile: Dockerfile
     command:
-      - npm
-      - run
+      - yarn
       - test:smoke
     depends_on:
       user-storage-server:
@@ -121,3 +120,6 @@ services:
       KEYCLOAK_URL: "http://keycloak:9026"
       CUSS_URL: "http://cuss-stub:8080"
       SMS_SINK_URL: "http://sms-sink:8081"
+      KC_SIGNATURE_SECRET: "some-very-long-secret"
+      KEYCLOAK_CLIENT_ID: "test-client"
+      KEYCLOAK_CLIENT_SECRET: "some-secret"

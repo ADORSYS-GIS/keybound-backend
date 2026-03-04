@@ -18,7 +18,7 @@
 c := ""
 compose_file := "compose.yml"
 project := "user-storage-backend"
-compose_e2e := "compose.e2e.yaml"
+compose_e2e := ".docker/e2e/compose.e2e.yaml"
 project_e2e := "user-storage-backend-e2e"
 
 export USER_ID := `id -u`
@@ -101,7 +101,7 @@ e2e-smoke:
 
 e2e-full:
 	docker compose -p {{project_e2e}} -f {{compose_e2e}} up -d --build
-	docker compose -p {{project_e2e}} -f {{compose_e2e}} run --rm e2e-runner npm run test:full
+	docker compose -p {{project_e2e}} -f {{compose_e2e}} run --rm e2e-runner yarn test:full
 	docker compose -p {{project_e2e}} -f {{compose_e2e}} down
 
 all-checks:

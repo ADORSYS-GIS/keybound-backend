@@ -7,11 +7,11 @@
     "test:full": "vitest run --runInBand --reporter=dot"
   },
   "dependencies": {
-    "undici": "^6.0.0",
-    "zod": "^4.40.0"
+    "undici": "^7.22.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "typescript": "^5.3.3",
-    "vitest": "^1.5.0"
+    "vitest": "^4.0.18"
   }
 }

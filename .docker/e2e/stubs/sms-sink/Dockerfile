@@ -4,12 +4,12 @@ WORKDIR /app
 
 COPY package.json tsconfig.json ./
 
-RUN npm install
+RUN yarn install
 
 COPY src ./src
 
-RUN npm run build
+RUN yarn build
 
 EXPOSE 8081
 
-CMD ["npm", "start"]
+CMD ["yarn", "start"]

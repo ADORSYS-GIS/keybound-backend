@@ -65,3 +65,13 @@ For E2E, the intended structure is:
 - `.docker/e2e/runner/` (TS runner container)
 - `.docker/e2e/stubs/` (TS stub containers with admin APIs)
 
+## Runner Scenarios
+
+- The `vitest` suite inside `.docker/e2e/runner/src/tests/bff.test.ts` now exercises:
+  - `/bff/internal/deposits/phone` creation + retrieval (verifies contact assignment/status).
+  - The OTP workflow (`internal/kyc/sessions`, `steps`, `phone/otp/issue`, `phone/otp/verify`) while polling the SMS sink.
+  - `/staff/api/kyc/instances` + `/staff/api/kyc/reports/summary` with expected payload shapes, plus the 404 response for missing instances.
+  - The stubbed CUSS register endpoint plus its `__admin/requests` trace.
+- Helper modules handle bearer tokens (`keycloak.ts`), JSON helpers + retries (`http.ts`), and stub controls (`sms.ts`).
+- `just e2e-smoke` builds the compose stack and runs `yarn test:smoke` in the runner; `just e2e-full` keeps the stack up and runs `yarn test:full`.
+- If `node_modules` is missing, `yarn install` must be executed from `.docker/e2e/runner` before invoking the runner so the tests can compile.
