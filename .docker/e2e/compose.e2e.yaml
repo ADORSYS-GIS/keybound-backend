@@ -1,5 +1,3 @@
-version: '3.9'
-
 include:
   - ../../deploy/compose/tools.compose.yml
   - ../../deploy/compose/postgres.compose.yml
