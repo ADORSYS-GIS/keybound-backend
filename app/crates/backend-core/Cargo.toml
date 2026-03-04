@@ -35,6 +35,7 @@ diesel = { workspace = true }
 default = []
 axum = ["dep:axum"]
 reqwest = ["dep:reqwest"]
+it-tests = []
 
 [dev-dependencies]
 tokio.workspace = true

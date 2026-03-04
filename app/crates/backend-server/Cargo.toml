@@ -8,6 +8,7 @@ authors.workspace = true
 
 [features]
 test-utils = []
+it-tests = []
 
 [dependencies]
 backend-auth = { workspace = true }

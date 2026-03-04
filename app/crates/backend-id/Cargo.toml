@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 
+[features]
+it-tests = []
+
 [dependencies]
 backend-core.workspace = true
 cuid.workspace = true

@@ -1,4 +1,6 @@
 pub mod bff;
+#[cfg(all(test, feature = "it-tests"))]
+mod it_tests;
 pub mod kc;
 mod repro_422;
 pub mod staff;

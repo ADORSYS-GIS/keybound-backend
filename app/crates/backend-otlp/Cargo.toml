@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 
+[features]
+it-tests = []
+
 [dependencies]
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
