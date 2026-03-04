@@ -1,0 +1,123 @@
+version: '3.9'
+
+include:
+  - deploy/compose/tools.compose.yml
+  - deploy/compose/postgres.compose.yml
+  - deploy/compose/redis.compose.yml
+  - deploy/compose/minio.compose.yml
+  - deploy/compose/keycloak.compose.yml
+
+services:
+  user-storage-server:
+    image: user-storage-app
+    build:
+      context: ../..
+      dockerfile: deploy/docker/user-storage/Dockerfile
+    command:
+      - serve
+      - --config-path
+      - config/e2e.yaml
+      - --mode
+      - server
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/user-storage"
+      REDIS_URL: "redis://redis:6379"
+      MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_REGION: "us-east-1"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
+      SMS_SINK_URL: "http://sms-sink:8081"
+      CUSS_URL: "http://cuss-stub:8080"
+      MINIO_FORCE_PATH_STYLE: "true"
+      RUST_LOG: info
+    volumes:
+      - ../../config:/app/config
+    ports:
+      - '3002:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+
+  user-storage-worker:
+    image: user-storage-app
+    build:
+      context: ../..
+      dockerfile: deploy/docker/user-storage/Dockerfile
+    command:
+      - serve
+      - --config-path
+      - config/e2e.yaml
+      - --mode
+      - worker
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/user-storage"
+      REDIS_URL: "redis://redis:6379"
+      MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_REGION: "us-east-1"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
+      SMS_SINK_URL: "http://sms-sink:8081"
+      CUSS_URL: "http://cuss-stub:8080"
+      MINIO_FORCE_PATH_STYLE: "true"
+      RUST_LOG: info
+    volumes:
+      - ../../config:/app/config
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+
+  cuss-stub:
+    build:
+      context: ../../.docker/e2e/stubs/cuss
+      dockerfile: Dockerfile
+    ports:
+      - '8080:8080'
+    restart: 'no'
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  sms-sink:
+    build:
+      context: ../../.docker/e2e/stubs/sms-sink
+      dockerfile: Dockerfile
+    ports:
+      - '8081:8081'
+    restart: 'no'
+
+  e2e-runner:
+    build:
+      context: ../../.docker/e2e/runner
+      dockerfile: Dockerfile
+    command:
+      - npm
+      - run
+      - test:smoke
+    depends_on:
+      user-storage-server:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      cuss-stub:
+        condition: service_started
+      sms-sink:
+        condition: service_started
+    environment:
+      USER_STORAGE_URL: "http://user-storage-server:3000"
+      KEYCLOAK_URL: "http://keycloak:9026"
+      CUSS_URL: "http://cuss-stub:8080"
+      SMS_SINK_URL: "http://sms-sink:8081"

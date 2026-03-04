@@ -18,6 +18,8 @@
 c := ""
 compose_file := "compose.yml"
 project := "user-storage-backend"
+compose_e2e := "compose.e2e.yaml"
+project_e2e := "user-storage-backend-e2e"
 
 export USER_ID := `id -u`
 export GROUP_ID := `id -g`
@@ -90,6 +92,17 @@ prepare: # Build the backend binary in release mode
 
 test-it: # Run OAS integration tests (feature-gated)
 	cargo test -p backend-server --features it-tests api::it_tests::
+
+e2e-build:
+	docker compose -p {{project_e2e}} -f {{compose_e2e}} build
+
+e2e-smoke:
+	docker compose -p {{project_e2e}} -f {{compose_e2e}} up --build --exit-code-from e2e-runner e2e-runner
+
+e2e-full:
+	docker compose -p {{project_e2e}} -f {{compose_e2e}} up -d --build
+	docker compose -p {{project_e2e}} -f {{compose_e2e}} run --rm e2e-runner npm run test:full
+	docker compose -p {{project_e2e}} -f {{compose_e2e}} down
 
 all-checks:
 	@echo "Running Rust formatting, lint, and checks"
