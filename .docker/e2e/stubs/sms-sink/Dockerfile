@@ -2,7 +2,7 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json tsconfig.json ./
+COPY package.json yarn.lock tsconfig.json ./
 
 RUN yarn install
 
