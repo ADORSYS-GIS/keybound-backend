@@ -7,7 +7,7 @@ pub mod staff;
 
 use crate::state::AppState;
 use axum::response::IntoResponse;
-use backend_auth::{JwtToken, OidcState, SignatureContext, SignatureState};
+use backend_auth::{Claims, JwtToken, OidcState, SignatureContext, SignatureState};
 use backend_core::{AppResult, Error};
 use http::{HeaderMap, HeaderValue};
 use std::sync::Arc;
@@ -102,6 +102,9 @@ impl gen_oas_server_bff::apis::ApiAuthBasic for BackendApi {
         headers: &HeaderMap,
         key: &str,
     ) -> Option<Self::Claims> {
+        if !self.state.config.bff.enabled {
+            return Some(auth_disabled_claims(&self.state.config.oauth2.issuer));
+        }
         claims_from_header_key(headers, key, self.oidc_state.clone()).await
     }
 }
@@ -131,8 +134,21 @@ impl gen_oas_server_staff::apis::ApiAuthBasic for BackendApi {
         headers: &HeaderMap,
         key: &str,
     ) -> Option<Self::Claims> {
+        if !self.state.config.staff.enabled {
+            return Some(auth_disabled_claims(&self.state.config.oauth2.issuer));
+        }
         claims_from_header_key(headers, key, self.oidc_state.clone()).await
     }
+}
+
+fn auth_disabled_claims(issuer: &str) -> JwtToken {
+    JwtToken::new(Claims {
+        sub: "usr_auth_disabled".to_owned(),
+        name: Some("auth-disabled".to_owned()),
+        iss: issuer.to_owned(),
+        exp: usize::MAX,
+        preferred_username: Some("auth-disabled".to_owned()),
+    })
 }
 
 #[instrument(skip(oidc_state))]

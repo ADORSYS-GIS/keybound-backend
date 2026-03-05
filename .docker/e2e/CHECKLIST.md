@@ -28,7 +28,7 @@ Legend:
 ## Auth (Bearer) Layer (BFF + Staff)
 
 Bypass / routing:
-- [ ] `enabled=false` bypasses auth layer.
+- [x] `enabled=false` bypasses auth layer.
 - [x] blank base path does not accidentally protect unrelated routes.
 - [x] request path outside protected base paths is not validated.
 

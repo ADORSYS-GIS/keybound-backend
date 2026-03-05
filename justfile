@@ -136,9 +136,10 @@ test-e2e-full:
 	  trap cleanup EXIT; \
 	  docker compose -p {{project_e2e}} -f {{compose_e2e}} build user-storage-server user-storage-worker cuss-stub sms-sink; \
 	  docker compose -p {{project_e2e}} -f {{compose_e2e}} up -d \
-	    postgres redis minio minio-create-bucket keycloak cuss-stub sms-sink user-storage-server user-storage-server-blank-base user-storage-worker; \
+	    postgres redis minio minio-create-bucket keycloak cuss-stub sms-sink user-storage-server user-storage-server-blank-base user-storage-server-auth-disabled user-storage-worker; \
 	  USER_STORAGE_URL=http://127.0.0.1:3002 \
 	  USER_STORAGE_BLANK_BASE_URL=http://127.0.0.1:3003 \
+	  USER_STORAGE_AUTH_DISABLED_URL=http://127.0.0.1:3004 \
 	  KEYCLOAK_URL=http://127.0.0.1:9026 \
 	  CUSS_URL=http://127.0.0.1:8080 \
 	  SMS_SINK_URL=http://127.0.0.1:8081 \

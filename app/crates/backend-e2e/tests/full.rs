@@ -143,6 +143,14 @@ async fn full_15_auth_blank_base_path_does_not_protect_unrelated_routes() -> Res
     Ok(())
 }
 
+#[tokio::test]
+#[file_serial]
+async fn full_16_auth_disabled_bypasses_bearer_layer() -> Result<()> {
+    let (env, client) = test_context()?;
+    scenario_auth_disabled_bypass(&client, &env).await?;
+    Ok(())
+}
+
 async fn scenario_auth_bypass_outside_protected_paths(
     client: &reqwest::Client,
     env: &Env,
@@ -191,6 +199,44 @@ async fn scenario_auth_blank_base_path_bypass(client: &reqwest::Client, env: &En
         .send()
         .await?;
     assert_eq!(staff_no_auth.status().as_u16(), 401);
+
+    Ok(())
+}
+
+async fn scenario_auth_disabled_bypass(client: &reqwest::Client, env: &Env) -> Result<()> {
+    let base_url = env
+        .user_storage_auth_disabled_url
+        .as_deref()
+        .ok_or_else(|| anyhow!("USER_STORAGE_AUTH_DISABLED_URL is required for auth-disabled test"))?;
+
+    let user_id = "usr_auth_disabled";
+    ensure_bff_fixtures(&env.database_url, user_id).await?;
+
+    let bff_no_auth = send_json(
+        client,
+        Method::POST,
+        &format!("{}/bff/internal/deposits/phone", base_url),
+        None,
+        Some(json!({
+            "userId": user_id,
+            "amount": 1000,
+            "currency": "XAF",
+            "provider": "MTN_CM",
+            "reason": "auth-disabled-bypass"
+        })),
+    )
+    .await?;
+    assert_ne!(bff_no_auth.status, 401, "{}", bff_no_auth.text);
+
+    let staff_no_auth = send_json(
+        client,
+        Method::GET,
+        &format!("{}/staff/api/kyc/instances?page=1&limit=1", base_url),
+        None,
+        None,
+    )
+    .await?;
+    assert_ne!(staff_no_auth.status, 401, "{}", staff_no_auth.text);
 
     Ok(())
 }

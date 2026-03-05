@@ -172,7 +172,13 @@ fn build_router(
         .filter(|p| !p.is_empty() && p != "/")
         .collect();
     if jwks_base_paths.is_empty() {
-        let defaults = [&config.bff.base_path, &config.staff.base_path];
+        let mut defaults: Vec<&str> = Vec::new();
+        if config.bff.enabled {
+            defaults.push(&config.bff.base_path);
+        }
+        if config.staff.enabled {
+            defaults.push(&config.staff.base_path);
+        }
         jwks_base_paths.extend(
             defaults
                 .iter()

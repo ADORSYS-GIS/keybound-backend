@@ -24,12 +24,12 @@ Tokenization/user-storage backend with three HTTP surfaces:
 
 ### Compose E2E Migration Snapshot (from `.docker/e2e/CHECKLIST.md`, 2026-03-05)
 - Overall checklist status:
-  - Implemented: `71`
+  - Implemented: `72`
   - Partial: `0`
-  - Missing: `4`
+  - Missing: `3`
 - Implemented areas:
   - Compose infrastructure and runner flow (`test-e2e-smoke`, `test-e2e-full`, log capture on failure).
-  - Health endpoint, Bearer auth enforcement (`401` cases + valid token pass-through), outside-base-path bypass behavior, and blank-base-path routing bypass behavior.
+  - Health endpoint, Bearer auth enforcement (`401` cases + valid token pass-through), outside-base-path bypass behavior, blank-base-path routing bypass behavior, and `enabled=false` bypass behavior.
   - BFF deposit owner/non-owner checks, session resume idempotency, step status reads, and OTP happy path.
   - BFF OTP expiry and OTP issuance rate-limit checks.
   - BFF wrong OTP deterministic error + attempt observability checks.
@@ -45,7 +45,6 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - Partial areas:
   - none.
 - Major missing groups:
-  - Bearer bypass/routing matrix (`enabled=false`).
   - Worker single-consumer lock validation.
   - SMS transient/permanent retry terminal-state coverage.
 - Keep this snapshot aligned with `.docker/e2e/CHECKLIST.md` whenever scenarios are added or marked complete.
