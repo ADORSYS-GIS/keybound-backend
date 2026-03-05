@@ -130,8 +130,8 @@ Redis readiness / locking:
 - [x] worker enforces single-consumer via Redis lock (two workers started -> only one processes).
 
 SMS retries:
-- [ ] transient SMS provider error is retried with backoff until success.
-- [ ] permanent SMS error moves to terminal state (no infinite retries).
+- [x] transient SMS provider error is retried with backoff until success.
+- [x] permanent SMS error moves to terminal state (no infinite retries).
 
 KYC_FIRST_DEPOSIT -> CUSS integration:
 - [x] success: staff confirm -> approve -> worker calls CUSS `registerCustomer` then `approveAndDeposit` -> instance completes.

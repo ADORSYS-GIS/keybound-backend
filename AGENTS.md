@@ -24,9 +24,9 @@ Tokenization/user-storage backend with three HTTP surfaces:
 
 ### Compose E2E Migration Snapshot (from `.docker/e2e/CHECKLIST.md`, 2026-03-05)
 - Overall checklist status:
-  - Implemented: `73`
+  - Implemented: `75`
   - Partial: `0`
-  - Missing: `2`
+  - Missing: `0`
 - Implemented areas:
   - Compose infrastructure and runner flow (`test-e2e-smoke`, `test-e2e-full`, log capture on failure).
   - Health endpoint, Bearer auth enforcement (`401` cases + valid token pass-through), outside-base-path bypass behavior, blank-base-path routing bypass behavior, and `enabled=false` bypass behavior.
@@ -41,12 +41,13 @@ Tokenization/user-storage backend with three HTTP surfaces:
   - Repeated staff approve is deterministic (`409 DEPOSIT_ALREADY_APPROVED`) and does not double-call CUSS approve-and-deposit.
   - KYC first-deposit CUSS failure paths (`registerCustomer`, `approveAndDeposit`) with manual retry and observability checks.
   - Worker single-consumer lock validation with dual-worker Compose startup and single active worker health verification.
+  - SMS retry behavior coverage: transient provider errors back off and retry to success; permanent errors terminate without infinite retries.
   - KC signature middleware matrix and KC surface CRUD/device race/idempotency coverage.
   - Representative cross-surface validation/not-found/conflict/internal error mapping checks.
 - Partial areas:
   - none.
 - Major missing groups:
-  - SMS transient/permanent retry terminal-state coverage.
+  - none.
 - Keep this snapshot aligned with `.docker/e2e/CHECKLIST.md` whenever scenarios are added or marked complete.
 
 `app/bins/backend` starts the server; `app/crates/backend-server` is a library crate.

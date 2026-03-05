@@ -10,8 +10,18 @@ use backend_repository::{
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
+use tokio::time::sleep;
 
 const OTP_MAX_TRIES: i32 = 5;
+const SMS_SEND_MAX_RETRIES: i32 = 2;
+const SMS_SEND_INITIAL_BACKOFF_SECONDS: i64 = 1;
+
+enum PhoneIssueOtpOutcome {
+    Succeeded,
+    RetryScheduled,
+    FailedTerminal,
+}
 
 pub struct Engine {
     state: Arc<AppState>,
@@ -379,11 +389,14 @@ impl Engine {
 
         match (instance.kind.as_str(), job.step_name.as_str()) {
             (KIND_KYC_PHONE_OTP, STEP_PHONE_ISSUE_OTP) => {
-                self.run_phone_issue_otp(job, claimed_attempt, sms_provider)
+                let outcome = self
+                    .run_phone_issue_otp(job, claimed_attempt, sms_provider)
                     .await?;
-                // After SMS sent, create manual gate.
-                self.ensure_manual_step_running(&instance.id, STEP_PHONE_VERIFY_OTP)
-                    .await?;
+                if matches!(outcome, PhoneIssueOtpOutcome::Succeeded) {
+                    // After SMS sent, create manual gate.
+                    self.ensure_manual_step_running(&instance.id, STEP_PHONE_VERIFY_OTP)
+                        .await?;
+                }
             }
             (KIND_KYC_FIRST_DEPOSIT, STEP_DEPOSIT_REGISTER_CUSTOMER) => {
                 self.run_deposit_register_customer(instance, job).await?;
@@ -411,8 +424,8 @@ impl Engine {
         job: StateMachineStepJob,
         attempt: backend_model::db::SmStepAttemptRow,
         sms_provider: Arc<dyn SmsProvider>,
-    ) -> Result<(), Error> {
-        let input = attempt.input;
+    ) -> Result<PhoneIssueOtpOutcome, Error> {
+        let input = attempt.input.clone();
         let msisdn = input
             .get("msisdn")
             .and_then(Value::as_str)
@@ -422,14 +435,37 @@ impl Engine {
         let otp_hash = hash_secret(&otp)?;
 
         // Merge into output.
-        let mut output = attempt.output.unwrap_or_else(|| json!({}));
+        let mut output = attempt.output.clone().unwrap_or_else(|| json!({}));
         if let Some(obj) = output.as_object_mut() {
             obj.insert("otp_hash".to_owned(), Value::String(otp_hash));
         }
 
-        // Send SMS first; if this fails, mark FAILED and do not leak OTP hash.
+        // Send SMS first; if this fails, classify as transient/permanent and decide retry.
         if let Err(err) = sms_provider.send_otp(msisdn, &otp).await {
             let finished = Utc::now();
+            let transient = sms_error_is_transient(&err);
+            let can_retry = transient && attempt.attempt_no <= SMS_SEND_MAX_RETRIES;
+
+            let mut retry_at = None;
+            if can_retry {
+                let backoff_seconds = sms_retry_backoff_seconds(attempt.attempt_no);
+                retry_at = Some(finished + Duration::seconds(backoff_seconds));
+
+                let retry_attempt = self
+                    .create_sms_retry_attempt(
+                        &attempt,
+                        retry_at.expect("retry_at should be set for can_retry"),
+                    )
+                    .await?;
+
+                self.schedule_step_retry(
+                    retry_attempt.instance_id.clone(),
+                    retry_attempt.step_name.clone(),
+                    retry_attempt.id.clone(),
+                    backoff_seconds,
+                );
+            }
+
             let _ = self
                 .state
                 .sm
@@ -439,15 +475,22 @@ impl Engine {
                         status: Some(ATTEMPT_STATUS_FAILED.to_owned()),
                         // Keep the prior output (otp_ref/expires/tries) but without a hash update.
                         output: None,
-                        error: Some(Some(json!({"error": err.to_string()}))),
+                        error: Some(Some(json!({
+                            "error": err.to_string(),
+                            "transient": transient,
+                            "will_retry": can_retry,
+                        }))),
                         queued_at: None,
                         started_at: None,
                         finished_at: Some(Some(finished)),
-                        next_retry_at: Some(None),
+                        next_retry_at: Some(retry_at),
                     },
                 )
                 .await?;
-            return Ok(());
+            if can_retry {
+                return Ok(PhoneIssueOtpOutcome::RetryScheduled);
+            }
+            return Ok(PhoneIssueOtpOutcome::FailedTerminal);
         }
 
         let finished = Utc::now();
@@ -468,7 +511,61 @@ impl Engine {
             )
             .await?;
 
-        Ok(())
+        Ok(PhoneIssueOtpOutcome::Succeeded)
+    }
+
+    async fn create_sms_retry_attempt(
+        &self,
+        previous_attempt: &backend_model::db::SmStepAttemptRow,
+        next_retry_at: chrono::DateTime<Utc>,
+    ) -> Result<backend_model::db::SmStepAttemptRow, Error> {
+        let next_attempt_no = self
+            .state
+            .sm
+            .next_attempt_no(&previous_attempt.instance_id, &previous_attempt.step_name)
+            .await?;
+
+        self.state
+            .sm
+            .create_step_attempt(SmStepAttemptCreateInput {
+                id: backend_id::sm_attempt_id()?,
+                instance_id: previous_attempt.instance_id.clone(),
+                step_name: previous_attempt.step_name.clone(),
+                attempt_no: next_attempt_no,
+                status: ATTEMPT_STATUS_QUEUED.to_owned(),
+                external_ref: previous_attempt.external_ref.clone(),
+                input: previous_attempt.input.clone(),
+                output: previous_attempt.output.clone(),
+                error: None,
+                queued_at: Some(Utc::now()),
+                started_at: None,
+                finished_at: None,
+                next_retry_at: Some(next_retry_at),
+            })
+            .await
+    }
+
+    fn schedule_step_retry(
+        &self,
+        instance_id: String,
+        step_name: String,
+        attempt_id: String,
+        backoff_seconds: i64,
+    ) {
+        let queue = self.state.sm_queue.clone();
+        tokio::spawn(async move {
+            sleep(StdDuration::from_secs(backoff_seconds as u64)).await;
+            if let Err(error) = queue
+                .enqueue(StateMachineStepJob {
+                    instance_id,
+                    step_name,
+                    attempt_id,
+                })
+                .await
+            {
+                tracing::warn!("failed to enqueue SMS retry job: {}", error);
+            }
+        });
     }
 
     async fn run_deposit_register_customer(
@@ -765,4 +862,19 @@ impl Engine {
             .await?;
         Ok(())
     }
+}
+
+fn sms_error_is_transient(error: &Error) -> bool {
+    match error {
+        Error::Http { error_key, .. } if *error_key == "SMS_SEND_PERMANENT" => false,
+        Error::Http { error_key, .. } if *error_key == "SMS_SEND_TRANSIENT" => true,
+        Error::Server(_) => true,
+        _ => true,
+    }
+}
+
+fn sms_retry_backoff_seconds(attempt_no: i32) -> i64 {
+    let exponent = attempt_no.saturating_sub(1).max(0) as u32;
+    let factor = 2_i64.saturating_pow(exponent);
+    SMS_SEND_INITIAL_BACKOFF_SECONDS.saturating_mul(factor).max(1)
 }

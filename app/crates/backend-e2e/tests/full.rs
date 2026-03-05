@@ -159,6 +159,22 @@ async fn full_17_worker_single_consumer_lock_enforced() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+#[file_serial]
+async fn full_18_sms_transient_error_retries_until_success() -> Result<()> {
+    let (env, client) = test_context()?;
+    scenario_sms_transient_error_retries_until_success(&client, &env).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[file_serial]
+async fn full_19_sms_permanent_error_terminal_no_infinite_retries() -> Result<()> {
+    let (env, client) = test_context()?;
+    scenario_sms_permanent_error_terminal_no_infinite_retries(&client, &env).await?;
+    Ok(())
+}
+
 async fn scenario_auth_bypass_outside_protected_paths(
     client: &reqwest::Client,
     env: &Env,
@@ -279,6 +295,146 @@ async fn scenario_worker_single_consumer_lock_enforced(
         primary_ok ^ secondary_ok,
         "expected exactly one worker health endpoint to be available with single-consumer lock; primary_ok={primary_ok}, secondary_ok={secondary_ok}"
     );
+
+    Ok(())
+}
+
+async fn scenario_sms_transient_error_retries_until_success(
+    client: &reqwest::Client,
+    env: &Env,
+) -> Result<()> {
+    let (token, subject) = get_client_token_and_subject(client, env).await?;
+    ensure_bff_fixtures(&env.database_url, &subject).await?;
+    reset_sms_sink(client, env).await?;
+
+    let sms_fault = send_json(
+        client,
+        Method::POST,
+        &format!("{}/__admin/faults", env.sms_sink_url),
+        None,
+        Some(json!({
+            "status": 503,
+            "body": { "error": "transient upstream" },
+            "count": 1
+        })),
+    )
+    .await?;
+    assert_eq!(sms_fault.status, 200, "{}", sms_fault.text);
+
+    let bff_base = format!("{}/bff", env.user_storage_url);
+    let staff_base = format!("{}/staff", env.user_storage_url);
+    let msisdn = "+237690000099";
+    let (session_id, _step_id, _otp_ref) =
+        create_phone_step_and_issue_otp(client, &bff_base, &token, &subject, msisdn, 120).await?;
+
+    wait_for_step_status(
+        client,
+        &staff_base,
+        &token,
+        &session_id,
+        "ISSUE_OTP",
+        "SUCCEEDED",
+        Duration::from_secs(45),
+    )
+    .await?;
+
+    let detail = send_json(
+        client,
+        Method::GET,
+        &format!("{}/api/kyc/instances/{}", staff_base, session_id),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(detail.status, 200, "{}", detail.text);
+    assert!(
+        step_attempts_count(&detail.body, "ISSUE_OTP") >= 2,
+        "transient SMS failure should create at least one retry attempt"
+    );
+
+    let _otp = wait_for_otp(client, env, msisdn, Duration::from_secs(30)).await?;
+
+    Ok(())
+}
+
+async fn scenario_sms_permanent_error_terminal_no_infinite_retries(
+    client: &reqwest::Client,
+    env: &Env,
+) -> Result<()> {
+    let (token, subject) = get_client_token_and_subject(client, env).await?;
+    ensure_bff_fixtures(&env.database_url, &subject).await?;
+    reset_sms_sink(client, env).await?;
+
+    let sms_fault = send_json(
+        client,
+        Method::POST,
+        &format!("{}/__admin/faults", env.sms_sink_url),
+        None,
+        Some(json!({
+            "status": 400,
+            "body": { "error": "invalid msisdn" },
+            "count": 5
+        })),
+    )
+    .await?;
+    assert_eq!(sms_fault.status, 200, "{}", sms_fault.text);
+
+    let bff_base = format!("{}/bff", env.user_storage_url);
+    let staff_base = format!("{}/staff", env.user_storage_url);
+    let (session_id, _step_id, _otp_ref) = create_phone_step_and_issue_otp(
+        client,
+        &bff_base,
+        &token,
+        &subject,
+        "+237690000100",
+        120,
+    )
+    .await?;
+
+    wait_for_step_status(
+        client,
+        &staff_base,
+        &token,
+        &session_id,
+        "ISSUE_OTP",
+        "FAILED",
+        Duration::from_secs(30),
+    )
+    .await?;
+
+    sleep(Duration::from_secs(4)).await;
+
+    let detail = send_json(
+        client,
+        Method::GET,
+        &format!("{}/api/kyc/instances/{}", staff_base, session_id),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(detail.status, 200, "{}", detail.text);
+    assert_eq!(
+        step_attempts_count(&detail.body, "ISSUE_OTP"),
+        1,
+        "permanent SMS failures should not create retry attempts"
+    );
+
+    let sms_messages = send_json(
+        client,
+        Method::GET,
+        &format!("{}/__admin/messages", env.sms_sink_url),
+        None,
+        None,
+    )
+    .await?;
+    assert_eq!(sms_messages.status, 200, "{}", sms_messages.text);
+    let delivered = sms_messages
+        .body
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
+    assert_eq!(delivered, 0, "permanent SMS failure should not deliver OTP");
 
     Ok(())
 }

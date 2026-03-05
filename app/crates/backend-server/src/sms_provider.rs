@@ -73,14 +73,23 @@ impl SmsProvider for ApiSmsProvider {
         let resp = req
             .send()
             .await
-            .map_err(|e| backend_core::Error::Server(e.to_string()))?;
+            .map_err(|e| {
+                backend_core::Error::internal("SMS_SEND_TRANSIENT", format!("sms transport error: {e}"))
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(backend_core::Error::Server(format!(
-                "SMS API returned {status}: {body}"
-            )));
+            if status.is_server_error() || status.as_u16() == 429 {
+                return Err(backend_core::Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    format!("SMS API returned {status}: {body}"),
+                ));
+            }
+            return Err(backend_core::Error::bad_request(
+                "SMS_SEND_PERMANENT",
+                format!("SMS API returned {status}: {body}"),
+            ));
         }
 
         Ok(())
