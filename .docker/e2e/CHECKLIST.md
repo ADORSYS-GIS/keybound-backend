@@ -127,7 +127,7 @@ Reports:
 ## Worker / Queue / Retry Scenarios
 
 Redis readiness / locking:
-- [ ] worker enforces single-consumer via Redis lock (two workers started -> only one processes).
+- [x] worker enforces single-consumer via Redis lock (two workers started -> only one processes).
 
 SMS retries:
 - [ ] transient SMS provider error is retried with backoff until success.

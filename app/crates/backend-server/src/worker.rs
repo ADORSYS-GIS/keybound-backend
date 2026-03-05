@@ -10,9 +10,14 @@ use backend_core::SmsProviderType;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::info;
+use tokio::sync::oneshot;
+use tokio::time::{Duration, interval};
+use tracing::{info, warn};
 
 const NOTIFICATION_QUEUE_NAMESPACE: &str = "backend:notifications";
+const WORKER_CONSUMER_LOCK_KEY: &str = "backend:worker:consumer-lock";
+const WORKER_CONSUMER_LOCK_TTL_SECONDS: i64 = 30;
+const WORKER_CONSUMER_LOCK_RENEW_SECONDS: u64 = 10;
 
 pub async fn ensure_redis_ready(redis_url: &str) -> backend_core::Result<()> {
     let client = redis::Client::open(redis_url)
@@ -35,6 +40,142 @@ pub async fn ensure_redis_ready(redis_url: &str) -> backend_core::Result<()> {
     }
 
     Ok(())
+}
+
+pub struct WorkerConsumerLock {
+    redis_url: String,
+    key: String,
+    owner: String,
+    stop_renew: Option<oneshot::Sender<()>>,
+    renew_handle: tokio::task::JoinHandle<()>,
+}
+
+impl WorkerConsumerLock {
+    pub async fn release(mut self) -> backend_core::Result<()> {
+        if let Some(stop) = self.stop_renew.take() {
+            let _ = stop.send(());
+        }
+        let _ = self.renew_handle.await;
+
+        let client = redis::Client::open(self.redis_url.clone())
+            .map_err(|error| backend_core::Error::Server(error.to_string()))?;
+        let mut connection = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|error| backend_core::Error::Server(error.to_string()))?;
+
+        let script = redis::Script::new(
+            r#"
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+                return redis.call('DEL', KEYS[1])
+            end
+            return 0
+            "#,
+        );
+        let _: i32 = script
+            .key(self.key)
+            .arg(self.owner)
+            .invoke_async(&mut connection)
+            .await
+            .map_err(|error| backend_core::Error::Server(error.to_string()))?;
+        Ok(())
+    }
+}
+
+pub async fn acquire_worker_consumer_lock(
+    redis_url: &str,
+) -> backend_core::Result<WorkerConsumerLock> {
+    let client = redis::Client::open(redis_url)
+        .map_err(|error| backend_core::Error::Server(error.to_string()))?;
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| backend_core::Error::Server(error.to_string()))?;
+
+    let owner = format!(
+        "pid:{}:ts:{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+
+    let acquired: Option<String> = redis::cmd("SET")
+        .arg(WORKER_CONSUMER_LOCK_KEY)
+        .arg(&owner)
+        .arg("NX")
+        .arg("EX")
+        .arg(WORKER_CONSUMER_LOCK_TTL_SECONDS)
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| backend_core::Error::Server(error.to_string()))?;
+
+    if acquired.is_none() {
+        return Err(backend_core::Error::Server(
+            "worker consumer lock already held by another instance".to_owned(),
+        ));
+    }
+
+    let redis_url_owned = redis_url.to_owned();
+    let owner_for_renew = owner.clone();
+    let key_for_renew = WORKER_CONSUMER_LOCK_KEY.to_owned();
+    let (stop_tx, mut stop_rx) = oneshot::channel();
+    let renew_handle = tokio::spawn(async move {
+        let client = match redis::Client::open(redis_url_owned.clone()) {
+            Ok(client) => client,
+            Err(error) => {
+                warn!("worker lock renew client init failed: {}", error);
+                return;
+            }
+        };
+        let mut connection = match client.get_multiplexed_async_connection().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                warn!("worker lock renew redis connect failed: {}", error);
+                return;
+            }
+        };
+        let renew_script = redis::Script::new(
+            r#"
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+                return redis.call('EXPIRE', KEYS[1], ARGV[2])
+            end
+            return 0
+            "#,
+        );
+
+        let mut tick = interval(Duration::from_secs(WORKER_CONSUMER_LOCK_RENEW_SECONDS));
+        loop {
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                _ = tick.tick() => {
+                    let renewed: Result<i32, redis::RedisError> = renew_script
+                        .key(&key_for_renew)
+                        .arg(&owner_for_renew)
+                        .arg(WORKER_CONSUMER_LOCK_TTL_SECONDS)
+                        .invoke_async(&mut connection)
+                        .await;
+                    match renewed {
+                        Ok(1) => {}
+                        Ok(_) => {
+                            warn!("worker consumer lock renew lost ownership");
+                            break;
+                        }
+                        Err(error) => {
+                            warn!("worker consumer lock renew failed: {}", error);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(WorkerConsumerLock {
+        redis_url: redis_url.to_owned(),
+        key: WORKER_CONSUMER_LOCK_KEY.to_owned(),
+        owner,
+        stop_renew: Some(stop_tx),
+        renew_handle,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

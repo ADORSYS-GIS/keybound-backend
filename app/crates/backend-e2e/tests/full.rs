@@ -10,8 +10,8 @@ use common::{
 };
 use hmac::{Hmac, Mac};
 use reqwest::Method;
-use serial_test::file_serial;
 use serde_json::{Value, json};
+use serial_test::file_serial;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -151,6 +151,14 @@ async fn full_16_auth_disabled_bypasses_bearer_layer() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+#[file_serial]
+async fn full_17_worker_single_consumer_lock_enforced() -> Result<()> {
+    let (env, client) = test_context()?;
+    scenario_worker_single_consumer_lock_enforced(&client, &env).await?;
+    Ok(())
+}
+
 async fn scenario_auth_bypass_outside_protected_paths(
     client: &reqwest::Client,
     env: &Env,
@@ -179,10 +187,9 @@ async fn scenario_auth_bypass_outside_protected_paths(
 }
 
 async fn scenario_auth_blank_base_path_bypass(client: &reqwest::Client, env: &Env) -> Result<()> {
-    let base_url = env
-        .user_storage_blank_base_url
-        .as_deref()
-        .ok_or_else(|| anyhow!("USER_STORAGE_BLANK_BASE_URL is required for blank base path test"))?;
+    let base_url = env.user_storage_blank_base_url.as_deref().ok_or_else(|| {
+        anyhow!("USER_STORAGE_BLANK_BASE_URL is required for blank base path test")
+    })?;
 
     let health_no_auth = client.get(format!("{base_url}/health")).send().await?;
     assert_eq!(health_no_auth.status().as_u16(), 200);
@@ -207,7 +214,9 @@ async fn scenario_auth_disabled_bypass(client: &reqwest::Client, env: &Env) -> R
     let base_url = env
         .user_storage_auth_disabled_url
         .as_deref()
-        .ok_or_else(|| anyhow!("USER_STORAGE_AUTH_DISABLED_URL is required for auth-disabled test"))?;
+        .ok_or_else(|| {
+            anyhow!("USER_STORAGE_AUTH_DISABLED_URL is required for auth-disabled test")
+        })?;
 
     let user_id = "usr_auth_disabled";
     ensure_bff_fixtures(&env.database_url, user_id).await?;
@@ -239,6 +248,46 @@ async fn scenario_auth_disabled_bypass(client: &reqwest::Client, env: &Env) -> R
     assert_ne!(staff_no_auth.status, 401, "{}", staff_no_auth.text);
 
     Ok(())
+}
+
+async fn scenario_worker_single_consumer_lock_enforced(
+    client: &reqwest::Client,
+    env: &Env,
+) -> Result<()> {
+    let primary = env
+        .worker_primary_url
+        .as_deref()
+        .ok_or_else(|| anyhow!("WORKER_PRIMARY_URL is required for worker lock test"))?;
+    let secondary = env
+        .worker_secondary_url
+        .as_deref()
+        .ok_or_else(|| anyhow!("WORKER_SECONDARY_URL is required for worker lock test"))?;
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (mut primary_ok, mut secondary_ok) = (false, false);
+
+    while Instant::now() < deadline {
+        primary_ok = worker_health_ok(client, primary).await;
+        secondary_ok = worker_health_ok(client, secondary).await;
+        if primary_ok ^ secondary_ok {
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    assert!(
+        primary_ok ^ secondary_ok,
+        "expected exactly one worker health endpoint to be available with single-consumer lock; primary_ok={primary_ok}, secondary_ok={secondary_ok}"
+    );
+
+    Ok(())
+}
+
+async fn worker_health_ok(client: &reqwest::Client, base_url: &str) -> bool {
+    match client.get(format!("{base_url}/health")).send().await {
+        Ok(response) => response.status().as_u16() == 200,
+        Err(_) => false,
+    }
 }
 
 async fn scenario_auth_enforcement(client: &reqwest::Client, env: &Env) -> Result<()> {
@@ -457,7 +506,11 @@ async fn scenario_bff_deposit_and_otp_flow(client: &reqwest::Client, env: &Env) 
         None,
     )
     .await?;
-    assert_eq!(detail_before_wrong_verify.status, 200, "{}", detail_before_wrong_verify.text);
+    assert_eq!(
+        detail_before_wrong_verify.status, 200,
+        "{}",
+        detail_before_wrong_verify.text
+    );
     let wrong_verify_attempts_before =
         step_attempts_count(&detail_before_wrong_verify.body, "VERIFY_OTP_ATTEMPT");
 
@@ -507,7 +560,11 @@ async fn scenario_bff_deposit_and_otp_flow(client: &reqwest::Client, env: &Env) 
         None,
     )
     .await?;
-    assert_eq!(detail_after_wrong_verify.status, 200, "{}", detail_after_wrong_verify.text);
+    assert_eq!(
+        detail_after_wrong_verify.status, 200,
+        "{}",
+        detail_after_wrong_verify.text
+    );
     assert!(
         step_attempts_count(&detail_after_wrong_verify.body, "VERIFY_OTP_ATTEMPT")
             > wrong_verify_attempts_before,
@@ -573,10 +630,7 @@ async fn scenario_bff_deposit_and_otp_flow(client: &reqwest::Client, env: &Env) 
     Ok(())
 }
 
-async fn scenario_bff_deposit_expiry_behavior(
-    client: &reqwest::Client,
-    env: &Env,
-) -> Result<()> {
+async fn scenario_bff_deposit_expiry_behavior(client: &reqwest::Client, env: &Env) -> Result<()> {
     let (token, subject) = get_client_token_and_subject(client, env).await?;
     ensure_bff_fixtures(&env.database_url, &subject).await?;
 
@@ -602,8 +656,12 @@ async fn scenario_bff_deposit_expiry_behavior(
         .ok_or_else(|| anyhow!("depositId must be a string"))?
         .to_owned();
 
-    force_deposit_expiry(&env.database_url, &deposit_id, chrono::Utc::now() - chrono::Duration::hours(3))
-        .await?;
+    force_deposit_expiry(
+        &env.database_url,
+        &deposit_id,
+        chrono::Utc::now() - chrono::Duration::hours(3),
+    )
+    .await?;
 
     let fetched = send_json(
         client,
@@ -2330,7 +2388,8 @@ async fn scenario_staff_deposit_approve_idempotency(
     );
 
     sleep(Duration::from_secs(2)).await;
-    let approve_calls_after = count_cuss_endpoint_requests(client, &env.cuss_url, "approve").await?;
+    let approve_calls_after =
+        count_cuss_endpoint_requests(client, &env.cuss_url, "approve").await?;
     assert_eq!(
         approve_calls_after, approve_calls_before,
         "repeated approve must not produce an additional approve-and-deposit call"
@@ -2557,12 +2616,19 @@ async fn scenario_error_mapping_representative(client: &reqwest::Client, env: &E
     let internal_step_type = send_json(
         client,
         Method::GET,
-        &format!("{}/internal/kyc/steps/{}__UNSUPPORTED_TYPE", bff_base, session_id),
+        &format!(
+            "{}/internal/kyc/steps/{}__UNSUPPORTED_TYPE",
+            bff_base, session_id
+        ),
         Some(&token),
         None,
     )
     .await?;
-    assert_eq!(internal_step_type.status, 500, "{}", internal_step_type.text);
+    assert_eq!(
+        internal_step_type.status, 500,
+        "{}",
+        internal_step_type.text
+    );
     assert_eq!(
         internal_step_type
             .body

@@ -25,6 +25,7 @@ The Rust runner uses environment variables passed by `just`:
 - `USER_STORAGE_URL`
 - `USER_STORAGE_BLANK_BASE_URL` (for blank-base-path auth bypass coverage in full suite)
 - `USER_STORAGE_AUTH_DISABLED_URL` (for `enabled=false` auth bypass coverage in full suite)
+- `WORKER_PRIMARY_URL` / `WORKER_SECONDARY_URL` (for single-consumer worker lock coverage in full suite)
 - `KEYCLOAK_URL`
 - `CUSS_URL`
 - `SMS_SINK_URL`

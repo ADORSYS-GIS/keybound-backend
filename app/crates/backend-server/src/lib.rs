@@ -72,6 +72,7 @@ pub async fn run_worker(core_config: &Config) -> Result<()> {
         .await
         .map_err(|error| backend_core::Error::DieselPool(error.to_string()))?;
     worker::ensure_redis_ready(&core_config.redis.url).await?;
+    let worker_lock = worker::acquire_worker_consumer_lock(&core_config.redis.url).await?;
 
     let state = Arc::new(state::AppState::from_config(core_config, pool).await?);
 
@@ -118,6 +119,9 @@ pub async fn run_worker(core_config: &Config) -> Result<()> {
     };
 
     let worker_res = worker::run(state).await;
+    if let Err(error) = worker_lock.release().await {
+        tracing::warn!("failed to release worker consumer lock: {}", error);
+    }
     if let Some(hs) = health_server {
         hs.abort();
     }
