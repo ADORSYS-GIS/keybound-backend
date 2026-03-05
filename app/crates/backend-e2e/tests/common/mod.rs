@@ -215,19 +215,17 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 user_id,
                 realm,
                 username,
-                first_name,
-                last_name,
+                full_name,
                 phone_number,
                 disabled,
                 created_at,
                 updated_at
-            ) VALUES ($1, 'e2e-testing', $2, 'E2E', 'Subject', '+237690123456', false, NOW(), NOW())
+            ) VALUES ($1, 'e2e-testing', $2, 'E2E Subject', '+237690123456', false, NOW(), NOW())
             ON CONFLICT (user_id) DO UPDATE
             SET
                 realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
+                full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
                 disabled = false,
                 updated_at = NOW()
@@ -244,8 +242,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 user_id,
                 realm,
                 username,
-                first_name,
-                last_name,
+                full_name,
                 phone_number,
                 disabled,
                 created_at,
@@ -254,8 +251,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 'usr_e2e_staff_001',
                 'staff',
                 'e2e-staff',
-                'E2E',
-                'Staff',
+                'E2E Staff',
                 '+237690000001',
                 false,
                 NOW(),
@@ -265,8 +261,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             SET
                 realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
+                full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
                 disabled = false,
                 updated_at = NOW()

@@ -26,6 +26,17 @@ impl UserRepository {
     }
 }
 
+fn normalize_full_name(name: Option<String>) -> Option<String> {
+    name.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
+}
+
 #[async_trait]
 impl UserRepo for UserRepository {
     async fn create_user(&self, req: &kc_map::UserUpsert) -> RepoResult<db::UserRow> {
@@ -43,8 +54,7 @@ impl UserRepo for UserRepository {
             user_id: user_id_val,
             realm: req.realm.clone(),
             username: req.username.clone(),
-            first_name: req.first_name.clone(),
-            last_name: req.last_name.clone(),
+            full_name: normalize_full_name(req.first_name.clone()),
             email: req.email.clone(),
             email_verified: req.email_verified.unwrap_or(false),
             phone_number: req
@@ -96,8 +106,7 @@ impl UserRepo for UserRepository {
             .set((
                 realm.eq(req.realm.clone()),
                 username.eq(req.username.clone()),
-                first_name.eq(req.first_name.clone()),
-                last_name.eq(req.last_name.clone()),
+                full_name.eq(normalize_full_name(req.first_name.clone())),
                 email.eq(req.email.clone()),
                 email_verified.eq(req.email_verified.unwrap_or(false)),
                 disabled.eq(!req.enabled.unwrap_or(true)),
@@ -136,8 +145,7 @@ impl UserRepo for UserRepository {
                 email
                     .ilike(pattern.clone())
                     .or(username.ilike(pattern.clone()))
-                    .or(first_name.ilike(pattern.clone()))
-                    .or(last_name.ilike(pattern)),
+                    .or(full_name.ilike(pattern)),
             );
         }
 
@@ -209,8 +217,7 @@ impl UserRepo for UserRepository {
             email: None,
             email_verified: false,
             phone_number: Some(phone.to_owned()),
-            first_name: None,
-            last_name: None,
+            full_name: None,
             fineract_customer_id: None,
             disabled: false,
             attributes: Some(attributes_json),

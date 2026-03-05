@@ -596,20 +596,14 @@ impl Engine {
             .cloned()
             .unwrap_or(Value::Null);
 
-        let first_name = approval
-            .get("first_name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        let last_name = approval
-            .get("last_name")
+        let full_name = approval
+            .get("full_name")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
 
         let req = RegistrationRequest {
-            first_name,
-            last_name,
+            full_name,
             email: None,
             phone,
             external_id: user_id.clone(),

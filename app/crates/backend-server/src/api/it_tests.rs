@@ -155,8 +155,7 @@ fn user_row(user_id: &str) -> backend_model::db::UserRow {
         user_id: user_id.to_owned(),
         realm: "realm-a".to_owned(),
         username: "alice".to_owned(),
-        first_name: Some("Alice".to_owned()),
-        last_name: Some("Tester".to_owned()),
+        full_name: Some("Alice Tester".to_owned()),
         email: Some("alice@example.test".to_owned()),
         email_verified: true,
         phone_number: Some("+4912345678".to_owned()),
@@ -1419,11 +1418,8 @@ async fn staff_approve_success() {
         None,
     );
 
-    let approve_body = gen_oas_server_staff::models::DepositApproveRequest::new(
-        "Alice".to_owned(),
-        "Tester".to_owned(),
-        2000.0,
-    );
+    let approve_body =
+        gen_oas_server_staff::models::DepositApproveRequest::new("Alice Tester".to_owned(), 2000.0);
     let response = api
         .staff_kyc_deposits_instance_id_approve_post(
             &Method::POST,
@@ -2049,11 +2045,7 @@ async fn staff_approve_rejects_non_deposit_instance() {
         MockMinioStorage::new(),
         None,
     );
-    let body = gen_oas_server_staff::models::DepositApproveRequest::new(
-        "A".to_owned(),
-        "B".to_owned(),
-        10.0,
-    );
+    let body = gen_oas_server_staff::models::DepositApproveRequest::new("A".to_owned(), 10.0);
     let error = api
         .staff_kyc_deposits_instance_id_approve_post(
             &Method::POST,
@@ -2113,8 +2105,7 @@ async fn cuss_oas_client_register_success_and_error() {
     let register_resp = gen_oas_client_cuss::apis::registration_api::register_customer(
         &config,
         gen_oas_client_cuss::models::RegistrationRequest {
-            first_name: "Alice".to_owned(),
-            last_name: "Tester".to_owned(),
+            full_name: "Alice Tester".to_owned(),
             email: None,
             phone: "+49111111".to_owned(),
             external_id: "usr_001".to_owned(),

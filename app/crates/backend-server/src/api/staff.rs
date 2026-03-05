@@ -272,8 +272,7 @@ impl KycStateMachines<Error> for BackendApi {
         // Persist approval context.
         let mut ctx = instance.context;
         let approval = json!({
-            "first_name": body.first_name,
-            "last_name": body.last_name,
+            "full_name": body.full_name,
             "deposit_amount": body.deposit_amount,
         });
         if let Some(obj) = ctx.as_object_mut() {

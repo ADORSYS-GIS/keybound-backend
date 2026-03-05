@@ -80,21 +80,15 @@ components:
     RegistrationRequest:
       type: object
       required:
-      - firstName
-      - lastName
+      - fullName
       - phone
       - externalId
       properties:
-        firstName:
+        fullName:
           type: string
-          description: The customer's first name.
+          description: The customer's full name.
           examples:
-          - Brenda
-        lastName:
-          type: string
-          description: The customer's last name.
-          examples:
-          - Biya
+          - Brenda Biya
         email:
           type: string
           format: email

@@ -31,23 +31,14 @@ impl StateMachineRepository {
             .map_err(|e| backend_core::Error::DieselPool(e.to_string()))
     }
 
-    fn build_contact_full_name(
-        first_name: Option<String>,
-        last_name: Option<String>,
-        username: String,
-    ) -> String {
-        let first = first_name.unwrap_or_default().trim().to_owned();
-        let last = last_name.unwrap_or_default().trim().to_owned();
-
-        if !first.is_empty() && !last.is_empty() {
-            format!("{first} {last}")
-        } else if !first.is_empty() {
-            first
-        } else if !last.is_empty() {
-            last
-        } else {
-            username
+    fn build_contact_full_name(full_name: Option<String>, username: String) -> String {
+        if let Some(full) = full_name {
+            let trimmed = full.trim().to_owned();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
         }
+        username
     }
 }
 
@@ -481,13 +472,7 @@ impl StateMachineRepo for StateMachineRepository {
         &self,
         user_id_val: &str,
     ) -> RepoResult<(String, String, String)> {
-        type CandidateRow = (
-            String,
-            Option<String>,
-            Option<String>,
-            String,
-            Option<String>,
-        );
+        type CandidateRow = (String, Option<String>, String, Option<String>);
 
         async fn fetch_candidate(
             conn: &mut AsyncPgConnection,
@@ -513,8 +498,7 @@ impl StateMachineRepo for StateMachineRepository {
                 .order(app_user::created_at.asc())
                 .select((
                     app_user::user_id,
-                    app_user::first_name,
-                    app_user::last_name,
+                    app_user::full_name,
                     app_user::username,
                     app_user::phone_number,
                 ))
@@ -538,7 +522,7 @@ impl StateMachineRepo for StateMachineRepository {
             None
         };
 
-        let Some((staff_id, first_name, last_name, username, phone_number)) =
+        let Some((staff_id, full_name, username, phone_number)) =
             preferred.or(fallback).or(requester_fallback)
         else {
             return Err(Error::bad_request(
@@ -556,7 +540,7 @@ impl StateMachineRepo for StateMachineRepository {
 
         Ok((
             staff_id,
-            StateMachineRepository::build_contact_full_name(first_name, last_name, username),
+            StateMachineRepository::build_contact_full_name(full_name, username),
             staff_phone_number,
         ))
     }

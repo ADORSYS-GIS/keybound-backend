@@ -374,12 +374,13 @@ components:
       type: object
       additionalProperties: false
       properties:
-        firstName: { type: string }
-        lastName: { type: string }
+        fullName:
+          type: string
+          description: Full name of the customer as confirmed by staff.
         depositAmount:
           type: number
           minimum: 0.01
-      required: [ firstName, lastName, depositAmount ]
+      required: [ fullName, depositAmount ]
 
     ReportSummary:
       type: object

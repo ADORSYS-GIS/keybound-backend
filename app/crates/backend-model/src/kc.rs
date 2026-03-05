@@ -194,12 +194,17 @@ mod tests {
 
 impl From<db::UserRow> for UserRecordDto {
     fn from(row: db::UserRow) -> Self {
+        let (first_name, last_name) = match row.full_name.clone() {
+            Some(full) => (Some(full), Some(String::new())),
+            None => (None, None),
+        };
+
         Self {
             user_id: row.user_id,
             realm: Some(row.realm),
             username: row.username,
-            first_name: row.first_name,
-            last_name: row.last_name,
+            first_name,
+            last_name,
             email: row.email,
             enabled: !row.disabled,
             email_verified: row.email_verified,

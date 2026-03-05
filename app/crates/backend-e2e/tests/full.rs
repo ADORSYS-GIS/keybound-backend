@@ -1623,8 +1623,7 @@ async fn scenario_staff_deposit_flow_triggers_worker_and_cuss(
         &format!("{}/api/kyc/deposits/{}/approve", staff_base, instance_id),
         Some(&token),
         Some(json!({
-            "firstName": "E2E",
-            "lastName": "Runner",
+            "fullName": "E2E Runner",
             "depositAmount": 2500
         })),
     )
@@ -2148,8 +2147,7 @@ async fn scenario_kc_signature_and_surface(client: &reqwest::Client, env: &Env) 
         Some(json!({
             "realm": realm,
             "username": username,
-            "first_name": "KC",
-            "last_name": "User",
+            "full_name": "KC User",
             "enabled": true
         })),
     )
@@ -2196,7 +2194,7 @@ async fn scenario_kc_signature_and_surface(client: &reqwest::Client, env: &Env) 
         Some(json!({
             "realm": realm,
             "username": username,
-            "first_name": "KC-UPDATED",
+            "full_name": "KC-UPDATED",
             "enabled": true
         })),
     )
@@ -2521,8 +2519,7 @@ async fn scenario_staff_deposit_approve_idempotency(
         &format!("{}/api/kyc/deposits/{}/approve", staff_base, instance_id),
         Some(&token),
         Some(json!({
-            "firstName": "Retry",
-            "lastName": "Flow",
+            "fullName": "Retry Flow",
             "depositAmount": 3600
         })),
     )
@@ -3026,8 +3023,7 @@ async fn create_confirm_and_approve_deposit_instance(
         &format!("{}/api/kyc/deposits/{}/approve", staff_base, instance_id),
         Some(token),
         Some(json!({
-            "firstName": "Retry",
-            "lastName": "Flow",
+            "fullName": "Retry Flow",
             "depositAmount": 3600
         })),
     )
