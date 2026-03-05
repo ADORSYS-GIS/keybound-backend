@@ -22,6 +22,7 @@ async fn full_suite() -> Result<()> {
     let client = http_client()?;
 
     scenario_auth_enforcement(&client, &env).await?;
+    scenario_auth_bypass_outside_protected_paths(&client, &env).await?;
     scenario_bff_deposit_and_otp_flow(&client, &env).await?;
     scenario_bff_deposit_expiry_behavior(&client, &env).await?;
     scenario_bff_session_resume_and_otp_limits(&client, &env).await?;
@@ -34,6 +35,33 @@ async fn full_suite() -> Result<()> {
     scenario_staff_deposit_approve_idempotency(&client, &env).await?;
     scenario_worker_cuss_failures_and_manual_retries(&client, &env).await?;
     scenario_error_mapping_representative(&client, &env).await?;
+
+    Ok(())
+}
+
+async fn scenario_auth_bypass_outside_protected_paths(
+    client: &reqwest::Client,
+    env: &Env,
+) -> Result<()> {
+    let health_no_auth = client
+        .get(format!("{}/health", env.user_storage_url))
+        .send()
+        .await?;
+    assert_eq!(health_no_auth.status().as_u16(), 200);
+
+    let health_with_invalid_bearer = client
+        .get(format!("{}/health", env.user_storage_url))
+        .header("Authorization", "Bearer definitely-invalid-token")
+        .send()
+        .await?;
+    assert_eq!(health_with_invalid_bearer.status().as_u16(), 200);
+
+    let missing_with_invalid_bearer = client
+        .get(format!("{}/does-not-exist-e2e", env.user_storage_url))
+        .header("Authorization", "Bearer definitely-invalid-token")
+        .send()
+        .await?;
+    assert_eq!(missing_with_invalid_bearer.status().as_u16(), 404);
 
     Ok(())
 }
