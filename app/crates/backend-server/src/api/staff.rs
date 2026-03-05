@@ -417,19 +417,33 @@ fn build_step_states(
     kind: &str,
     attempts: &[backend_model::db::SmStepAttemptRow],
 ) -> Result<Vec<models::StepState>, Error> {
-    let steps = steps_for_kind(kind);
-    let mut out = Vec::with_capacity(steps.len());
-    for step in steps {
+    let known_steps = steps_for_kind(kind);
+    let mut extra_steps = attempts
+        .iter()
+        .map(|attempt| attempt.step_name.clone())
+        .filter(|step_name| !known_steps.iter().any(|known| known == &step_name.as_str()))
+        .collect::<Vec<_>>();
+    extra_steps.sort();
+    extra_steps.dedup();
+
+    let mut step_names = known_steps
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    step_names.extend(extra_steps);
+
+    let mut out = Vec::with_capacity(step_names.len());
+    for step_name in step_names {
         let mut step_attempts = attempts
             .iter()
-            .filter(|a| a.step_name == step)
+            .filter(|a| a.step_name == step_name)
             .cloned()
             .collect::<Vec<_>>();
         step_attempts.sort_by_key(|a| a.attempt_no);
         let latest = step_attempts.last().cloned();
 
         out.push(models::StepState {
-            step_name: step.to_owned(),
+            step_name,
             latest_attempt: latest.clone().map(attempt_to_dto),
             attempts: step_attempts.into_iter().map(attempt_to_dto).collect(),
         });

@@ -89,13 +89,13 @@ Deposits:
 
 Sessions / steps:
 - [x] `POST /internal/kyc/sessions` (`internalStartSession`) create/resume is idempotent (or deterministic).
-- [~] `POST /internal/kyc/steps` (`internalCreateStep`) creates each supported step type (phone/email/address/identity).
+- [x] `POST /internal/kyc/steps` (`internalCreateStep`) creates each supported step type (phone/email/address/identity).
 - [x] `GET /internal/kyc/steps/{stepId}` (`internalGetStep`) returns correct data/status transitions.
 
 Phone OTP:
 - [x] `POST /internal/kyc/phone/otp/issue` (`internalIssueOtp`) issues challenge; SMS is sent (captured by stub/sink).
 - [x] verify correct OTP -> step moves to verified state.
-- [~] verify wrong OTP -> deterministic error and `sm_step_attempt` increments.
+- [x] verify wrong OTP -> deterministic error and `sm_step_attempt` increments.
 - [x] verify expired OTP -> deterministic error.
 - [x] rate limits / max attempts enforced (if configured).
 
@@ -145,4 +145,4 @@ Across at least one BFF and one Staff endpoint:
 - [x] validation errors map to stable status + payload shape.
 - [x] not found maps to stable status + payload shape.
 - [x] conflict maps to stable status + payload shape.
-- [ ] unexpected internal error maps to stable status + payload shape.
+- [x] unexpected internal error maps to stable status + payload shape.

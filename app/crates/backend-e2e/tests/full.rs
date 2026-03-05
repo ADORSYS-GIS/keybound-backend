@@ -115,6 +115,7 @@ async fn scenario_bff_deposit_and_otp_flow(client: &reqwest::Client, env: &Env) 
     reset_sms_sink(client, env).await?;
 
     let bff_base = format!("{}/bff", env.user_storage_url);
+    let staff_base = format!("{}/staff", env.user_storage_url);
 
     let deposit_response = send_json(
         client,
@@ -245,6 +246,18 @@ async fn scenario_bff_deposit_and_otp_flow(client: &reqwest::Client, env: &Env) 
     let otp = wait_for_otp(client, env, "+237690000033", Duration::from_secs(30)).await?;
     let wrong_code = if otp == "000000" { "000001" } else { "000000" };
 
+    let detail_before_wrong_verify = send_json(
+        client,
+        Method::GET,
+        &format!("{}/api/kyc/instances/{}", staff_base, session_id),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(detail_before_wrong_verify.status, 200, "{}", detail_before_wrong_verify.text);
+    let wrong_verify_attempts_before =
+        step_attempts_count(&detail_before_wrong_verify.body, "VERIFY_OTP_ATTEMPT");
+
     let wrong_verify = send_json(
         client,
         Method::POST,
@@ -281,6 +294,21 @@ async fn scenario_bff_deposit_and_otp_flow(client: &reqwest::Client, env: &Env) 
             .and_then(|body| body.get("stepStatus"))
             .and_then(Value::as_str),
         Some("IN_PROGRESS")
+    );
+
+    let detail_after_wrong_verify = send_json(
+        client,
+        Method::GET,
+        &format!("{}/api/kyc/instances/{}", staff_base, session_id),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(detail_after_wrong_verify.status, 200, "{}", detail_after_wrong_verify.text);
+    assert!(
+        step_attempts_count(&detail_after_wrong_verify.body, "VERIFY_OTP_ATTEMPT")
+            > wrong_verify_attempts_before,
+        "wrong OTP verification should append VERIFY_OTP_ATTEMPT entry"
     );
 
     let verify = send_json(
@@ -477,6 +505,52 @@ async fn scenario_bff_session_resume_and_otp_limits(
     assert!(
         email_step_id.ends_with("__EMAIL"),
         "expected deterministic EMAIL step id"
+    );
+
+    let address_step = send_json(
+        client,
+        Method::POST,
+        &format!("{}/internal/kyc/steps", bff_base),
+        Some(&token),
+        Some(json!({
+            "sessionId": session_id_two,
+            "userId": subject,
+            "type": "ADDRESS",
+            "policy": {}
+        })),
+    )
+    .await?;
+    assert_eq!(address_step.status, 201, "{}", address_step.text);
+    let address_step_id = require_json_field(&address_step.body, "id")?
+        .as_str()
+        .ok_or_else(|| anyhow!("address step id must be a string"))?
+        .to_owned();
+    assert!(
+        address_step_id.ends_with("__ADDRESS"),
+        "expected deterministic ADDRESS step id"
+    );
+
+    let identity_step = send_json(
+        client,
+        Method::POST,
+        &format!("{}/internal/kyc/steps", bff_base),
+        Some(&token),
+        Some(json!({
+            "sessionId": session_id_two,
+            "userId": subject,
+            "type": "IDENTITY",
+            "policy": {}
+        })),
+    )
+    .await?;
+    assert_eq!(identity_step.status, 201, "{}", identity_step.text);
+    let identity_step_id = require_json_field(&identity_step.body, "id")?
+        .as_str()
+        .ok_or_else(|| anyhow!("identity step id must be a string"))?
+        .to_owned();
+    assert!(
+        identity_step_id.ends_with("__IDENTITY"),
+        "expected deterministic IDENTITY step id"
     );
 
     let mut last_otp_ref = String::new();
@@ -2276,6 +2350,24 @@ async fn scenario_error_mapping_representative(client: &reqwest::Client, env: &E
     let session_id = require_json_field(&session.body, "id")?
         .as_str()
         .ok_or_else(|| anyhow!("session id must be a string"))?;
+
+    let internal_step_type = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/kyc/steps/{}__UNSUPPORTED_TYPE", bff_base, session_id),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(internal_step_type.status, 500, "{}", internal_step_type.text);
+    assert_eq!(
+        internal_step_type
+            .body
+            .as_ref()
+            .and_then(|body| body.get("error_key"))
+            .and_then(Value::as_str),
+        Some("INVALID_STEP_TYPE")
+    );
 
     let staff_retry_validation = send_json(
         client,

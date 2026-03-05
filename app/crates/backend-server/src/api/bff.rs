@@ -35,6 +35,7 @@ const MAGIC_RATE_LIMIT_MAX_ISSUES: i64 = 5;
 
 const OTP_STEP_TYPE: &str = "PHONE";
 const MAGIC_STEP_TYPE: &str = "EMAIL";
+const OTP_VERIFY_ATTEMPT_STEP: &str = "VERIFY_OTP_ATTEMPT";
 
 fn step_id(session_id: &str, step_type: &str) -> String {
     format!("{session_id}__{step_type}")
@@ -196,13 +197,6 @@ impl Steps<Error> for BackendApi {
         }
 
         let step_type = body.r_type.to_string();
-        if step_type != OTP_STEP_TYPE && step_type != MAGIC_STEP_TYPE {
-            return Err(Error::bad_request(
-                "STEP_TYPE_NOT_SUPPORTED",
-                "Only PHONE and EMAIL steps are supported in this revamp",
-            ));
-        }
-
         let id = step_id(&session.id, &step_type);
 
         // Idempotent: ensure stepIds contains the deterministic id.
@@ -472,6 +466,40 @@ impl Notifications<Error> for BackendApi {
                 ),
             ));
         }
+
+        // Persist wrong-code verification attempts for observability.
+        let verify_attempt_no = self
+            .state
+            .sm
+            .next_attempt_no(&session.id, OTP_VERIFY_ATTEMPT_STEP)
+            .await?;
+        let verify_attempt_finished_at = Utc::now();
+        let _ = self
+            .state
+            .sm
+            .create_step_attempt(SmStepAttemptCreateInput {
+                id: backend_id::sm_attempt_id()?,
+                instance_id: session.id.clone(),
+                step_name: OTP_VERIFY_ATTEMPT_STEP.to_owned(),
+                attempt_no: verify_attempt_no,
+                status: ATTEMPT_STATUS_FAILED.to_owned(),
+                external_ref: Some(body.otp_ref.clone()),
+                input: json!({
+                    "otp_ref": body.otp_ref,
+                    "code_len": body.code.len()
+                }),
+                output: Some(json!({
+                    "reason": "INVALID"
+                })),
+                error: Some(json!({
+                    "error_key": "OTP_INVALID"
+                })),
+                queued_at: None,
+                started_at: Some(verify_attempt_finished_at),
+                finished_at: Some(verify_attempt_finished_at),
+                next_retry_at: None,
+            })
+            .await?;
 
         // Decrement tries_left in attempt output.
         let mut new_out = output.clone();
