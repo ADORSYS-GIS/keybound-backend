@@ -10,5 +10,6 @@ gen*
 *tmp*
 
 *.js
+*.log
 
 node_modules

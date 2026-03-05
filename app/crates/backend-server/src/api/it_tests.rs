@@ -1355,17 +1355,23 @@ async fn staff_approve_success() {
         .times(1)
         .return_once(|input| Ok(sm_event_row(&input.instance_id)));
     sm.expect_get_latest_step_attempt()
-        .times(1)
-        .return_once(|_, _| {
-            Ok(Some(sm_attempt_row(
-                "att_approval",
-                "ins_dep_approve",
-                STEP_DEPOSIT_AWAIT_APPROVAL,
-                ATTEMPT_STATUS_RUNNING,
-                1,
-                None,
-                None,
-            )))
+        .times(2)
+        .returning(|instance_id, step_name| {
+            if step_name == STEP_DEPOSIT_REGISTER_CUSTOMER {
+                Ok(None)
+            } else if step_name == STEP_DEPOSIT_AWAIT_APPROVAL {
+                Ok(Some(sm_attempt_row(
+                    "att_approval",
+                    instance_id,
+                    step_name,
+                    ATTEMPT_STATUS_RUNNING,
+                    1,
+                    None,
+                    None,
+                )))
+            } else {
+                Ok(None)
+            }
         });
     sm.expect_patch_step_attempt()
         .times(1)
@@ -1536,7 +1542,7 @@ async fn bff_create_step_session_not_found() {
 }
 
 #[tokio::test]
-async fn bff_create_step_unsupported_type() {
+async fn bff_create_step_address_success() {
     let session = sm_instance_row(
         "ins_otp_005",
         KIND_KYC_PHONE_OTP,
@@ -1548,6 +1554,12 @@ async fn bff_create_step_unsupported_type() {
     sm.expect_get_instance()
         .times(1)
         .return_once(move |_| Ok(Some(session)));
+    sm.expect_update_instance_context()
+        .times(1)
+        .return_once(|_, _| Ok(()));
+    sm.expect_list_step_attempts()
+        .times(1)
+        .return_once(|_| Ok(vec![]));
 
     let api = build_api(
         sm,
@@ -1558,7 +1570,7 @@ async fn bff_create_step_unsupported_type() {
         MockMinioStorage::new(),
         None,
     );
-    let error = api
+    let response = api
         .internal_create_step(
             &Method::POST,
             &host(),
@@ -1571,8 +1583,11 @@ async fn bff_create_step_unsupported_type() {
             ),
         )
         .await
-        .expect_err("expected unsupported type");
-    assert_http_error(error, 400, "STEP_TYPE_NOT_SUPPORTED");
+        .expect("expected address step to be created");
+    assert!(matches!(
+        response,
+        gen_oas_server_bff::apis::steps::InternalCreateStepResponse::Status201_StepCreated(_)
+    ));
 }
 
 #[tokio::test]
