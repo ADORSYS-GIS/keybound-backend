@@ -1,30 +1,215 @@
 openapi: 3.1.0
 info:
-  title: KYC Backend Internal API
-  version: 0.1.4
+  title: KYC Backend Internal API (BFF)
+  version: 0.2.0
   description: >
-    Internal API for KYC orchestration, evidence storage metadata, OTP/email issuance, and staff review operations. Intended for trusted callers only (BFF, staff console, jobs).
+    Internal BFF-facing API for KYC orchestration. The API keeps a generic
+    session model and exposes case-specific paths for phone OTP, email magic,
+    deposits, and uploads.
 servers:
   - url: https://kyc-internal.example.local
 tags:
+  - name: sessions
   - name: steps
-  - name: uploads
-  - name: notifications
+  - name: phone-otp
+  - name: email-magic
   - name: deposits
+  - name: uploads
 
 security:
   - BearerAuth: [ ]
 
 paths:
-  /internal/deposits/phone:
+  /internal/kyc/sessions:
+    post:
+      tags: [ sessions ]
+      summary: Create or resume KYC session
+      description: Creates or resumes a session for a user and flow.
+      operationId: internalCreateKycSession
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKycSessionRequest"
+      responses:
+        "201":
+          description: Session created or resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycSession"
+
+  /internal/kyc/sessions/{sessionId}:
+    get:
+      tags: [ sessions ]
+      summary: Get KYC session
+      operationId: internalGetKycSession
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycSession"
+
+  /internal/kyc/phone-otp/steps:
+    post:
+      tags: [ phone-otp ]
+      summary: Create or ensure phone OTP step
+      operationId: internalCreatePhoneOtpStep
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCaseStepRequest"
+      responses:
+        "201":
+          description: Step created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycStep"
+
+  /internal/kyc/email-magic/steps:
+    post:
+      tags: [ email-magic ]
+      summary: Create or ensure email magic step
+      operationId: internalCreateEmailMagicStep
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCaseStepRequest"
+      responses:
+        "201":
+          description: Step created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycStep"
+
+  /internal/kyc/steps/{stepId}:
+    get:
+      tags: [ steps ]
+      summary: Get KYC step
+      operationId: internalGetKycStep
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/StepId"
+      responses:
+        "200":
+          description: Step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycStep"
+
+  /internal/kyc/phone-otp/challenges:
+    post:
+      tags: [ phone-otp ]
+      summary: Issue phone OTP challenge
+      operationId: internalIssuePhoneOtpChallenge
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuePhoneOtpRequest"
+      responses:
+        "200":
+          description: OTP challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpChallengeInternal"
+
+  /internal/kyc/phone-otp/verifications:
+    post:
+      tags: [ phone-otp ]
+      summary: Verify phone OTP challenge
+      operationId: internalVerifyPhoneOtpChallenge
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyPhoneOtpRequest"
+      responses:
+        "200":
+          description: Verification outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyOutcome"
+
+  /internal/kyc/email-magic/challenges:
+    post:
+      tags: [ email-magic ]
+      summary: Issue magic-email challenge
+      operationId: internalIssueMagicEmailChallenge
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueMagicEmailRequest"
+      responses:
+        "200":
+          description: Magic email challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MagicEmailChallengeInternal"
+
+  /internal/kyc/email-magic/verifications:
+    post:
+      tags: [ email-magic ]
+      summary: Verify magic-email challenge
+      operationId: internalVerifyMagicEmailChallenge
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyMagicEmailRequest"
+      responses:
+        "200":
+          description: Verification outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyOutcome"
+
+  /internal/kyc/deposits/phone/requests:
     post:
       tags: [ deposits ]
       summary: Create phone deposit request
       description: >
-        Creates a mobile money deposit request. The system selects the target
-        staff member and returns the contact information (name and phone number)
-        to which the caller must send the funds.
-      operationId: internalCreatePhoneDeposit
+        Creates a mobile-money deposit request for the provided session and
+        returns the selected staff contact details.
+      operationId: internalCreatePhoneDepositRequest
       security:
         - BearerAuth: [ ]
       requestBody:
@@ -41,19 +226,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PhoneDepositResponse"
 
-  /internal/deposits/{depositId}:
+  /internal/kyc/deposits/phone/requests/{depositRequestId}:
     get:
       tags: [ deposits ]
       summary: Get phone deposit request
-      operationId: internalGetPhoneDeposit
+      operationId: internalGetPhoneDepositRequest
       security:
         - BearerAuth: [ ]
       parameters:
-        - name: depositId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/DepositRequestId"
       responses:
         "200":
           description: Deposit request
@@ -62,161 +243,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/PhoneDepositResponse"
 
-  /internal/kyc/sessions:
-    post:
-      tags: [ steps ]
-      summary: Create/resume session for a user
-      description: Allocates or refreshes a backend session tied to a user ID, ensuring steps are tracked consistently.
-      operationId: internalStartSession
-      security:
-        - BearerAuth: [ ]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InternalStartSessionRequest"
-      responses:
-        "201":
-          description: Session
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/KycSessionInternal"
-
-  /internal/kyc/steps:
-    post:
-      tags: [ steps ]
-      summary: Create a KYC step
-      description: Adds a new verification step (phone, email, address, or identity) to the ongoing session and returns its metadata.
-      operationId: internalCreateStep
-      security:
-        - BearerAuth: [ ]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateStepRequest"
-      responses:
-        "201":
-          description: Step created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/KycStepInternal"
-
-  /internal/kyc/steps/{stepId}:
-    get:
-      tags: [ steps ]
-      summary: Get step
-      description: Retrieves the internal state, data payload, and policy of the specified step for orchestration or staff tooling.
-      operationId: internalGetStep
-      security:
-        - BearerAuth: [ ]
-      parameters:
-        - $ref: "#/components/parameters/StepId"
-      responses:
-        "200":
-          description: Step
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/KycStepInternal"
-
-  /internal/kyc/phone/otp/issue:
-    post:
-      tags: [ notifications ]
-      summary: Issue OTP
-      description: Requests the underlying SMS gateway to issue a one-time code for the given msisdn and step.
-      operationId: internalIssueOtp
-      security:
-        - BearerAuth: [ ]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/IssueOtpRequest"
-      responses:
-        "200":
-          description: Challenge
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OtpChallengeInternal"
-
-  /internal/kyc/phone/otp/verify:
-    post:
-      tags: [ notifications ]
-      summary: Verify OTP
-      description: Confirms the submitted OTP against the stored challenge, returning the verification outcome and updated step status.
-      operationId: internalVerifyOtp
-      security:
-        - BearerAuth: [ ]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VerifyOtpInternalRequest"
-      responses:
-        "200":
-          description: Verification outcome
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VerifyOutcome"
-
-  /internal/kyc/email/magic/issue:
-    post:
-      tags: [ notifications ]
-      summary: Issue magic email token
-      description: Generates a magic email token tied to a step so the client can deliver a secure link or code to the user.
-      operationId: internalIssueMagicEmail
-      security:
-        - BearerAuth: [ ]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/IssueMagicEmailRequest"
-      responses:
-        "200":
-          description: Challenge
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MagicEmailChallengeInternal"
-
-  /internal/kyc/email/magic/verify:
-    post:
-      tags: [ notifications ]
-      summary: Verify magic token
-      description: Validates the email token and surfaces the result (verified/invalid/expired) along with the current step status.
-      operationId: internalVerifyMagicEmail
-      security:
-        - BearerAuth: [ ]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VerifyMagicEmailRequest"
-      responses:
-        "200":
-          description: Outcome
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VerifyOutcome"
-
-  /internal/uploads/presign:
+  /internal/kyc/uploads/presign:
     post:
       tags: [ uploads ]
-      summary: Create presigned upload (S3-compatible)
-      description: Provides presigned upload details (single/multipart) and encryption policy for evidence ingestion.
+      summary: Create presigned upload
+      description: Returns upload target and metadata for a KYC step.
       operationId: internalPresignUpload
       security:
         - BearerAuth: [ ]
@@ -228,17 +259,16 @@ paths:
               $ref: "#/components/schemas/InternalPresignRequest"
       responses:
         "200":
-          description: Presign response
+          description: Presigned upload response
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PresignUploadResponseInternal"
 
-  /internal/uploads/complete:
+  /internal/kyc/uploads/complete:
     post:
       tags: [ uploads ]
-      summary: Finalize upload and register evidence
-      description: Closes the upload session, optionally verifies checksum, and registers evidence metadata with the step.
+      summary: Complete upload and register evidence
       operationId: internalCompleteUpload
       security:
         - BearerAuth: [ ]
@@ -262,109 +292,49 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Generic bearer token used by services and staff consoles.
+      description: Generic bearer token used by trusted internal callers.
 
   parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 8
     StepId:
       name: stepId
       in: path
       required: true
       schema:
         $ref: "#/components/schemas/StepIdValue"
-    Page:
-      name: page
-      in: query
-      required: false
+    DepositRequestId:
+      name: depositRequestId
+      in: path
+      required: true
       schema:
-        $ref: "#/components/schemas/PageNumber"
-      description: Page number (default 1).
-    Limit:
-      name: limit
-      in: query
-      required: false
-      schema:
-        $ref: "#/components/schemas/PageSize"
-      description: Page size (default 20).
+        type: string
+        minLength: 8
 
   schemas:
-    DepositProvider:
+    KycFlowType:
       type: string
       enum:
-        - MTN_CM
-        - ORANGE_CM
+        - PHONE_OTP
+        - EMAIL_MAGIC
+        - FIRST_DEPOSIT
+        - ID_DOCUMENT
+        - ADDRESS_PROOF
 
-    DepositStatus:
+    KycSessionStatus:
       type: string
       enum:
-        - CREATED
-        - CONTACT_PROVIDED
-        - PAID
+        - OPEN
+        - RUNNING
+        - COMPLETED
+        - LOCKED
         - CANCELLED
-        - EXPIRED
-
-    CreatePhoneDepositRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        userId:
-          type: string
-          description: User initiating the deposit
-        provider:
-          $ref: "#/components/schemas/DepositProvider"
-        amount:
-          type: number
-          minimum: 0.01
-        currency:
-          type: string
-          example: XAF
-        reason:
-          type: string
-          description: Business reason for the deposit
-        reference:
-          type: string
-          description: Optional external reference id
-      required: [ userId, amount, currency ]
-
-    StaffContact:
-      type: object
-      additionalProperties: false
-      properties:
-        staffId:
-          type: string
-        fullName:
-          type: string
-        phoneNumber:
-          type: string
-          example: "+237690000000"
-      required: [ staffId, fullName, phoneNumber ]
-
-    PhoneDepositResponse:
-      type: object
-      additionalProperties: false
-      properties:
-        depositId:
-          type: string
-        status:
-          $ref: "#/components/schemas/DepositStatus"
-        amount:
-          type: number
-        currency:
-          type: string
-        contact:
-          $ref: "#/components/schemas/StaffContact"
-        expiresAt:
-          type: string
-          format: date-time
-        createdAt:
-          type: string
-          format: date-time
-      required:
-        - depositId
-        - status
-        - amount
-        - currency
-        - contact
-        - createdAt
+        - FAILED
 
     KycStatus:
       type: string
@@ -380,66 +350,60 @@ components:
     StepType:
       type: string
       enum:
-        - PHONE
-        - EMAIL
+        - PHONE_OTP
+        - EMAIL_MAGIC
         - ADDRESS
         - IDENTITY
+        - DOCUMENT_UPLOAD
+        - PHONE_DEPOSIT
 
     StepIdValue:
       type: string
       minLength: 8
 
-    PageNumber:
-      type: integer
-      default: 1
-      minimum: 1
-
-    PageSize:
-      type: integer
-      default: 20
-      minimum: 1
-
-    KycSessionInternalStatus:
-      type: string
-      enum:
-        - OPEN
-        - COMPLETED
-        - LOCKED
-
-    KycSessionInternal:
+    KycSession:
       type: object
       additionalProperties: false
       properties:
         id: { type: string }
         userId: { type: string }
-        status: { $ref: "#/components/schemas/KycSessionInternalStatus" }
+        flow: { $ref: "#/components/schemas/KycFlowType" }
+        status: { $ref: "#/components/schemas/KycSessionStatus" }
         stepIds:
           type: array
           items: { type: string }
+        context:
+          type: object
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-      required: [ id, userId, status, stepIds, updatedAt ]
+      required: [ id, userId, flow, status, stepIds, createdAt, updatedAt ]
 
-    InternalStartSessionRequest:
+    CreateKycSessionRequest:
       type: object
       additionalProperties: false
       properties:
         userId: { type: string }
+        flow: { $ref: "#/components/schemas/KycFlowType" }
         reason: { type: string }
-      required: [ userId ]
+        context:
+          type: object
+          additionalProperties: true
+      required: [ userId, flow ]
 
-    CreateStepRequest:
+    CreateCaseStepRequest:
       type: object
       additionalProperties: false
       properties:
         sessionId: { type: string }
         userId: { type: string }
-        type: { $ref: "#/components/schemas/StepType" }
+        purpose: { type: string }
         policy:
           type: object
           additionalProperties: true
-      required: [ sessionId, userId, type ]
+      required: [ sessionId, userId ]
 
-    KycStepInternal:
+    KycStep:
       type: object
       additionalProperties: false
       properties:
@@ -450,7 +414,7 @@ components:
         status: { $ref: "#/components/schemas/KycStatus" }
         data:
           type: object
-          description: Internal step data (may include PII/evidence refs).
+          description: Internal step data.
           additionalProperties: true
         policy:
           type: object
@@ -464,15 +428,17 @@ components:
       enum:
         - SMS
         - VOICE
-    IssueOtpRequest:
+
+    IssuePhoneOtpRequest:
       type: object
       additionalProperties: false
       properties:
+        sessionId: { type: string }
         stepId: { type: string }
         msisdn: { type: string, example: "+237690000000" }
         channel: { $ref: "#/components/schemas/IssueOtpRequestChannel" }
         ttlSeconds: { type: integer, minimum: 30, maximum: 900 }
-      required: [ stepId, msisdn ]
+      required: [ sessionId, stepId, msisdn ]
 
     OtpChallengeInternal:
       type: object
@@ -481,29 +447,31 @@ components:
         otpRef: { type: string }
         providerMessageId:
           type: string
-          description: Optional provider id from SMS gateway
+          description: Optional provider id from SMS gateway.
         expiresAt: { type: string, format: date-time }
         triesLeft: { type: integer, minimum: 0 }
       required: [ otpRef, expiresAt, triesLeft ]
 
-    VerifyOtpInternalRequest:
+    VerifyPhoneOtpRequest:
       type: object
       additionalProperties: false
       properties:
+        sessionId: { type: string }
         stepId: { type: string }
         otpRef: { type: string }
         code: { type: string, minLength: 4, maxLength: 8 }
-      required: [ stepId, otpRef, code ]
+      required: [ sessionId, stepId, otpRef, code ]
 
     IssueMagicEmailRequest:
       type: object
       additionalProperties: false
       properties:
+        sessionId: { type: string }
         stepId: { type: string }
         email: { type: string, format: email }
         ttlSeconds: { type: integer, minimum: 60, maximum: 86400 }
         includeShortCode: { type: boolean, default: true }
-      required: [ stepId, email ]
+      required: [ sessionId, stepId, email ]
 
     MagicEmailChallengeInternal:
       type: object
@@ -517,8 +485,10 @@ components:
       type: object
       additionalProperties: false
       properties:
+        sessionId: { type: string }
+        stepId: { type: string }
         token: { type: string, minLength: 10 }
-      required: [ token ]
+      required: [ sessionId, stepId, token ]
 
     VerifyOutcomeReason:
       type: string
@@ -538,26 +508,125 @@ components:
         stepStatus: { $ref: "#/components/schemas/KycStatus" }
       required: [ ok, reason, stepStatus ]
 
+    DepositProvider:
+      type: string
+      enum:
+        - MTN_CM
+        - ORANGE_CM
+
+    DepositStatus:
+      type: string
+      enum:
+        - CREATED
+        - CONTACT_PROVIDED
+        - PAID
+        - CANCELLED
+        - EXPIRED
+
+    CreatePhoneDepositRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        sessionId:
+          type: string
+          description: Session handling the first-deposit flow.
+        userId:
+          type: string
+          description: User initiating the deposit.
+        provider:
+          $ref: "#/components/schemas/DepositProvider"
+        amount:
+          type: number
+          minimum: 0.01
+        currency:
+          type: string
+          example: XAF
+        reason:
+          type: string
+          description: Business reason for the deposit.
+        reference:
+          type: string
+          description: Optional external reference id.
+      required: [ sessionId, userId, amount, currency ]
+
+    StaffContact:
+      type: object
+      additionalProperties: false
+      properties:
+        staffId: { type: string }
+        fullName: { type: string }
+        phoneNumber:
+          type: string
+          example: "+237690000000"
+      required: [ staffId, fullName, phoneNumber ]
+
+    PhoneDepositResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        depositRequestId: { type: string }
+        sessionId: { type: string }
+        stepId: { type: string }
+        status: { $ref: "#/components/schemas/DepositStatus" }
+        amount: { type: number }
+        currency: { type: string }
+        contact: { $ref: "#/components/schemas/StaffContact" }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+      required:
+        - depositRequestId
+        - sessionId
+        - status
+        - amount
+        - currency
+        - contact
+        - createdAt
+
+    InternalUploadPurpose:
+      type: string
+      enum:
+        - KYC_IDENTITY
+        - KYC_ADDRESS
+
+    IdentityAssetType:
+      type: string
+      enum:
+        - SELFIE_CLOSEUP
+        - SELFIE_WITH_ID
+        - ID_FRONT
+        - ID_BACK
+        - PROOF_OF_ADDRESS
+
+    SseMode:
+      type: string
+      enum:
+        - SSE_S3
+        - SSE_KMS
+        - SSE_C
+
+    UploadMethod:
+      type: string
+      enum:
+        - PUT
+
     InternalPresignRequest:
       type: object
       additionalProperties: false
       properties:
+        sessionId: { type: string }
         stepId: { type: string }
         userId: { type: string }
-        purpose:
-          $ref: "#/components/schemas/InternalUploadPurpose"
-        assetType:
-          $ref: "#/components/schemas/IdentityAssetType"
+        purpose: { $ref: "#/components/schemas/InternalUploadPurpose" }
+        assetType: { $ref: "#/components/schemas/IdentityAssetType" }
         mime: { type: string }
         sizeBytes: { type: integer, minimum: 1 }
         encryption:
           type: object
           additionalProperties: false
           properties:
-            mode:
-              $ref: "#/components/schemas/SseMode"
+            mode: { $ref: "#/components/schemas/SseMode" }
           required: [ mode ]
-      required: [ stepId, userId, purpose, assetType, mime, sizeBytes ]
+      required: [ sessionId, stepId, userId, purpose, assetType, mime, sizeBytes ]
 
     PresignUploadResponseInternal:
       type: object
@@ -566,8 +635,7 @@ components:
         uploadId: { type: string }
         bucket: { type: string }
         objectKey: { type: string }
-        method:
-          $ref: "#/components/schemas/UploadMethod"
+        method: { $ref: "#/components/schemas/UploadMethod" }
         url: { type: string }
         headers:
           type: object
@@ -595,6 +663,8 @@ components:
       type: object
       additionalProperties: false
       properties:
+        sessionId: { type: string }
+        stepId: { type: string }
         uploadId: { type: string }
         bucket: { type: string }
         objectKey: { type: string }
@@ -609,57 +679,16 @@ components:
               etag: { type: string }
             required: [ partNumber, etag ]
         computedSha256: { type: string }
-      required: [ uploadId, bucket, objectKey ]
+      required: [ sessionId, stepId, uploadId, bucket, objectKey ]
 
     EvidenceRef:
       type: object
       additionalProperties: false
       properties:
         evidenceId: { type: string }
+        sessionId: { type: string }
         stepId: { type: string }
         assetType: { type: string }
         sha256: { type: string }
         createdAt: { type: string, format: date-time }
-      required: [ evidenceId, stepId, assetType, createdAt ]
-
-    IdentityAssetType:
-      type: string
-      enum:
-        - SELFIE_CLOSEUP
-        - SELFIE_WITH_ID
-        - ID_FRONT
-        - ID_BACK
-
-    InternalUploadPurpose:
-      type: string
-      enum:
-        - KYC_IDENTITY
-
-    SseMode:
-      type: string
-      enum:
-        - SSE_S3
-        - SSE_KMS
-        - SSE_C
-
-    UploadMethod:
-      type: string
-      enum:
-        - PUT
-
-    ReviewDecisionOutcome:
-      type: string
-      enum:
-        - APPROVE
-        - REJECT
-
-    ReviewReasonCode:
-      type: string
-      enum:
-        - OK
-        - BLURRY
-        - MISSING_FACE
-        - ID_NOT_READABLE
-        - ID_MISMATCH
-        - FRAUD_SUSPECTED
-        - OTHER
+      required: [ evidenceId, sessionId, stepId, assetType, createdAt ]
