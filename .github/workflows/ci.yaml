@@ -15,6 +15,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         name: Setup rust
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-tests-${{ runner.os }}-workspace
+          cache-on-failure: true
       - name: Run cargo test (workspace)
         id: run_tests
         run: |
@@ -42,6 +46,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         name: Setup rust
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-tests-${{ runner.os }}-oas
+          cache-on-failure: true
       - name: Run OAS integration tests
         id: run_tests
         run: |
@@ -128,6 +136,10 @@ jobs:
       - test-workspace
       - test-oas
     runs-on: ${{ matrix.runner }}
+    env:
+      MUSL_TARGET: ${{ matrix.rust_target }}
+      MUSL_ARCH: ${{ matrix.arch }}
+      MUSL_RUNNER: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +156,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         name: Setup rust
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-musl-${{ runner.os }}-${{ matrix.rust_target }}
+          cache-on-failure: true
       - name: Install MUSL build dependencies
         run: |
           sudo apt-get update
@@ -152,33 +168,73 @@ jobs:
             cmake \
             clang \
             llvm-dev \
+            musl-dev \
             musl-tools \
             pkg-config \
             perl \
             protobuf-compiler
       - name: Add rust target
-        run: rustup target add "${{ matrix.rust_target }}"
+        run: rustup target add "${MUSL_TARGET}"
+      - name: Configure MUSL linker env
+        run: |
+          if [ "${MUSL_TARGET}" = "x86_64-unknown-linux-musl" ]; then
+            cc_bin="musl-gcc"
+            cxx_bin="g++"
+            ar_bin="ar"
+            if command -v x86_64-linux-musl-gcc >/dev/null 2>&1; then
+              cc_bin="x86_64-linux-musl-gcc"
+            fi
+            if command -v x86_64-linux-musl-g++ >/dev/null 2>&1; then
+              cxx_bin="x86_64-linux-musl-g++"
+            fi
+            if command -v x86_64-linux-musl-ar >/dev/null 2>&1; then
+              ar_bin="x86_64-linux-musl-ar"
+            fi
+            echo "CC_x86_64_unknown_linux_musl=${cc_bin}" >> "$GITHUB_ENV"
+            echo "CXX_x86_64_unknown_linux_musl=${cxx_bin}" >> "$GITHUB_ENV"
+            echo "AR_x86_64_unknown_linux_musl=${ar_bin}" >> "$GITHUB_ENV"
+          fi
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+      - name: Verify MUSL toolchain
+        run: |
+          command -v musl-gcc || true
+          command -v x86_64-linux-musl-gcc || true
+          command -v aarch64-linux-musl-gcc || true
       - name: Build backend + health (MUSL)
         id: build
         run: |
+          set -euo pipefail
           start_ts="$(date +%s)"
-          cargo build --release --locked --target "${{ matrix.rust_target }}" -p backend
-          mkdir -p dist
-          cp "target/${{ matrix.rust_target }}/release/backend" dist/backend
-          cp "target/${{ matrix.rust_target }}/release/health" dist/healthcheck
-          chmod +x dist/backend dist/healthcheck
+          set +e
+          cargo build --release --locked --target "${MUSL_TARGET}" -p backend
+          build_rc=$?
+          set -e
+          if [ "${build_rc}" -eq 0 ]; then
+            mkdir -p dist
+            cp "target/${MUSL_TARGET}/release/backend" dist/backend
+            cp "target/${MUSL_TARGET}/release/health" dist/healthcheck
+            chmod +x dist/backend dist/healthcheck
+          fi
           end_ts="$(date +%s)"
           echo "duration_seconds=$((end_ts - start_ts))" >> "$GITHUB_OUTPUT"
+          exit "${build_rc}"
       - name: Collect binary size metadata
         id: sizes
+        if: always()
         run: |
-          backend_bytes="$(stat -c%s dist/backend)"
-          health_bytes="$(stat -c%s dist/healthcheck)"
-          total_bytes="$((backend_bytes + health_bytes))"
+          backend_bytes="n/a"
+          health_bytes="n/a"
+          total_bytes="n/a"
+          if [ -f dist/backend ] && [ -f dist/healthcheck ]; then
+            backend_bytes="$(stat -c%s dist/backend)"
+            health_bytes="$(stat -c%s dist/healthcheck)"
+            total_bytes="$((backend_bytes + health_bytes))"
+          fi
           echo "backend_bytes=${backend_bytes}" >> "$GITHUB_OUTPUT"
           echo "health_bytes=${health_bytes}" >> "$GITHUB_OUTPUT"
           echo "total_bytes=${total_bytes}" >> "$GITHUB_OUTPUT"
       - name: Upload MUSL binaries
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: musl-binaries-${{ matrix.arch }}
@@ -188,11 +244,15 @@ jobs:
         run: |
           {
             timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            duration="${{ steps.build.outputs.duration_seconds }}"
+            if [ -z "${duration}" ]; then
+              duration="n/a"
+            fi
             echo "### ⚙️ MUSL Build Report (${{ matrix.arch }})"
-            echo "- Target: ${{ matrix.rust_target }}"
-            echo "- Runner: ${{ matrix.runner }} (arch ${{ matrix.arch }})"
+            echo "- Target: ${MUSL_TARGET}"
+            echo "- Runner: ${MUSL_RUNNER} (arch ${MUSL_ARCH})"
             echo "- Result: **${{ steps.build.outcome }}**"
-            echo "- Duration: ${{ steps.build.outputs.duration_seconds }}s"
+            echo "- Duration: ${duration}s"
             echo "- Backend size: ${{ steps.sizes.outputs.backend_bytes }} bytes"
             echo "- Healthcheck size: ${{ steps.sizes.outputs.health_bytes }} bytes"
             echo "- Total MUSL payload: ${{ steps.sizes.outputs.total_bytes }} bytes"
