@@ -5,6 +5,7 @@ mod session_flow;
 mod shared;
 mod step_flow;
 mod upload_flow;
+mod user_flow;
 
 use super::BackendApi;
 use axum_extra::extract::CookieJar;
@@ -29,6 +30,10 @@ use gen_oas_server_bff::apis::steps::{InternalGetKycStepResponse, Steps};
 use gen_oas_server_bff::apis::uploads::{
     InternalCompleteUploadResponse, InternalPresignUploadResponse, Uploads,
 };
+use gen_oas_server_bff::apis::users::{
+    InternalGetUserByIdResponse, InternalGetUserKycLevelResponse,
+    InternalGetUserKycSummaryResponse, Users,
+};
 use gen_oas_server_bff::models;
 use headers::Host;
 use http::Method;
@@ -39,6 +44,7 @@ use self::phone_flow::PhoneFlow;
 use self::session_flow::SessionFlow;
 use self::step_flow::StepFlow;
 use self::upload_flow::UploadFlow;
+use self::user_flow::UserFlow;
 
 #[backend_core::async_trait]
 impl Sessions<Error> for BackendApi {
@@ -222,5 +228,43 @@ impl Uploads<Error> for BackendApi {
         body: &models::InternalCompleteUploadRequest,
     ) -> Result<InternalCompleteUploadResponse, Error> {
         self.complete_upload_flow(claims, body).await
+    }
+}
+
+#[backend_core::async_trait]
+impl Users<Error> for BackendApi {
+    type Claims = JwtToken;
+
+    async fn internal_get_user_by_id(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::InternalGetUserByIdPathParams,
+    ) -> Result<InternalGetUserByIdResponse, Error> {
+        self.get_user_by_id_flow(claims, path_params).await
+    }
+
+    async fn internal_get_user_kyc_level(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::InternalGetUserKycLevelPathParams,
+    ) -> Result<InternalGetUserKycLevelResponse, Error> {
+        self.get_user_kyc_level_flow(claims, path_params).await
+    }
+
+    async fn internal_get_user_kyc_summary(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::InternalGetUserKycSummaryPathParams,
+    ) -> Result<InternalGetUserKycSummaryResponse, Error> {
+        self.get_user_kyc_summary_flow(claims, path_params).await
     }
 }

@@ -15,6 +15,7 @@ tags:
   - name: email-magic
   - name: deposits
   - name: uploads
+  - name: users
 
 security:
   - BearerAuth: [ ]
@@ -91,6 +92,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KycSession"
+
+  /internal/users/{userId}:
+    get:
+      tags: [ users ]
+      summary: Get user row by id
+      description: Returns the persisted `app_user` Diesel row shape.
+      operationId: internalGetUserById
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: User row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalUserRecord"
+
+  /internal/users/{userId}/kyc-level:
+    get:
+      tags: [ users ]
+      summary: Get user KYC level
+      operationId: internalGetUserKycLevel
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: KYC level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserKycLevelResponse"
+
+  /internal/users/{userId}/kyc-summary:
+    get:
+      tags: [ users ]
+      summary: Get user KYC summary
+      operationId: internalGetUserKycSummary
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: KYC summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserKycSummary"
 
   /internal/kyc/phone-otp/steps:
     post:
@@ -328,6 +381,13 @@ components:
       description: Generic bearer token used by trusted internal callers.
 
   parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 8
     SessionId:
       name: sessionId
       in: path
@@ -421,6 +481,68 @@ components:
           items:
             $ref: "#/components/schemas/KycSession"
       required: [ items ]
+
+    InternalUserRecord:
+      type: object
+      additionalProperties: false
+      properties:
+        userId: { type: string }
+        realm: { type: string }
+        username: { type: string }
+        fullName: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        emailVerified: { type: boolean }
+        phoneNumber: { type: string, nullable: true }
+        fineractCustomerId: { type: string, nullable: true }
+        disabled: { type: boolean }
+        attributes:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - userId
+        - realm
+        - username
+        - emailVerified
+        - disabled
+        - createdAt
+        - updatedAt
+
+    UserKycLevel:
+      type: string
+      enum:
+        - NONE
+        - PHONE_OTP_VERIFIED
+        - FIRST_DEPOSIT_VERIFIED
+
+    UserKycLevelResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        userId: { type: string }
+        level: { $ref: "#/components/schemas/UserKycLevel" }
+        phoneOtpVerified: { type: boolean }
+        firstDepositVerified: { type: boolean }
+      required: [ userId, level, phoneOtpVerified, firstDepositVerified ]
+
+    UserKycSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        userId: { type: string }
+        level: { $ref: "#/components/schemas/UserKycLevel" }
+        phoneOtpStatus:
+          allOf:
+            - $ref: "#/components/schemas/KycSessionStatus"
+          nullable: true
+        firstDepositStatus:
+          allOf:
+            - $ref: "#/components/schemas/KycSessionStatus"
+          nullable: true
+        latestSessionUpdatedAt: { type: string, format: date-time, nullable: true }
+      required: [ userId, level ]
 
     CreateKycSessionRequest:
       type: object
