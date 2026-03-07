@@ -175,6 +175,14 @@ async fn full_19_sms_permanent_error_terminal_no_infinite_retries() -> Result<()
     Ok(())
 }
 
+#[tokio::test]
+#[file_serial]
+async fn full_20_bff_user_endpoints() -> Result<()> {
+    let (env, client) = test_context()?;
+    scenario_bff_user_endpoints(&client, &env).await?;
+    Ok(())
+}
+
 async fn scenario_auth_bypass_outside_protected_paths(
     client: &reqwest::Client,
     env: &Env,
@@ -446,6 +454,176 @@ async fn scenario_sms_permanent_error_terminal_no_infinite_retries(
         .map(|items| items.len())
         .unwrap_or(0);
     assert_eq!(delivered, 0, "permanent SMS failure should not deliver OTP");
+
+    Ok(())
+}
+
+async fn scenario_bff_user_endpoints(client: &reqwest::Client, env: &Env) -> Result<()> {
+    let (token, subject) = get_client_token_and_subject(client, env).await?;
+    ensure_bff_fixtures(&env.database_url, &subject).await?;
+    reset_sms_sink(client, env).await?;
+
+    let bff_base = format!("{}/bff", env.user_storage_url);
+
+    let user_row = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/users/{}", bff_base, subject),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(user_row.status, 200, "{}", user_row.text);
+    assert_eq!(
+        require_json_field(&user_row.body, "userId")?
+            .as_str()
+            .ok_or_else(|| anyhow!("userId must be string"))?,
+        subject
+    );
+
+    let initial_level = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/users/{}/kyc-level", bff_base, subject),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(initial_level.status, 200, "{}", initial_level.text);
+    assert_eq!(
+        require_json_field(&initial_level.body, "level")?
+            .as_str()
+            .ok_or_else(|| anyhow!("level must be string"))?,
+        "NONE"
+    );
+    assert_eq!(
+        require_json_field(&initial_level.body, "phoneOtpVerified")?.as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        require_json_field(&initial_level.body, "firstDepositVerified")?.as_bool(),
+        Some(false)
+    );
+
+    let (session_id, step_id, otp_ref) =
+        create_phone_step_and_issue_otp(client, &bff_base, &token, &subject, "+237690000121", 120)
+            .await?;
+    let otp = wait_for_otp(client, env, "+237690000121", Duration::from_secs(30)).await?;
+
+    let verify = send_json(
+        client,
+        Method::POST,
+        &format!("{}/internal/kyc/phone-otp/verifications", bff_base),
+        Some(&token),
+        Some(json!({
+            "sessionId": session_id,
+            "stepId": step_id,
+            "otpRef": otp_ref,
+            "code": otp
+        })),
+    )
+    .await?;
+    assert_eq!(verify.status, 200, "{}", verify.text);
+    assert_eq!(
+        require_json_field(&verify.body, "reason")?
+            .as_str()
+            .ok_or_else(|| anyhow!("reason must be string"))?,
+        "VERIFIED"
+    );
+
+    let after_phone_level = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/users/{}/kyc-level", bff_base, subject),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(after_phone_level.status, 200, "{}", after_phone_level.text);
+    assert_eq!(
+        require_json_field(&after_phone_level.body, "level")?
+            .as_str()
+            .ok_or_else(|| anyhow!("level must be string"))?,
+        "PHONE_OTP_VERIFIED"
+    );
+    assert_eq!(
+        require_json_field(&after_phone_level.body, "phoneOtpVerified")?.as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        require_json_field(&after_phone_level.body, "firstDepositVerified")?.as_bool(),
+        Some(false)
+    );
+
+    let phone_summary = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/users/{}/kyc-summary", bff_base, subject),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(phone_summary.status, 200, "{}", phone_summary.text);
+    assert_eq!(
+        require_json_field(&phone_summary.body, "level")?
+            .as_str()
+            .ok_or_else(|| anyhow!("level must be string"))?,
+        "PHONE_OTP_VERIFIED"
+    );
+    assert_eq!(
+        require_json_field(&phone_summary.body, "phoneOtpStatus")?
+            .as_str()
+            .ok_or_else(|| anyhow!("phoneOtpStatus must be string"))?,
+        "COMPLETED"
+    );
+
+    insert_completed_kyc_instance(&env.database_url, &subject, "KYC_FIRST_DEPOSIT").await?;
+
+    let after_deposit_level = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/users/{}/kyc-level", bff_base, subject),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(
+        after_deposit_level.status, 200,
+        "{}",
+        after_deposit_level.text
+    );
+    assert_eq!(
+        require_json_field(&after_deposit_level.body, "level")?
+            .as_str()
+            .ok_or_else(|| anyhow!("level must be string"))?,
+        "FIRST_DEPOSIT_VERIFIED"
+    );
+    assert_eq!(
+        require_json_field(&after_deposit_level.body, "firstDepositVerified")?.as_bool(),
+        Some(true)
+    );
+
+    let final_summary = send_json(
+        client,
+        Method::GET,
+        &format!("{}/internal/users/{}/kyc-summary", bff_base, subject),
+        Some(&token),
+        None,
+    )
+    .await?;
+    assert_eq!(final_summary.status, 200, "{}", final_summary.text);
+    assert_eq!(
+        require_json_field(&final_summary.body, "level")?
+            .as_str()
+            .ok_or_else(|| anyhow!("level must be string"))?,
+        "FIRST_DEPOSIT_VERIFIED"
+    );
+    assert_eq!(
+        require_json_field(&final_summary.body, "firstDepositStatus")?
+            .as_str()
+            .ok_or_else(|| anyhow!("firstDepositStatus must be string"))?,
+        "COMPLETED"
+    );
 
     Ok(())
 }
@@ -1850,6 +2028,60 @@ async fn force_deposit_expiry(
         )
         .await
         .map_err(|error| anyhow!("failed to force deposit expiry: {error}"))?;
+
+    Ok(())
+}
+
+async fn insert_completed_kyc_instance(
+    database_url: &str,
+    user_id: &str,
+    kind: &str,
+) -> Result<()> {
+    let (client, connection) = tokio_postgres::connect(database_url, NoTls)
+        .await
+        .map_err(|error| anyhow!("failed to connect to postgres: {error}"))?;
+
+    tokio::spawn(async move {
+        if let Err(error) = connection.await {
+            eprintln!("postgres connection task failed: {error}");
+        }
+    });
+
+    let instance_id = format!(
+        "smi_e2e_{kind}_{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
+    let idempotency_key = format!("{kind}:{user_id}:{}", chrono::Utc::now().timestamp_millis());
+
+    client
+        .execute(
+            r#"
+            INSERT INTO sm_instance (
+                id,
+                kind,
+                user_id,
+                idempotency_key,
+                status,
+                context,
+                created_at,
+                updated_at,
+                completed_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                'COMPLETED',
+                '{}'::jsonb,
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            "#,
+            &[&instance_id, &kind, &user_id, &idempotency_key],
+        )
+        .await
+        .map_err(|error| anyhow!("failed to insert completed kyc instance: {error}"))?;
 
     Ok(())
 }

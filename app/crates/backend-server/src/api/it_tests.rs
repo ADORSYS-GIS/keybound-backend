@@ -22,6 +22,7 @@ use gen_oas_server_bff::apis::phone_otp::PhoneOtp;
 use gen_oas_server_bff::apis::sessions::Sessions;
 use gen_oas_server_bff::apis::steps::Steps;
 use gen_oas_server_bff::apis::uploads::Uploads;
+use gen_oas_server_bff::apis::users::Users as _;
 use gen_oas_server_kc::apis::devices::Devices;
 use gen_oas_server_kc::apis::enrollment::Enrollment;
 use gen_oas_server_kc::apis::users::Users;
@@ -1540,6 +1541,190 @@ async fn bff_start_session_user_mismatch_is_unauthorized() {
         .await
         .expect_err("expected unauthorized");
     assert_http_error(error, 401, "UNAUTHORIZED");
+}
+
+#[tokio::test]
+async fn bff_get_user_by_id_success() {
+    let mut user = MockUserRepo::new();
+    user.expect_get_user()
+        .times(1)
+        .withf(|user_id| user_id == "usr_001")
+        .return_once(|_| Ok(Some(user_row("usr_001"))));
+
+    let api = build_api(
+        MockStateMachineRepo::new(),
+        user,
+        MockDeviceRepo::new(),
+        MockStateMachineQueue::new(),
+        MockNotificationQueue::new(),
+        MockMinioStorage::new(),
+        None,
+    );
+
+    let response = api
+        .internal_get_user_by_id(
+            &Method::GET,
+            &host(),
+            &cookies(),
+            &claims("usr_001"),
+            &gen_oas_server_bff::models::InternalGetUserByIdPathParams {
+                user_id: "usr_001".to_owned(),
+            },
+        )
+        .await
+        .expect("get user by id");
+
+    match response {
+        gen_oas_server_bff::apis::users::InternalGetUserByIdResponse::Status200_UserRow(user) => {
+            assert_eq!(user.user_id, "usr_001");
+            assert_eq!(user.username, "alice");
+            assert_eq!(user.email.as_deref(), Some("alice@example.test"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn bff_get_user_kyc_level_success() {
+    let mut user = MockUserRepo::new();
+    user.expect_get_user()
+        .times(1)
+        .return_once(|_| Ok(Some(user_row("usr_001"))));
+
+    let phone_instance = sm_instance_row(
+        "ins_phone",
+        KIND_KYC_PHONE_OTP,
+        INSTANCE_STATUS_COMPLETED,
+        Some("usr_001"),
+        json!({}),
+    );
+    let deposit_instance = sm_instance_row(
+        "ins_deposit",
+        KIND_KYC_FIRST_DEPOSIT,
+        INSTANCE_STATUS_COMPLETED,
+        Some("usr_001"),
+        json!({}),
+    );
+
+    let mut sm = MockStateMachineRepo::new();
+    sm.expect_list_instances()
+        .times(1)
+        .withf(|filter| filter.kind.as_deref() == Some(KIND_KYC_PHONE_OTP))
+        .return_once(move |_| Ok((vec![phone_instance], 1)));
+    sm.expect_list_instances()
+        .times(1)
+        .withf(|filter| filter.kind.as_deref() == Some(KIND_KYC_FIRST_DEPOSIT))
+        .return_once(move |_| Ok((vec![deposit_instance], 1)));
+
+    let api = build_api(
+        sm,
+        user,
+        MockDeviceRepo::new(),
+        MockStateMachineQueue::new(),
+        MockNotificationQueue::new(),
+        MockMinioStorage::new(),
+        None,
+    );
+
+    let response = api
+        .internal_get_user_kyc_level(
+            &Method::GET,
+            &host(),
+            &cookies(),
+            &claims("usr_001"),
+            &gen_oas_server_bff::models::InternalGetUserKycLevelPathParams {
+                user_id: "usr_001".to_owned(),
+            },
+        )
+        .await
+        .expect("get user kyc level");
+
+    match response {
+        gen_oas_server_bff::apis::users::InternalGetUserKycLevelResponse::Status200_KYCLevel(
+            level,
+        ) => {
+            assert_eq!(level.user_id, "usr_001");
+            assert_eq!(
+                level.level,
+                gen_oas_server_bff::models::UserKycLevel::FirstDepositVerified
+            );
+            assert!(level.phone_otp_verified);
+            assert!(level.first_deposit_verified);
+        }
+    }
+}
+
+#[tokio::test]
+async fn bff_get_user_kyc_summary_success() {
+    let mut user = MockUserRepo::new();
+    user.expect_get_user()
+        .times(1)
+        .return_once(|_| Ok(Some(user_row("usr_001"))));
+
+    let phone_instance = sm_instance_row(
+        "ins_phone_summary",
+        KIND_KYC_PHONE_OTP,
+        INSTANCE_STATUS_RUNNING,
+        Some("usr_001"),
+        json!({}),
+    );
+    let deposit_instance = sm_instance_row(
+        "ins_deposit_summary",
+        KIND_KYC_FIRST_DEPOSIT,
+        INSTANCE_STATUS_ACTIVE,
+        Some("usr_001"),
+        json!({}),
+    );
+
+    let mut sm = MockStateMachineRepo::new();
+    sm.expect_list_instances()
+        .times(1)
+        .withf(|filter| filter.kind.as_deref() == Some(KIND_KYC_PHONE_OTP))
+        .return_once(move |_| Ok((vec![phone_instance], 1)));
+    sm.expect_list_instances()
+        .times(1)
+        .withf(|filter| filter.kind.as_deref() == Some(KIND_KYC_FIRST_DEPOSIT))
+        .return_once(move |_| Ok((vec![deposit_instance], 1)));
+
+    let api = build_api(
+        sm,
+        user,
+        MockDeviceRepo::new(),
+        MockStateMachineQueue::new(),
+        MockNotificationQueue::new(),
+        MockMinioStorage::new(),
+        None,
+    );
+
+    let response = api
+        .internal_get_user_kyc_summary(
+            &Method::GET,
+            &host(),
+            &cookies(),
+            &claims("usr_001"),
+            &gen_oas_server_bff::models::InternalGetUserKycSummaryPathParams {
+                user_id: "usr_001".to_owned(),
+            },
+        )
+        .await
+        .expect("get user kyc summary");
+
+    match response {
+        gen_oas_server_bff::apis::users::InternalGetUserKycSummaryResponse::Status200_KYCSummary(
+            summary,
+        ) => {
+            assert_eq!(summary.user_id, "usr_001");
+            assert_eq!(summary.level, gen_oas_server_bff::models::UserKycLevel::None);
+            assert_eq!(
+                summary.phone_otp_status,
+                Some(gen_oas_server_bff::models::KycSessionStatus::Running)
+            );
+            assert_eq!(
+                summary.first_deposit_status,
+                Some(gen_oas_server_bff::models::KycSessionStatus::Open)
+            );
+            assert!(summary.latest_session_updated_at.is_some());
+        }
+    }
 }
 
 #[tokio::test]

@@ -92,6 +92,11 @@ Sessions / steps:
 - [x] `POST /internal/kyc/steps` (`internalCreateStep`) creates each supported step type (phone/email/address/identity).
 - [x] `GET /internal/kyc/steps/{stepId}` (`internalGetStep`) returns correct data/status transitions.
 
+Users:
+- [x] `GET /internal/users/{userId}` (`internalGetUserById`) returns persisted user row data for the authenticated user.
+- [x] `GET /internal/users/{userId}/kyc-level` (`internalGetUserKycLevel`) returns derived level transitions (`NONE` -> `PHONE_OTP_VERIFIED` -> `FIRST_DEPOSIT_VERIFIED`).
+- [x] `GET /internal/users/{userId}/kyc-summary` (`internalGetUserKycSummary`) returns per-flow status summary and latest session timestamp.
+
 Phone OTP:
 - [x] `POST /internal/kyc/phone/otp/issue` (`internalIssueOtp`) issues challenge; SMS is sent (captured by stub/sink).
 - [x] verify correct OTP -> step moves to verified state.
