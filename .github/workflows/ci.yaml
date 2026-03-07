@@ -193,6 +193,23 @@ jobs:
             echo "CC_x86_64_unknown_linux_musl=${cc_bin}" >> "$GITHUB_ENV"
             echo "CXX_x86_64_unknown_linux_musl=${cxx_bin}" >> "$GITHUB_ENV"
             echo "AR_x86_64_unknown_linux_musl=${ar_bin}" >> "$GITHUB_ENV"
+            echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=${cc_bin}" >> "$GITHUB_ENV"
+            echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_AR=${ar_bin}" >> "$GITHUB_ENV"
+            echo "SELECTED_MUSL_LINKER=${cc_bin}" >> "$GITHUB_ENV"
+          elif [ "${MUSL_TARGET}" = "aarch64-unknown-linux-musl" ]; then
+            cc_bin="musl-gcc"
+            ar_bin="ar"
+            if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then
+              cc_bin="aarch64-linux-musl-gcc"
+            fi
+            if command -v aarch64-linux-musl-ar >/dev/null 2>&1; then
+              ar_bin="aarch64-linux-musl-ar"
+            fi
+            echo "CC_aarch64_unknown_linux_musl=${cc_bin}" >> "$GITHUB_ENV"
+            echo "AR_aarch64_unknown_linux_musl=${ar_bin}" >> "$GITHUB_ENV"
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=${cc_bin}" >> "$GITHUB_ENV"
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_AR=${ar_bin}" >> "$GITHUB_ENV"
+            echo "SELECTED_MUSL_LINKER=${cc_bin}" >> "$GITHUB_ENV"
           fi
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
       - name: Verify MUSL toolchain
@@ -200,6 +217,7 @@ jobs:
           command -v musl-gcc || true
           command -v x86_64-linux-musl-gcc || true
           command -v aarch64-linux-musl-gcc || true
+          echo "selected linker: ${SELECTED_MUSL_LINKER:-unset}"
       - name: Build backend + health (MUSL)
         id: build
         run: |
@@ -251,6 +269,7 @@ jobs:
             echo "### ⚙️ MUSL Build Report (${{ matrix.arch }})"
             echo "- Target: ${MUSL_TARGET}"
             echo "- Runner: ${MUSL_RUNNER} (arch ${MUSL_ARCH})"
+            echo "- Linker: ${SELECTED_MUSL_LINKER:-n/a}"
             echo "- Result: **${{ steps.build.outcome }}**"
             echo "- Duration: ${duration}s"
             echo "- Backend size: ${{ steps.sizes.outputs.backend_bytes }} bytes"
