@@ -28,11 +28,11 @@ jobs:
           {
             timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "### 🧪 Tests Report: Workspace"
-            echo "- Command: \\`cargo test --workspace --locked\\`"
+            echo "- Command: cargo test --workspace --locked"
             echo "- Outcome: **${{ steps.run_tests.outcome }}**"
             echo "- Duration: ${{ steps.run_tests.outputs.duration_seconds }}s"
             echo "- Timestamp: ${timestamp} UTC"
-            echo "- Run ID: #${GITHUB_RUN_NUMBER} (job \\`${{ github.job }}\\`)"
+            echo "- Run ID: #${GITHUB_RUN_NUMBER} (job ${{ github.job }})"
           } >> "$GITHUB_STEP_SUMMARY"
 
   test-oas:
@@ -55,11 +55,11 @@ jobs:
           {
             timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "### 🔍 Tests Report: OAS Integration"
-            echo "- Command: \\`cargo test -p backend-server --features it-tests api::it_tests:: --locked\\`"
+            echo "- Command: cargo test -p backend-server --features it-tests api::it_tests:: --locked"
             echo "- Outcome: **${{ steps.run_tests.outcome }}**"
             echo "- Duration: ${{ steps.run_tests.outputs.duration_seconds }}s"
             echo "- Timestamp: ${timestamp} UTC"
-            echo "- Run ID: #${GITHUB_RUN_NUMBER} (job \\`${{ github.job }}\\`)"
+            echo "- Run ID: #${GITHUB_RUN_NUMBER} (job ${{ github.job }})"
           } >> "$GITHUB_STEP_SUMMARY"
 
   cargo-version:
@@ -112,9 +112,13 @@ jobs:
       - name: Version report
         run: |
           {
+            latest_tag="${{ steps.latest.outputs.latest_tag }}"
+            if [ -z "${latest_tag}" ]; then
+              latest_tag="none"
+            fi
             echo "### 🚩 Cargo Version Report"
-            echo "- Latest release/tag: \\`${{ steps.latest.outputs.latest_tag }}\\`"
-            echo "- Workspace version: **${{ steps.workspace_version.outputs.current_version }}**"
+            echo "- Latest release/tag: ${latest_tag}"
+            echo "- Workspace version: ${{ steps.workspace_version.outputs.current_version }}"
             echo "- New release required: **${{ steps.change.outputs.changed }}**"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -185,8 +189,8 @@ jobs:
           {
             timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "### ⚙️ MUSL Build Report (${{ matrix.arch }})"
-            echo "- Target: \\`${{ matrix.rust_target }}\\`"
-            echo "- Runner: \\`${{ matrix.runner }}\\` (arch \\`${{ matrix.arch }}\\`)"
+            echo "- Target: ${{ matrix.rust_target }}"
+            echo "- Runner: ${{ matrix.runner }} (arch ${{ matrix.arch }})"
             echo "- Result: **${{ steps.build.outcome }}**"
             echo "- Duration: ${{ steps.build.outputs.duration_seconds }}s"
             echo "- Backend size: ${{ steps.sizes.outputs.backend_bytes }} bytes"
@@ -256,11 +260,11 @@ jobs:
         run: |
           {
             echo "### 🐳 Container Report: Dev (${{ matrix.arch }})"
-            echo "- Platform: \\`${{ matrix.platform }}\\`"
-            echo "- Tag: \\`${{ steps.image.outputs.tag }}\\`"
-            echo "- Digest: \\`${{ steps.build_image.outputs.digest }}\\`"
+            echo "- Platform: ${{ matrix.platform }}"
+            echo "- Tag: ${{ steps.image.outputs.tag }}"
+            echo "- Digest: ${{ steps.build_image.outputs.digest }}"
             echo "- Manifest size (imagetools): ${{ steps.image_meta.outputs.size }}"
-            echo "- Source artifact: \\`musl-binaries-${{ matrix.arch }}\\`"
+            echo "- Source artifact: musl-binaries-${{ matrix.arch }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   container-build-dev-manifest:
@@ -298,8 +302,8 @@ jobs:
           {
             timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "### 📦 Container Report: Dev Manifest"
-            echo "- Tag: \\`${{ steps.manifest.outputs.tag }}\\`"
-            echo "- Source slices: \\`${{ steps.manifest.outputs.tag }}-amd64\\`, \\`${{ steps.manifest.outputs.tag }}-arm64\\`"
+            echo "- Tag: ${{ steps.manifest.outputs.tag }}"
+            echo "- Source slices: ${{ steps.manifest.outputs.tag }}-amd64, ${{ steps.manifest.outputs.tag }}-arm64"
             echo "- Per-arch manifest sizes: ${{ steps.manifest.outputs.sizes }}"
             echo "- Timestamp: ${timestamp} UTC"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -330,12 +334,12 @@ jobs:
         run: |
           {
             echo "### Container Report: Prod Tags"
-            echo "- Workspace version: \\`${{ needs.cargo-version.outputs.version }}\\`"
-            echo "- Latest release/tag detected: \\`${{ needs.cargo-version.outputs.latest_tag }}\\`"
+            echo "- Workspace version: ${{ needs.cargo-version.outputs.version }}"
+            echo "- Latest release/tag detected: ${{ needs.cargo-version.outputs.latest_tag }}"
             echo "- New release required: **${{ needs.cargo-version.outputs.changed }}**"
             echo "- Tags:"
             while IFS= read -r tag; do
-              [ -n "$tag" ] && echo "  - \\`${tag}\\`"
+              [ -n "$tag" ] && echo "  - ${tag}"
             done <<< "${{ steps.setup.outputs.tags }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -411,11 +415,11 @@ jobs:
         run: |
           {
             echo "### 🐧 Container Report: Prod (${{ matrix.arch }})"
-            echo "- Platform: \\`${{ matrix.platform }}\\`"
-            echo "- Example tag: \\`${{ steps.tags.outputs.first_tag }}\\`"
-            echo "- Digest: \\`${{ steps.build_image.outputs.digest }}\\`"
+            echo "- Platform: ${{ matrix.platform }}"
+            echo "- Example tag: ${{ steps.tags.outputs.first_tag }}"
+            echo "- Digest: ${{ steps.build_image.outputs.digest }}"
             echo "- Manifest size (imagetools): ${{ steps.image_meta.outputs.size }}"
-            echo "- Source artifact: \\`musl-binaries-${{ matrix.arch }}\\`"
+            echo "- Source artifact: musl-binaries-${{ matrix.arch }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   container-build-prod-manifest:
@@ -462,8 +466,8 @@ jobs:
           {
             timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "### 🚀 Container Report: Prod Manifest"
-            echo "- Example tag: \\`${{ steps.manifests.outputs.first_tag }}\\`"
+            echo "- Example tag: ${{ steps.manifests.outputs.first_tag }}"
             echo "- Per-arch manifest sizes: ${{ steps.manifests.outputs.first_sizes }}"
-            echo "- Source tags: \\`${{ needs.container-build-prod-prepare.outputs.tags }}\\`"
+            echo "- Source tags: ${{ needs.container-build-prod-prepare.outputs.tags }}"
             echo "- Timestamp: ${timestamp} UTC"
           } >> "$GITHUB_STEP_SUMMARY"
