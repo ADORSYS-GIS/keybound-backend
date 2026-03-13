@@ -1,9 +1,10 @@
 use super::super::BackendApi;
-use super::shared::{ensure_user_match, split_step_id};
+use super::shared::{ensure_user_match, normalized_user_id, split_step_id, user_id_matches};
 use crate::file_storage::EncryptionMode;
 use backend_auth::JwtToken;
 use backend_core::{Error, StorageType};
 use chrono::{Duration, Utc};
+use tracing::instrument;
 use gen_oas_server_bff::apis::uploads::{
     InternalCompleteUploadResponse, InternalPresignUploadResponse,
 };
@@ -26,12 +27,14 @@ pub(super) trait UploadFlow {
 
 #[backend_core::async_trait]
 impl UploadFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn presign_upload_flow(
         &self,
         claims: &JwtToken,
         body: &models::InternalPresignRequest,
     ) -> Result<InternalPresignUploadResponse, Error> {
         ensure_user_match(claims, &body.user_id)?;
+        let user_id = normalized_user_id(&body.user_id);
 
         let (step_session_id, _step_type) = split_step_id(&body.step_id)
             .ok_or_else(|| Error::bad_request("INVALID_STEP_ID", "Step id format is invalid"))?;
@@ -48,7 +51,7 @@ impl UploadFlow for BackendApi {
             .get_instance(&body.session_id)
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
-        if session.user_id.as_deref() != Some(&body.user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Session does not belong to authenticated user",
             ));
@@ -85,7 +88,7 @@ impl UploadFlow for BackendApi {
         let upload_id = backend_id::kyc_upload_id()?;
         let object_key = format!(
             "uploads/{}/{}/{}/{}",
-            body.user_id, body.session_id, body.step_id, upload_id
+            user_id, body.session_id, body.step_id, upload_id
         );
 
         let encryption = if is_minio_storage {
@@ -127,6 +130,7 @@ impl UploadFlow for BackendApi {
         )
     }
 
+    #[instrument(skip(self))]
     async fn complete_upload_flow(
         &self,
         claims: &JwtToken,
@@ -149,7 +153,7 @@ impl UploadFlow for BackendApi {
             .get_instance(&body.session_id)
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
-        if session.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Session does not belong to authenticated user",
             ));

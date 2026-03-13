@@ -3,7 +3,7 @@ use crate::state_machine::types::{
     INSTANCE_STATUS_ACTIVE, INSTANCE_STATUS_CANCELLED, INSTANCE_STATUS_COMPLETED,
     INSTANCE_STATUS_FAILED, STEP_PHONE_ISSUE_OTP,
 };
-use backend_auth::JwtToken;
+use backend_auth::{JwtToken, normalize_user_id};
 use backend_core::Error;
 use backend_model::db::SmStepAttemptRow;
 use gen_oas_server_bff::models;
@@ -38,12 +38,22 @@ pub(super) fn split_step_id(id: &str) -> Option<(String, String)> {
 
 pub(super) fn ensure_user_match(claims: &JwtToken, expected_user_id: &str) -> Result<(), Error> {
     let authed = BackendApi::require_user_id(claims)?;
-    if authed != expected_user_id {
+    if authed != normalize_user_id(expected_user_id) {
         return Err(Error::unauthorized(
             "Authenticated user does not match request userId",
         ));
     }
     Ok(())
+}
+
+pub(super) fn normalized_user_id(user_id: &str) -> String {
+    normalize_user_id(user_id).to_owned()
+}
+
+pub(super) fn user_id_matches(stored_user_id: Option<&str>, expected_user_id: &str) -> bool {
+    stored_user_id
+        .map(normalize_user_id)
+        .is_some_and(|stored| stored == normalize_user_id(expected_user_id))
 }
 
 pub(super) fn parse_session_status(
@@ -154,7 +164,12 @@ pub(super) fn session_from_instance(
 
     let mut model = models::KycSession::new(
         instance.id,
-        instance.user_id.unwrap_or_default(),
+        instance
+            .user_id
+            .as_deref()
+            .map(normalize_user_id)
+            .unwrap_or_default()
+            .to_owned(),
         flow,
         status,
         step_ids,
@@ -274,4 +289,44 @@ pub(super) fn is_instance_active(instance_status: &str, context: &Value) -> bool
         status,
         models::KycSessionStatus::Open | models::KycSessionStatus::Running
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ensure_user_match, normalized_user_id, user_id_matches};
+    use backend_auth::{Claims, JwtToken};
+
+    fn claims(sub: &str) -> JwtToken {
+        JwtToken::new(Claims {
+            sub: sub.to_owned(),
+            name: None,
+            iss: "https://issuer.example".to_owned(),
+            exp: usize::MAX,
+            preferred_username: None,
+        })
+    }
+
+    #[test]
+    fn normalize_user_id_collapses_prefixed_identity() {
+        assert_eq!(
+            normalized_user_id("f:backend-user-storage:usr_123"),
+            "usr_123"
+        );
+    }
+
+    #[test]
+    fn ensure_user_match_accepts_prefixed_expected_id() {
+        let jwt = claims("usr_123");
+        ensure_user_match(&jwt, "f:backend-user-storage:usr_123")
+            .expect("equivalent IDs should match");
+    }
+
+    #[test]
+    fn user_id_matches_compares_normalized_values() {
+        assert!(user_id_matches(
+            Some("f:backend-user-storage:usr_123"),
+            "usr_123"
+        ));
+        assert!(!user_id_matches(Some("usr_999"), "usr_123"));
+    }
 }

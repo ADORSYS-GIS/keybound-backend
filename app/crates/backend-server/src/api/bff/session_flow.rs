@@ -1,8 +1,8 @@
 use super::super::BackendApi;
 use super::shared::{
+    api_map_to_value, ensure_user_match, flow_kind, is_instance_active,
+    normalized_user_id, parse_flow, put_flow_in_context, session_from_instance, user_id_matches,
     KIND_KYC_ADDRESS_PROOF, KIND_KYC_FIRST_DEPOSIT, KIND_KYC_ID_DOCUMENT, KIND_KYC_PHONE_OTP,
-    api_map_to_value, ensure_user_match, flow_kind, is_instance_active, parse_flow,
-    put_flow_in_context, session_from_instance,
 };
 use crate::state_machine::engine::Engine;
 use backend_auth::JwtToken;
@@ -14,6 +14,7 @@ use gen_oas_server_bff::apis::sessions::{
 };
 use gen_oas_server_bff::models;
 use serde_json::Value;
+use tracing::{info, instrument};
 
 #[backend_core::async_trait]
 pub(super) trait SessionFlow {
@@ -38,31 +39,35 @@ pub(super) trait SessionFlow {
 
 #[backend_core::async_trait]
 impl SessionFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn create_kyc_session_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreateKycSessionRequest,
     ) -> Result<InternalCreateKycSessionResponse, Error> {
         ensure_user_match(claims, &body.user_id)?;
+        let user_id = normalized_user_id(&body.user_id);
 
         let kind = flow_kind(body.flow);
-        let key = format!("{}:{}:{}", kind, body.flow, body.user_id);
+        let key = format!("{}:{}:{}", kind, body.flow, user_id);
 
         let mut context =
             api_map_to_value(body.context.clone()).unwrap_or(Value::Object(Default::default()));
         if !context.is_object() {
             context = Value::Object(Default::default());
         }
+
         if let Some(obj) = context.as_object_mut()
             && !obj.get("step_ids").is_some_and(Value::is_array)
         {
             obj.insert("step_ids".to_owned(), Value::Array(vec![]));
         }
+
         put_flow_in_context(&mut context, body.flow);
 
         let engine = Engine::new(self.state.clone());
         let mut instance = engine
-            .ensure_active_instance(kind, Some(body.user_id.clone()), key, context)
+            .ensure_active_instance(kind, Some(user_id), key, context)
             .await?;
 
         let mut normalized = instance.context.clone();
@@ -100,19 +105,22 @@ impl SessionFlow for BackendApi {
                 .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
         }
 
+        let session = session_from_instance(instance);
         Ok(
             InternalCreateKycSessionResponse::Status201_SessionCreatedOrResumed(
-                session_from_instance(instance),
+                session,
             ),
         )
     }
 
+    #[instrument(skip(self))]
     async fn get_kyc_session_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetKycSessionPathParams,
     ) -> Result<InternalGetKycSessionResponse, Error> {
         let user_id = BackendApi::require_user_id(claims)?;
+
         let instance = self
             .state
             .sm
@@ -120,7 +128,7 @@ impl SessionFlow for BackendApi {
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
-        if instance.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(instance.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Session does not belong to authenticated user",
             ));
@@ -131,14 +139,16 @@ impl SessionFlow for BackendApi {
         ))
     }
 
+    #[instrument(skip(self))]
     async fn list_kyc_sessions_flow(
         &self,
         claims: &JwtToken,
         query_params: &models::InternalListKycSessionsQueryParams,
     ) -> Result<InternalListKycSessionsResponse, Error> {
         let authed_user_id = BackendApi::require_user_id(claims)?;
-        let user_id = query_params.user_id.as_deref().unwrap_or(&authed_user_id);
-        ensure_user_match(claims, user_id)?;
+        let requested_user_id = query_params.user_id.as_deref().unwrap_or(&authed_user_id);
+        ensure_user_match(claims, requested_user_id)?;
+        let user_id = normalized_user_id(requested_user_id);
 
         let active_only = query_params.active_only.unwrap_or(true);
         let kinds: Vec<&'static str> = if let Some(flow) = query_params.flow {
@@ -160,7 +170,7 @@ impl SessionFlow for BackendApi {
                 .list_instances(SmInstanceFilter {
                     kind: Some(kind.to_owned()),
                     status: None,
-                    user_id: Some(user_id.to_owned()),
+                    user_id: Some(user_id.clone()),
                     phone_number: None,
                     created_from: None,
                     created_to: None,

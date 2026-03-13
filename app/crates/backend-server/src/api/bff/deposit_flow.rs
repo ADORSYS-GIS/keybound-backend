@@ -1,5 +1,8 @@
 use super::super::BackendApi;
-use super::shared::{DEPOSIT_STEP_TYPE, ensure_user_match, step_id, upsert_step_id_in_context};
+use super::shared::{
+    DEPOSIT_STEP_TYPE, ensure_user_match, normalized_user_id, step_id, upsert_step_id_in_context,
+    user_id_matches,
+};
 use crate::state_machine::engine::Engine;
 use crate::state_machine::types::{KIND_KYC_FIRST_DEPOSIT, STEP_DEPOSIT_AWAIT_PAYMENT};
 use backend_auth::JwtToken;
@@ -10,6 +13,7 @@ use gen_oas_server_bff::apis::deposits::{
 };
 use gen_oas_server_bff::models;
 use serde_json::Value;
+use tracing::instrument;
 
 #[backend_core::async_trait]
 pub(super) trait DepositFlow {
@@ -28,12 +32,14 @@ pub(super) trait DepositFlow {
 
 #[backend_core::async_trait]
 impl DepositFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn create_phone_deposit_request_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreatePhoneDepositRequest,
     ) -> Result<InternalCreatePhoneDepositRequestResponse, Error> {
         ensure_user_match(claims, &body.user_id)?;
+        let user_id = normalized_user_id(&body.user_id);
 
         let mut instance = self
             .state
@@ -48,7 +54,7 @@ impl DepositFlow for BackendApi {
                 "Session is not a FIRST_DEPOSIT flow",
             ));
         }
-        if instance.user_id.as_deref() != Some(&body.user_id) {
+        if !user_id_matches(instance.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Session does not belong to authenticated user",
             ));
@@ -62,11 +68,8 @@ impl DepositFlow for BackendApi {
             .and_then(Value::as_object)
             .is_some_and(|deposit| !deposit.is_empty());
         if !deposit_exists {
-            let (staff_id, staff_full_name, staff_phone_number) = self
-                .state
-                .sm
-                .select_deposit_staff_contact(&body.user_id)
-                .await?;
+            let (staff_id, staff_full_name, staff_phone_number) =
+                self.state.sm.select_deposit_staff_contact(&user_id).await?;
 
             let expires_at = Utc::now() + Duration::hours(2);
 
@@ -125,6 +128,7 @@ impl DepositFlow for BackendApi {
         )
     }
 
+    #[instrument(skip(self))]
     async fn get_phone_deposit_request_flow(
         &self,
         claims: &JwtToken,
@@ -145,7 +149,7 @@ impl DepositFlow for BackendApi {
                 "Deposit request not found",
             ));
         }
-        if instance.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(instance.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Deposit request does not belong to authenticated user",
             ));

@@ -6,12 +6,25 @@ use crate::claims::Claims;
 use crate::oidc_state::OidcState;
 use backend_core::{Error, Result};
 use jsonwebtoken::{DecodingKey, Validation, decode};
-use tracing::instrument;
+use tracing::{instrument};
 
 /// Wrapper around JWT claims with verification capabilities.
 #[derive(Debug, Clone)]
 pub struct JwtToken {
     pub claims: Claims,
+}
+
+/// Normalizes externally scoped identifiers like `f:backend-user-storage:usr_xxx` to `usr_xxx`.
+pub fn normalize_user_id(raw: &str) -> &str {
+    if raw.starts_with("usr_") {
+        return raw;
+    }
+
+    if let Some(segment) = raw.rsplit(':').find(|segment| segment.starts_with("usr_")) {
+        return segment;
+    }
+
+    raw.rsplit(':').next().unwrap_or(raw)
 }
 
 impl JwtToken {
@@ -22,17 +35,7 @@ impl JwtToken {
 
     /// Returns the user ID from the token's subject claim.
     pub fn user_id(&self) -> &str {
-        if self.claims.sub.contains(&":".to_string()) {
-            return &self
-                .claims
-                .sub
-                .split(":")
-                .collect::<Vec<&str>>()
-                .last()
-                .unwrap();
-        }
-
-        &self.claims.sub
+        normalize_user_id(&self.claims.sub)
     }
 
     /// Verifies a JWT token against the OIDC state's JWKS.
@@ -72,5 +75,40 @@ impl JwtToken {
             .map_err(|e| Error::unauthorized(format!("Token validation failed: {e}")))?;
 
         Ok(JwtToken::new(token_data.claims))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JwtToken, normalize_user_id};
+    use crate::Claims;
+
+    #[test]
+    fn normalize_user_id_supports_prefixed_scope() {
+        assert_eq!(
+            normalize_user_id("f:backend-user-storage:usr_cmmnxs9a80000o601z88fv62h"),
+            "usr_cmmnxs9a80000o601z88fv62h"
+        );
+    }
+
+    #[test]
+    fn normalize_user_id_supports_plain_usr_value() {
+        assert_eq!(
+            normalize_user_id("usr_cmmnxs9a80000o601z88fv62h"),
+            "usr_cmmnxs9a80000o601z88fv62h"
+        );
+    }
+
+    #[test]
+    fn jwt_token_user_id_returns_normalized_subject() {
+        let token = JwtToken::new(Claims {
+            sub: "f:backend-user-storage:usr_001".to_owned(),
+            name: None,
+            iss: "https://issuer.example".to_owned(),
+            exp: usize::MAX,
+            preferred_username: None,
+        });
+
+        assert_eq!(token.user_id(), "usr_001");
     }
 }

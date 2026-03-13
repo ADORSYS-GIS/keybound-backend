@@ -1,8 +1,9 @@
 use super::super::BackendApi;
 use super::shared::{
     MAGIC_ISSUE_STEP, MAGIC_RATE_LIMIT_MAX_ISSUES, MAGIC_RATE_LIMIT_WINDOW_MINUTES,
-    MAGIC_STEP_TYPE, ensure_step_registered, ensure_user_match, parse_step_status, parse_step_type,
-    rate_limited_error, split_step_id, step_id, upsert_step_id_in_context,
+    MAGIC_STEP_TYPE, ensure_step_registered, ensure_user_match, normalized_user_id,
+    parse_step_status, parse_step_type, rate_limited_error, split_step_id, step_id,
+    upsert_step_id_in_context, user_id_matches,
 };
 use crate::state_machine::secrets::{hash_secret, verify_secret};
 use crate::state_machine::types::{ActorType, INSTANCE_STATUS_COMPLETED, KIND_KYC_PHONE_OTP};
@@ -17,6 +18,7 @@ use gen_oas_server_bff::apis::email_magic::{
 };
 use gen_oas_server_bff::models;
 use serde_json::{Value, json};
+use tracing::instrument;
 
 #[backend_core::async_trait]
 pub(super) trait EmailFlow {
@@ -41,12 +43,14 @@ pub(super) trait EmailFlow {
 
 #[backend_core::async_trait]
 impl EmailFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn create_email_magic_step_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreateCaseStepRequest,
     ) -> Result<InternalCreateEmailMagicStepResponse, Error> {
         ensure_user_match(claims, &body.user_id)?;
+        let user_id = normalized_user_id(&body.user_id);
 
         let session = self
             .state
@@ -61,7 +65,7 @@ impl EmailFlow for BackendApi {
                 "Unsupported session kind for email magic",
             ));
         }
-        if session.user_id.as_deref() != Some(&body.user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Session does not belong to authenticated user",
             ));
@@ -90,7 +94,7 @@ impl EmailFlow for BackendApi {
             models::KycStep {
                 id,
                 session_id: session.id,
-                user_id: body.user_id.clone(),
+                user_id,
                 r_type: parse_step_type(MAGIC_STEP_TYPE)?,
                 status,
                 data: None,
@@ -101,6 +105,7 @@ impl EmailFlow for BackendApi {
         ))
     }
 
+    #[instrument(skip(self))]
     async fn issue_magic_email_challenge_flow(
         &self,
         claims: &JwtToken,
@@ -134,7 +139,7 @@ impl EmailFlow for BackendApi {
                 "Unsupported session kind for email magic",
             ));
         }
-        if session.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Step does not belong to authenticated user",
             ));
@@ -207,6 +212,7 @@ impl EmailFlow for BackendApi {
         )
     }
 
+    #[instrument(skip(self))]
     async fn verify_magic_email_challenge_flow(
         &self,
         claims: &JwtToken,
@@ -240,7 +246,7 @@ impl EmailFlow for BackendApi {
                 "Unsupported session kind for email magic",
             ));
         }
-        if session.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Step does not belong to authenticated user",
             ));

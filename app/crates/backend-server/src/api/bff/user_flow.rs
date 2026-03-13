@@ -1,13 +1,14 @@
 use super::super::BackendApi;
 use super::shared::{
-    KIND_KYC_FIRST_DEPOSIT, KIND_KYC_PHONE_OTP, ensure_user_match, parse_session_status,
-    value_to_api_map,
+    KIND_KYC_FIRST_DEPOSIT, KIND_KYC_PHONE_OTP, ensure_user_match, normalized_user_id,
+    parse_session_status, value_to_api_map,
 };
 use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_model::db::{SmInstanceRow, UserRow};
 use backend_repository::SmInstanceFilter;
 use chrono::{DateTime, Utc};
+use tracing::instrument;
 use gen_oas_server_bff::apis::users::{
     InternalGetUserByIdResponse, InternalGetUserKycLevelResponse, InternalGetUserKycSummaryResponse,
 };
@@ -46,30 +47,34 @@ pub(super) trait UserFlow {
 
 #[backend_core::async_trait]
 impl UserFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn get_user_by_id_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetUserByIdPathParams,
     ) -> Result<InternalGetUserByIdResponse, Error> {
         ensure_user_match(claims, &path_params.user_id)?;
-        let row = require_user(self, &path_params.user_id).await?;
+        let user_id = normalized_user_id(&path_params.user_id);
+        let row = require_user(self, &user_id).await?;
 
         Ok(InternalGetUserByIdResponse::Status200_UserRow(
             user_record_from_row(row),
         ))
     }
 
+    #[instrument(skip(self))]
     async fn get_user_kyc_level_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetUserKycLevelPathParams,
     ) -> Result<InternalGetUserKycLevelResponse, Error> {
         ensure_user_match(claims, &path_params.user_id)?;
-        require_user(self, &path_params.user_id).await?;
+        let user_id = normalized_user_id(&path_params.user_id);
+        require_user(self, &user_id).await?;
 
-        let projection = build_user_kyc_projection(self, &path_params.user_id).await?;
+        let projection = build_user_kyc_projection(self, &user_id).await?;
         let payload = models::UserKycLevelResponse::new(
-            path_params.user_id.clone(),
+            user_id,
             projection.level,
             projection.phone_otp_verified,
             projection.first_deposit_verified,
@@ -78,17 +83,18 @@ impl UserFlow for BackendApi {
         Ok(InternalGetUserKycLevelResponse::Status200_KYCLevel(payload))
     }
 
+    #[instrument(skip(self))]
     async fn get_user_kyc_summary_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetUserKycSummaryPathParams,
     ) -> Result<InternalGetUserKycSummaryResponse, Error> {
         ensure_user_match(claims, &path_params.user_id)?;
-        require_user(self, &path_params.user_id).await?;
+        let user_id = normalized_user_id(&path_params.user_id);
+        require_user(self, &user_id).await?;
 
-        let projection = build_user_kyc_projection(self, &path_params.user_id).await?;
-        let mut payload =
-            models::UserKycSummary::new(path_params.user_id.clone(), projection.level);
+        let projection = build_user_kyc_projection(self, &user_id).await?;
+        let mut payload = models::UserKycSummary::new(user_id, projection.level);
         payload.phone_otp_status = projection.phone_otp_status;
         payload.first_deposit_status = projection.first_deposit_status;
         payload.latest_session_updated_at = projection.latest_session_updated_at;
@@ -306,6 +312,31 @@ mod tests {
         assert_eq!(payload.username, "alice");
         assert_eq!(payload.full_name.as_deref(), Some("Alice"));
         assert_eq!(payload.email.as_deref(), Some("alice@example.test"));
+    }
+
+    #[tokio::test]
+    async fn get_user_by_id_normalizes_prefixed_user_ids() {
+        let mut user = MockUserRepo::new();
+        user.expect_get_user()
+            .times(1)
+            .withf(|user_id| user_id == "usr_001")
+            .return_once(|_| Ok(Some(user_row("usr_001"))));
+
+        let api = build_api(MockStateMachineRepo::new(), user);
+        let claims = create_fake_jwt("f:backend-user-storage:usr_001");
+
+        let response = api
+            .get_user_by_id_flow(
+                &claims,
+                &models::InternalGetUserByIdPathParams {
+                    user_id: "f:backend-user-storage:usr_001".to_owned(),
+                },
+            )
+            .await
+            .expect("prefixed IDs should normalize");
+
+        let InternalGetUserByIdResponse::Status200_UserRow(payload) = response;
+        assert_eq!(payload.user_id, "usr_001");
     }
 
     #[tokio::test]

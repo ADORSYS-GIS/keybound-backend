@@ -1,5 +1,8 @@
+use tracing::instrument;
 use super::super::BackendApi;
-use super::shared::{ensure_step_registered, parse_step_status, parse_step_type, split_step_id};
+use super::shared::{
+    ensure_step_registered, parse_step_status, parse_step_type, split_step_id, user_id_matches,
+};
 use backend_auth::JwtToken;
 use backend_core::Error;
 use gen_oas_server_bff::apis::steps::InternalGetKycStepResponse;
@@ -16,6 +19,7 @@ pub(super) trait StepFlow {
 
 #[backend_core::async_trait]
 impl StepFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn get_kyc_step_flow(
         &self,
         claims: &JwtToken,
@@ -32,7 +36,7 @@ impl StepFlow for BackendApi {
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
-        if session.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Step does not belong to authenticated user",
             ));

@@ -1,8 +1,9 @@
 use super::super::BackendApi;
 use super::shared::{
     OTP_RATE_LIMIT_MAX_ISSUES, OTP_RATE_LIMIT_WINDOW_MINUTES, OTP_STEP_TYPE,
-    OTP_VERIFY_ATTEMPT_STEP, ensure_step_registered, ensure_user_match, parse_step_status,
-    parse_step_type, rate_limited_error, split_step_id, step_id, upsert_step_id_in_context,
+    OTP_VERIFY_ATTEMPT_STEP, ensure_step_registered, ensure_user_match, normalized_user_id,
+    parse_step_status, parse_step_type, rate_limited_error, split_step_id, step_id,
+    upsert_step_id_in_context, user_id_matches,
 };
 use crate::state_machine::engine::Engine;
 use crate::state_machine::secrets::verify_secret;
@@ -20,7 +21,7 @@ use gen_oas_server_bff::apis::phone_otp::{
 };
 use gen_oas_server_bff::models;
 use serde_json::{Value, json};
-use tracing::info;
+use tracing::{info, instrument};
 
 #[backend_core::async_trait]
 pub(super) trait PhoneFlow {
@@ -45,6 +46,7 @@ pub(super) trait PhoneFlow {
 
 #[backend_core::async_trait]
 impl PhoneFlow for BackendApi {
+    #[instrument(skip(self))]
     async fn create_phone_otp_step_flow(
         &self,
         claims: &JwtToken,
@@ -52,6 +54,7 @@ impl PhoneFlow for BackendApi {
     ) -> Result<InternalCreatePhoneOtpStepResponse, Error> {
         info!("Handling create_phone_otp_step_flow called");
         ensure_user_match(claims, &body.user_id)?;
+        let user_id = normalized_user_id(&body.user_id);
 
         let session = self
             .state
@@ -66,7 +69,7 @@ impl PhoneFlow for BackendApi {
                 "Unsupported session kind for phone OTP",
             ));
         }
-        if session.user_id.as_deref() != Some(&body.user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Session does not belong to authenticated user",
             ));
@@ -95,7 +98,7 @@ impl PhoneFlow for BackendApi {
             models::KycStep {
                 id,
                 session_id: session.id,
-                user_id: body.user_id.clone(),
+                user_id,
                 r_type: parse_step_type(OTP_STEP_TYPE)?,
                 status,
                 data: None,
@@ -106,6 +109,7 @@ impl PhoneFlow for BackendApi {
         ))
     }
 
+    #[instrument(skip(self))]
     async fn issue_phone_otp_challenge_flow(
         &self,
         claims: &JwtToken,
@@ -139,7 +143,7 @@ impl PhoneFlow for BackendApi {
                 "Unsupported session kind for phone OTP",
             ));
         }
-        if session.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Step does not belong to authenticated user",
             ));
@@ -182,6 +186,7 @@ impl PhoneFlow for BackendApi {
         )
     }
 
+    #[instrument(skip(self))]
     async fn verify_phone_otp_challenge_flow(
         &self,
         claims: &JwtToken,
@@ -215,7 +220,7 @@ impl PhoneFlow for BackendApi {
                 "Unsupported session kind for phone OTP",
             ));
         }
-        if session.user_id.as_deref() != Some(&user_id) {
+        if !user_id_matches(session.user_id.as_deref(), &user_id) {
             return Err(Error::unauthorized(
                 "Step does not belong to authenticated user",
             ));

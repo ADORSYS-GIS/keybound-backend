@@ -11,7 +11,7 @@ use backend_auth::{Claims, JwtToken, OidcState, SignatureContext, SignatureState
 use backend_core::{AppResult, Error};
 use http::{HeaderMap, HeaderValue};
 use std::sync::Arc;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 #[derive(Clone)]
 pub struct BackendApi {
