@@ -1,6 +1,7 @@
 use crate::traits::*;
 use backend_core::async_trait;
 use backend_model::{db, kc as kc_map};
+use diesel::PgJsonbExpressionMethods;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use diesel_async::AsyncPgConnection;
@@ -29,6 +30,17 @@ impl UserRepository {
 
 fn normalize_full_name(name: Option<String>) -> Option<String> {
     name.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
+}
+
+fn normalize_search_field(value: Option<&String>) -> Option<String> {
+    value.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() {
             None
@@ -140,22 +152,102 @@ impl UserRepo for UserRepository {
 
         query = query.filter(realm.eq(req.realm.clone()));
 
-        if let Some(ref search_val) = req.search {
-            let pattern = format!("%{}%", search_val);
-            query = query.filter(
-                email
-                    .ilike(pattern.clone())
-                    .or(username.ilike(pattern.clone()))
-                    .or(full_name.ilike(pattern)),
-            );
+        let exact = req.exact.unwrap_or(false);
+        let search_filter = normalize_search_field(req.search.as_ref());
+        let username_filter = normalize_search_field(req.username.as_ref());
+        let first_name_filter = normalize_search_field(req.first_name.as_ref());
+        let last_name_filter = normalize_search_field(req.last_name.as_ref());
+        let email_filter = normalize_search_field(req.email.as_ref());
+
+        let attribute_filters: Vec<(String, String)> = req
+            .attributes
+            .as_ref()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        let key = normalize_search_field(Some(key))?;
+                        let value = normalize_search_field(Some(value))?;
+                        Some((key, value))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let has_identity_filter = search_filter.is_some()
+            || username_filter.is_some()
+            || first_name_filter.is_some()
+            || last_name_filter.is_some()
+            || email_filter.is_some()
+            || !attribute_filters.is_empty();
+
+        // Defensive guard for KC federation lookups:
+        // if the request contains only realm (no identity filters), do not return
+        // arbitrary users from that realm.
+        if !has_identity_filter {
+            return Ok(vec![]);
         }
 
-        if let Some(ref username_val) = req.username {
-            query = query.filter(username.eq(username_val));
+        if let Some(search_val) = search_filter {
+            if exact {
+                query = query.filter(
+                    email
+                        .eq(search_val.clone())
+                        .or(username.eq(search_val.clone()))
+                        .or(full_name.eq(search_val)),
+                );
+            } else {
+                let pattern = format!("%{}%", search_val);
+                query = query.filter(
+                    email
+                        .ilike(pattern.clone())
+                        .or(username.ilike(pattern.clone()))
+                        .or(full_name.ilike(pattern)),
+                );
+            }
         }
 
-        if let Some(ref email_val) = req.email {
-            query = query.filter(email.eq(email_val));
+        if let Some(username_val) = username_filter {
+            if exact {
+                query = query.filter(username.eq(username_val));
+            } else {
+                query = query.filter(username.ilike(format!("%{}%", username_val)));
+            }
+        }
+
+        if let Some(email_val) = email_filter {
+            if exact {
+                query = query.filter(email.eq(email_val));
+            } else {
+                query = query.filter(email.ilike(format!("%{}%", email_val)));
+            }
+        }
+
+        if exact {
+            match (first_name_filter.clone(), last_name_filter.clone()) {
+                (Some(first_name_val), Some(last_name_val)) => {
+                    query = query.filter(full_name.eq(format!("{first_name_val} {last_name_val}")));
+                }
+                (Some(first_name_val), None) => {
+                    query = query.filter(full_name.eq(first_name_val));
+                }
+                (None, Some(last_name_val)) => {
+                    query = query.filter(full_name.eq(last_name_val));
+                }
+                (None, None) => {}
+            }
+        } else {
+            if let Some(first_name_val) = first_name_filter.clone() {
+                query = query.filter(full_name.ilike(format!("%{}%", first_name_val)));
+            }
+            if let Some(last_name_val) = last_name_filter.clone() {
+                query = query.filter(full_name.ilike(format!("%{}%", last_name_val)));
+            }
+        }
+
+        for (key, value) in attribute_filters {
+            let contains_value = serde_json::json!({ key: value });
+            query = query.filter(attributes.contains(contains_value));
         }
 
         if let Some(enabled_val) = req.enabled {

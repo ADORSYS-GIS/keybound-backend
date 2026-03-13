@@ -215,6 +215,7 @@ components:
       type: string
       enum:
         - KYC_PHONE_OTP
+        - KYC_EMAIL_MAGIC
         - KYC_FIRST_DEPOSIT
 
     InstanceStatus:

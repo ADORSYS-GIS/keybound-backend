@@ -14,6 +14,7 @@ use std::collections::HashMap;
 pub(super) const KIND_KYC_ID_DOCUMENT: &str = "KYC_ID_DOCUMENT";
 pub(super) const KIND_KYC_ADDRESS_PROOF: &str = "KYC_ADDRESS_PROOF";
 pub(super) const KIND_KYC_PHONE_OTP: &str = crate::state_machine::types::KIND_KYC_PHONE_OTP;
+pub(super) const KIND_KYC_EMAIL_MAGIC: &str = crate::state_machine::types::KIND_KYC_EMAIL_MAGIC;
 pub(super) const KIND_KYC_FIRST_DEPOSIT: &str = crate::state_machine::types::KIND_KYC_FIRST_DEPOSIT;
 
 pub(super) const OTP_RATE_LIMIT_WINDOW_MINUTES: i64 = 10;
@@ -108,7 +109,25 @@ pub(super) fn parse_step_status(
         return models::KycStatus::NotStarted;
     }
 
-    if kind == KIND_KYC_PHONE_OTP && step_type == MAGIC_STEP_TYPE {
+    if kind == KIND_KYC_EMAIL_MAGIC && step_type == MAGIC_STEP_TYPE {
+        let latest_issue = attempts
+            .iter()
+            .filter(|a| a.step_name == MAGIC_ISSUE_STEP)
+            .max_by_key(|a| a.attempt_no);
+        if latest_issue.is_some() {
+            return models::KycStatus::InProgress;
+        }
+        return models::KycStatus::NotStarted;
+    }
+
+    // Backward compatibility for records created before EMAIL_MAGIC got its own kind.
+    if kind == KIND_KYC_PHONE_OTP
+        && context
+            .get("flow")
+            .and_then(Value::as_str)
+            .is_some_and(|flow| flow == models::KycFlowType::EmailMagic.to_string())
+        && step_type == MAGIC_STEP_TYPE
+    {
         let latest_issue = attempts
             .iter()
             .filter(|a| a.step_name == MAGIC_ISSUE_STEP)
@@ -140,6 +159,7 @@ pub(super) fn parse_flow(kind: &str, context: &Value) -> models::KycFlowType {
 
     match kind {
         KIND_KYC_FIRST_DEPOSIT => models::KycFlowType::FirstDeposit,
+        KIND_KYC_EMAIL_MAGIC => models::KycFlowType::EmailMagic,
         KIND_KYC_ID_DOCUMENT => models::KycFlowType::IdDocument,
         KIND_KYC_ADDRESS_PROOF => models::KycFlowType::AddressProof,
         _ => models::KycFlowType::PhoneOtp,
@@ -148,7 +168,8 @@ pub(super) fn parse_flow(kind: &str, context: &Value) -> models::KycFlowType {
 
 pub(super) fn flow_kind(flow: models::KycFlowType) -> &'static str {
     match flow {
-        models::KycFlowType::PhoneOtp | models::KycFlowType::EmailMagic => KIND_KYC_PHONE_OTP,
+        models::KycFlowType::PhoneOtp => KIND_KYC_PHONE_OTP,
+        models::KycFlowType::EmailMagic => KIND_KYC_EMAIL_MAGIC,
         models::KycFlowType::FirstDeposit => KIND_KYC_FIRST_DEPOSIT,
         models::KycFlowType::IdDocument => KIND_KYC_ID_DOCUMENT,
         models::KycFlowType::AddressProof => KIND_KYC_ADDRESS_PROOF,

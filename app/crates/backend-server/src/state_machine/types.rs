@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const KIND_KYC_PHONE_OTP: &str = "KYC_PHONE_OTP";
+pub const KIND_KYC_EMAIL_MAGIC: &str = "KYC_EMAIL_MAGIC";
 pub const KIND_KYC_FIRST_DEPOSIT: &str = "KYC_FIRST_DEPOSIT";
 
 pub const INSTANCE_STATUS_ACTIVE: &str = "ACTIVE";

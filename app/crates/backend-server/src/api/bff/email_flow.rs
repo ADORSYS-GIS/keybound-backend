@@ -6,7 +6,7 @@ use super::shared::{
     upsert_step_id_in_context, user_id_matches,
 };
 use crate::state_machine::secrets::{hash_secret, verify_secret};
-use crate::state_machine::types::{ActorType, INSTANCE_STATUS_COMPLETED, KIND_KYC_PHONE_OTP};
+use crate::state_machine::types::{ActorType, INSTANCE_STATUS_COMPLETED, KIND_KYC_EMAIL_MAGIC};
 use crate::worker::NotificationJob;
 use backend_auth::JwtToken;
 use backend_core::Error;
@@ -59,7 +59,7 @@ impl EmailFlow for BackendApi {
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
-        if session.kind != KIND_KYC_PHONE_OTP {
+        if session.kind != KIND_KYC_EMAIL_MAGIC {
             return Err(Error::bad_request(
                 "INVALID_SESSION_KIND",
                 "Unsupported session kind for email magic",
@@ -133,7 +133,7 @@ impl EmailFlow for BackendApi {
             .get_instance(&body.session_id)
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
-        if session.kind != KIND_KYC_PHONE_OTP {
+        if session.kind != KIND_KYC_EMAIL_MAGIC {
             return Err(Error::bad_request(
                 "INVALID_SESSION_KIND",
                 "Unsupported session kind for email magic",
@@ -240,7 +240,7 @@ impl EmailFlow for BackendApi {
             .get_instance(&body.session_id)
             .await?
             .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
-        if session.kind != KIND_KYC_PHONE_OTP {
+        if session.kind != KIND_KYC_EMAIL_MAGIC {
             return Err(Error::bad_request(
                 "INVALID_SESSION_KIND",
                 "Unsupported session kind for email magic",

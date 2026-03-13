@@ -3,9 +3,10 @@ use crate::file_storage::PresignedUpload;
 use crate::state_machine::secrets::hash_secret;
 use crate::state_machine::types::{
     ATTEMPT_STATUS_RUNNING, ATTEMPT_STATUS_SUCCEEDED, INSTANCE_STATUS_ACTIVE,
-    INSTANCE_STATUS_COMPLETED, INSTANCE_STATUS_RUNNING, KIND_KYC_FIRST_DEPOSIT, KIND_KYC_PHONE_OTP,
-    STEP_DEPOSIT_AWAIT_APPROVAL, STEP_DEPOSIT_AWAIT_PAYMENT, STEP_DEPOSIT_REGISTER_CUSTOMER,
-    STEP_PHONE_ISSUE_OTP, STEP_PHONE_VERIFY_OTP,
+    INSTANCE_STATUS_COMPLETED, INSTANCE_STATUS_RUNNING, KIND_KYC_EMAIL_MAGIC,
+    KIND_KYC_FIRST_DEPOSIT, KIND_KYC_PHONE_OTP, STEP_DEPOSIT_AWAIT_APPROVAL,
+    STEP_DEPOSIT_AWAIT_PAYMENT, STEP_DEPOSIT_REGISTER_CUSTOMER, STEP_PHONE_ISSUE_OTP,
+    STEP_PHONE_VERIFY_OTP,
 };
 use crate::test_utils::{
     MockDeviceRepo, MockMinioStorage, MockNotificationQueue, MockStateMachineQueue,
@@ -853,7 +854,7 @@ async fn bff_issue_and_verify_otp_success() {
 async fn bff_magic_email_issue_success() {
     let session = sm_instance_row(
         "ins_otp_003",
-        KIND_KYC_PHONE_OTP,
+        KIND_KYC_EMAIL_MAGIC,
         INSTANCE_STATUS_RUNNING,
         Some("usr_001"),
         json!({"step_ids": ["ins_otp_003__EMAIL_MAGIC"]}),
@@ -935,7 +936,7 @@ async fn bff_magic_email_verify_success() {
     );
     let session = sm_instance_row(
         "ins_otp_004",
-        KIND_KYC_PHONE_OTP,
+        KIND_KYC_EMAIL_MAGIC,
         INSTANCE_STATUS_RUNNING,
         Some("usr_001"),
         json!({"step_ids": ["ins_otp_004__EMAIL_MAGIC"]}),
@@ -1963,7 +1964,7 @@ async fn bff_create_step_session_not_found() {
 async fn bff_create_email_step_success() {
     let session = sm_instance_row(
         "ins_otp_005",
-        KIND_KYC_PHONE_OTP,
+        KIND_KYC_EMAIL_MAGIC,
         INSTANCE_STATUS_RUNNING,
         Some("usr_001"),
         json!({}),
@@ -2138,7 +2139,7 @@ async fn bff_verify_otp_missing_attempt_returns_invalid_outcome() {
 async fn bff_magic_verify_invalid_token_returns_failed_outcome() {
     let session = sm_instance_row(
         "ins_otp_008",
-        KIND_KYC_PHONE_OTP,
+        KIND_KYC_EMAIL_MAGIC,
         INSTANCE_STATUS_RUNNING,
         Some("usr_001"),
         json!({"step_ids": ["ins_otp_008__EMAIL_MAGIC"]}),

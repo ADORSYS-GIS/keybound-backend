@@ -1,8 +1,8 @@
 use super::super::BackendApi;
 use super::shared::{
-    KIND_KYC_ADDRESS_PROOF, KIND_KYC_FIRST_DEPOSIT, KIND_KYC_ID_DOCUMENT, KIND_KYC_PHONE_OTP,
-    api_map_to_value, ensure_user_match, flow_kind, is_instance_active, normalized_user_id,
-    parse_flow, put_flow_in_context, session_from_instance, user_id_matches,
+    KIND_KYC_ADDRESS_PROOF, KIND_KYC_EMAIL_MAGIC, KIND_KYC_FIRST_DEPOSIT, KIND_KYC_ID_DOCUMENT,
+    KIND_KYC_PHONE_OTP, api_map_to_value, ensure_user_match, flow_kind, is_instance_active,
+    normalized_user_id, parse_flow, put_flow_in_context, session_from_instance, user_id_matches,
 };
 use crate::state_machine::engine::Engine;
 use backend_auth::JwtToken;
@@ -14,7 +14,7 @@ use gen_oas_server_bff::apis::sessions::{
 };
 use gen_oas_server_bff::models;
 use serde_json::Value;
-use tracing::{info, instrument};
+use tracing::instrument;
 
 #[backend_core::async_trait]
 pub(super) trait SessionFlow {
@@ -152,6 +152,7 @@ impl SessionFlow for BackendApi {
         } else {
             vec![
                 KIND_KYC_PHONE_OTP,
+                KIND_KYC_EMAIL_MAGIC,
                 KIND_KYC_FIRST_DEPOSIT,
                 KIND_KYC_ID_DOCUMENT,
                 KIND_KYC_ADDRESS_PROOF,

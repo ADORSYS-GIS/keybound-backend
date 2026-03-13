@@ -9,8 +9,9 @@ Tokenization/user-storage backend with three HTTP surfaces:
 ## Revamp Status (2026-03-07)
 - Legacy KYC SQL tables (`kyc_*`, `phone_deposit`) are replaced by a generic persisted state-machine store:
   - `sm_instance`, `sm_event`, `sm_step_attempt`
-- Two KYC processes are implemented as state machines:
+- Three KYC processes are implemented as state machines:
   - `KYC_PHONE_OTP`
+  - `KYC_EMAIL_MAGIC`
   - `KYC_FIRST_DEPOSIT` (staff confirms payment then approves; worker calls CUSS `registerCustomer` then `approveAndDeposit`)
 - Staff OpenAPI (`openapi/user-storage--staff.yaml`) is rewritten to expose state-machine observability and controls.
 - OAS3 integration tests are implemented in `backend-server` under `app/crates/backend-server/src/api/it_tests.rs` and gated by the `it-tests` crate feature.
@@ -315,6 +316,7 @@ All backends:
 - **Persistence**: `sm_instance`, `sm_event`, `sm_step_attempt` (legacy `kyc_*` and `phone_deposit` tables are removed by the state-machine revamp migration).
 - **Processes**:
   - `KYC_PHONE_OTP`
+  - `KYC_EMAIL_MAGIC`
   - `KYC_FIRST_DEPOSIT`
 
 ### BFF KYC Sessions & Steps (Current)
@@ -331,7 +333,8 @@ All backends:
   - Reuses active session via `ensure_active_instance` keying by `{kind}:{flow}:{userId}`.
 - **Step IDs**: deterministic `"{sessionId}__{stepType}"` stored in session `context.step_ids`.
 - **Flow-to-kind mapping**:
-  - `PHONE_OTP` and `EMAIL_MAGIC` map to `KYC_PHONE_OTP`.
+  - `PHONE_OTP` maps to `KYC_PHONE_OTP`.
+  - `EMAIL_MAGIC` maps to `KYC_EMAIL_MAGIC`.
   - `FIRST_DEPOSIT` maps to `KYC_FIRST_DEPOSIT`.
   - `ID_DOCUMENT` and `ADDRESS_PROOF` map to dedicated kinds for future extension.
 

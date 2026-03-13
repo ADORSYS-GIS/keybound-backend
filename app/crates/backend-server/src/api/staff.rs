@@ -393,6 +393,7 @@ fn steps_for_kind(kind: &str) -> Vec<&'static str> {
             STEP_DEPOSIT_APPROVE_AND_DEPOSIT,
             STEP_MARK_COMPLETE,
         ],
+        KIND_KYC_EMAIL_MAGIC => vec!["ISSUE_MAGIC_EMAIL", STEP_MARK_COMPLETE],
         _ => vec![
             STEP_PHONE_ISSUE_OTP,
             STEP_PHONE_VERIFY_OTP,
@@ -404,6 +405,7 @@ fn steps_for_kind(kind: &str) -> Vec<&'static str> {
 fn is_retryable_async_step(kind: &str, step_name: &str) -> bool {
     match kind {
         KIND_KYC_PHONE_OTP => step_name == STEP_PHONE_ISSUE_OTP,
+        KIND_KYC_EMAIL_MAGIC => false,
         KIND_KYC_FIRST_DEPOSIT => {
             step_name == STEP_DEPOSIT_REGISTER_CUSTOMER
                 || step_name == STEP_DEPOSIT_APPROVE_AND_DEPOSIT

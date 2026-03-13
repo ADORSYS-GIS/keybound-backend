@@ -49,9 +49,9 @@ RUN \
       exit 1; \
       ;; \
   esac; \
-  cargo build --release --locked --target "${RUST_TARGET}" -p backend \
-  && cp ./target/"${RUST_TARGET}"/release/backend backend \
-  && cp ./target/"${RUST_TARGET}"/release/health healthcheck
+  cargo build --locked --target "${RUST_TARGET}" -p backend \
+  && cp ./target/"${RUST_TARGET}"/debug/backend backend \
+  && cp ./target/"${RUST_TARGET}"/debug/health healthcheck
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
