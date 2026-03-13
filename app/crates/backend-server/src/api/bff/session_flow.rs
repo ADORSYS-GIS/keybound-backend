@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{
     KIND_KYC_ADDRESS_PROOF, KIND_KYC_EMAIL_MAGIC, KIND_KYC_FIRST_DEPOSIT, KIND_KYC_ID_DOCUMENT,
     KIND_KYC_PHONE_OTP, api_map_to_value, ensure_user_match, flow_kind, is_instance_active,
@@ -16,31 +15,11 @@ use gen_oas_server_bff::models;
 use serde_json::Value;
 use tracing::instrument;
 
-#[backend_core::async_trait]
-pub(super) trait SessionFlow {
-    async fn create_kyc_session_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::CreateKycSessionRequest,
-    ) -> Result<InternalCreateKycSessionResponse, Error>;
+use super::super::BackendApi;
 
-    async fn get_kyc_session_flow(
-        &self,
-        claims: &JwtToken,
-        path_params: &models::InternalGetKycSessionPathParams,
-    ) -> Result<InternalGetKycSessionResponse, Error>;
-
-    async fn list_kyc_sessions_flow(
-        &self,
-        claims: &JwtToken,
-        query_params: &models::InternalListKycSessionsQueryParams,
-    ) -> Result<InternalListKycSessionsResponse, Error>;
-}
-
-#[backend_core::async_trait]
-impl SessionFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn create_kyc_session_flow(
+    pub async fn create_kyc_session_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreateKycSessionRequest,
@@ -110,7 +89,7 @@ impl SessionFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn get_kyc_session_flow(
+    pub async fn get_kyc_session_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetKycSessionPathParams,
@@ -136,7 +115,7 @@ impl SessionFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn list_kyc_sessions_flow(
+    pub async fn list_kyc_sessions_flow(
         &self,
         claims: &JwtToken,
         query_params: &models::InternalListKycSessionsQueryParams,

@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{ensure_user_match, normalized_user_id, split_step_id, user_id_matches};
 use crate::file_storage::EncryptionMode;
 use backend_auth::JwtToken;
@@ -10,25 +9,11 @@ use gen_oas_server_bff::apis::uploads::{
 use gen_oas_server_bff::models;
 use tracing::instrument;
 
-#[backend_core::async_trait]
-pub(super) trait UploadFlow {
-    async fn presign_upload_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::InternalPresignRequest,
-    ) -> Result<InternalPresignUploadResponse, Error>;
+use super::super::BackendApi;
 
-    async fn complete_upload_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::InternalCompleteUploadRequest,
-    ) -> Result<InternalCompleteUploadResponse, Error>;
-}
-
-#[backend_core::async_trait]
-impl UploadFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn presign_upload_flow(
+    pub async fn presign_upload_flow(
         &self,
         claims: &JwtToken,
         body: &models::InternalPresignRequest,
@@ -131,7 +116,7 @@ impl UploadFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn complete_upload_flow(
+    pub async fn complete_upload_flow(
         &self,
         claims: &JwtToken,
         body: &models::InternalCompleteUploadRequest,

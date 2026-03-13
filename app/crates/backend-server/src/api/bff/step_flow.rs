@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{
     ensure_step_registered, parse_step_status, parse_step_type, split_step_id, user_id_matches,
 };
@@ -8,19 +7,11 @@ use gen_oas_server_bff::apis::steps::InternalGetKycStepResponse;
 use gen_oas_server_bff::models;
 use tracing::instrument;
 
-#[backend_core::async_trait]
-pub(super) trait StepFlow {
-    async fn get_kyc_step_flow(
-        &self,
-        claims: &JwtToken,
-        path_params: &models::InternalGetKycStepPathParams,
-    ) -> Result<InternalGetKycStepResponse, Error>;
-}
+use super::super::BackendApi;
 
-#[backend_core::async_trait]
-impl StepFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn get_kyc_step_flow(
+    pub async fn get_kyc_step_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetKycStepPathParams,

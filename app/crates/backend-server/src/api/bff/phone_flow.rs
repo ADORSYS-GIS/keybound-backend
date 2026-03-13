@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{
     OTP_RATE_LIMIT_MAX_ISSUES, OTP_RATE_LIMIT_WINDOW_MINUTES, OTP_STEP_TYPE,
     OTP_VERIFY_ATTEMPT_STEP, ensure_step_registered, ensure_user_match, normalized_user_id,
@@ -23,31 +22,11 @@ use gen_oas_server_bff::models;
 use serde_json::{Value, json};
 use tracing::{info, instrument};
 
-#[backend_core::async_trait]
-pub(super) trait PhoneFlow {
-    async fn create_phone_otp_step_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::CreateCaseStepRequest,
-    ) -> Result<InternalCreatePhoneOtpStepResponse, Error>;
+use super::super::BackendApi;
 
-    async fn issue_phone_otp_challenge_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::IssuePhoneOtpRequest,
-    ) -> Result<InternalIssuePhoneOtpChallengeResponse, Error>;
-
-    async fn verify_phone_otp_challenge_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::VerifyPhoneOtpRequest,
-    ) -> Result<InternalVerifyPhoneOtpChallengeResponse, Error>;
-}
-
-#[backend_core::async_trait]
-impl PhoneFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn create_phone_otp_step_flow(
+    pub async fn create_phone_otp_step_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreateCaseStepRequest,
@@ -110,7 +89,7 @@ impl PhoneFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn issue_phone_otp_challenge_flow(
+    pub async fn issue_phone_otp_challenge_flow(
         &self,
         claims: &JwtToken,
         body: &models::IssuePhoneOtpRequest,
@@ -187,7 +166,7 @@ impl PhoneFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn verify_phone_otp_challenge_flow(
+    pub async fn verify_phone_otp_challenge_flow(
         &self,
         claims: &JwtToken,
         body: &models::VerifyPhoneOtpRequest,

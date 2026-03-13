@@ -913,10 +913,8 @@ dependencies = [
 name = "backend"
 version = "0.2.3"
 dependencies = [
- "backend-cli",
  "backend-core",
  "backend-migrate",
- "backend-otlp",
  "backend-server",
  "clap",
  "diesel",
@@ -924,6 +922,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -953,13 +952,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "backend-cli"
-version = "0.2.3"
-dependencies = [
- "clap",
-]
-
-[[package]]
 name = "backend-core"
 version = "0.2.3"
 dependencies = [
@@ -969,6 +961,7 @@ dependencies = [
  "aws-sdk-sns",
  "axum",
  "chrono",
+ "clap",
  "cuid",
  "diesel",
  "hex",
@@ -981,6 +974,10 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-error",
+ "tracing-subscriber",
  "utoipa",
 ]
 
@@ -1041,18 +1038,6 @@ dependencies = [
  "o2o",
  "serde_json",
  "sha2",
-]
-
-[[package]]
-name = "backend-otlp"
-version = "0.2.3"
-dependencies = [
- "backend-core",
- "tracing",
- "tracing-appender",
- "tracing-error",
- "tracing-flame",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1122,6 +1107,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "strum",
  "tokio",
  "tower",
  "tower-http",
@@ -5411,6 +5397,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.115",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5930,17 +5937,6 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b1581020d7a273442f5b45074a6a57d5757ad0a47dac0e9f0bd57b81936f3db"
 dependencies = [
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "tracing-flame"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bae117ee14789185e129aaee5d93750abe67fdc5a9a62650452bfe4e122a3a9"
-dependencies = [
- "lazy_static",
  "tracing",
  "tracing-subscriber",
 ]

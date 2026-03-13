@@ -127,7 +127,7 @@ pub struct SmStepAttemptCreateInput {
 }
 
 /// Partial update for step attempt records.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SmStepAttemptPatch {
     pub status: Option<String>,
     pub output: Option<Option<Value>>,
@@ -136,6 +136,82 @@ pub struct SmStepAttemptPatch {
     pub started_at: Option<Option<DateTime<Utc>>>,
     pub finished_at: Option<Option<DateTime<Utc>>>,
     pub next_retry_at: Option<Option<DateTime<Utc>>>,
+}
+
+impl SmStepAttemptPatch {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn status(mut self, status: impl Into<String>) -> Self {
+        self.status = Some(status.into());
+        self
+    }
+
+    pub fn output(mut self, value: Value) -> Self {
+        self.output = Some(Some(value));
+        self
+    }
+
+    pub fn clear_output(mut self) -> Self {
+        self.output = Some(None);
+        self
+    }
+
+    pub fn error(mut self, value: Value) -> Self {
+        self.error = Some(Some(value));
+        self
+    }
+
+    pub fn clear_error(mut self) -> Self {
+        self.error = Some(None);
+        self
+    }
+
+    pub fn queued_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.queued_at = Some(Some(dt));
+        self
+    }
+
+    pub fn clear_queued_at(mut self) -> Self {
+        self.queued_at = Some(None);
+        self
+    }
+
+    pub fn started_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.started_at = Some(Some(dt));
+        self
+    }
+
+    pub fn clear_started_at(mut self) -> Self {
+        self.started_at = Some(None);
+        self
+    }
+
+    pub fn finished_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.finished_at = Some(Some(dt));
+        self
+    }
+
+    pub fn clear_finished_at(mut self) -> Self {
+        self.finished_at = Some(None);
+        self
+    }
+
+    pub fn next_retry_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.next_retry_at = Some(Some(dt));
+        self
+    }
+
+    pub fn clear_next_retry_at(mut self) -> Self {
+        self.next_retry_at = Some(None);
+        self
+    }
+
+    pub fn next_retry_at_opt(mut self, opt: Option<DateTime<Utc>>) -> Self {
+        self.next_retry_at = Some(opt);
+        self
+    }
 }
 
 /// Input payload for upserting a row in app_user_data.

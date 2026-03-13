@@ -5,11 +5,19 @@
 //! - Configuration management with environment variable support
 //! - Error handling with rich metadata and HTTP status mapping
 //! - Data transfer objects (DTOs) for account and project management
+//! - CLI types for command-line parsing
+//! - Telemetry initialization for structured logging
 //! - Re-exports of commonly used dependencies
 
 mod config;
 mod dto;
 mod error;
+
+#[cfg(feature = "cli")]
+mod cli;
+
+#[cfg(feature = "telemetry")]
+mod telemetry;
 
 // Re-export DTOs for account and project management
 pub use crate::dto::{
@@ -21,6 +29,14 @@ pub use crate::error::{AppResult, Error, ErrorMeta, ErrorPayload, Result};
 
 // Re-export configuration types
 pub use config::*;
+
+// Re-export CLI types when feature is enabled
+#[cfg(feature = "cli")]
+pub use crate::cli::{Cli, Commands};
+
+// Re-export telemetry types when feature is enabled
+#[cfg(feature = "telemetry")]
+pub use crate::telemetry::init_tracing;
 
 // Re-export commonly used external crates
 pub use anyhow;

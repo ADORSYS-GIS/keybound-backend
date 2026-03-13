@@ -19,11 +19,16 @@ openssl.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
+clap = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 utoipa.workspace = true
 reqwest = { workspace = true, optional = true }
 aws-sdk-s3 = "1"
 aws-sdk-sns = "1"
+tracing-subscriber = { workspace = true, optional = true }
+tracing-appender = { workspace = true, optional = true }
+tracing-error = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 diesel = { workspace = true, features = ["pq-src"] }
@@ -35,7 +40,8 @@ diesel = { workspace = true }
 default = []
 axum = ["dep:axum"]
 reqwest = ["dep:reqwest"]
-it-tests = []
+cli = ["dep:clap"]
+telemetry = ["dep:tracing-subscriber", "dep:tracing-appender", "dep:tracing-error", "dep:tracing"]
 
 [dev-dependencies]
 tokio.workspace = true

@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{
     KIND_KYC_FIRST_DEPOSIT, KIND_KYC_PHONE_OTP, ensure_user_match, normalized_user_id,
     parse_session_status, value_to_api_map,
@@ -14,6 +13,8 @@ use gen_oas_server_bff::apis::users::{
 use gen_oas_server_bff::models;
 use tracing::{info, instrument};
 
+use super::super::BackendApi;
+
 #[derive(Debug, Clone)]
 struct UserKycProjection {
     level: Vec<models::UserKycLevel>,
@@ -24,31 +25,9 @@ struct UserKycProjection {
     latest_session_updated_at: Option<DateTime<Utc>>,
 }
 
-#[backend_core::async_trait]
-pub(super) trait UserFlow {
-    async fn get_user_by_id_flow(
-        &self,
-        claims: &JwtToken,
-        path_params: &models::InternalGetUserByIdPathParams,
-    ) -> Result<InternalGetUserByIdResponse, Error>;
-
-    async fn get_user_kyc_level_flow(
-        &self,
-        claims: &JwtToken,
-        path_params: &models::InternalGetUserKycLevelPathParams,
-    ) -> Result<InternalGetUserKycLevelResponse, Error>;
-
-    async fn get_user_kyc_summary_flow(
-        &self,
-        claims: &JwtToken,
-        path_params: &models::InternalGetUserKycSummaryPathParams,
-    ) -> Result<InternalGetUserKycSummaryResponse, Error>;
-}
-
-#[backend_core::async_trait]
-impl UserFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn get_user_by_id_flow(
+    pub async fn get_user_by_id_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetUserByIdPathParams,
@@ -63,7 +42,7 @@ impl UserFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn get_user_kyc_level_flow(
+    pub async fn get_user_kyc_level_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetUserKycLevelPathParams,
@@ -84,7 +63,7 @@ impl UserFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn get_user_kyc_summary_flow(
+    pub async fn get_user_kyc_summary_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetUserKycSummaryPathParams,

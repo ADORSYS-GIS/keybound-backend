@@ -2,14 +2,12 @@
 members = [
     "app/bins/backend",
     "app/crates/backend-auth",
-    "app/crates/backend-cli",
     "app/crates/backend-core",
     "app/crates/backend-e2e",
     "app/crates/backend-id",
     "app/crates/backend-migrate",
     "app/crates/backend-model",
     "app/crates/backend-repository",
-    "app/crates/backend-otlp",
     "app/crates/backend-server",
     "app/gen/oas_client_cuss",
     "app/gen/oas_server_bff",
@@ -20,13 +18,11 @@ resolver = "3"
 
 [workspace.dependencies]
 backend-auth = { path = "app/crates/backend-auth" }
-backend-cli = { path = "app/crates/backend-cli" }
 backend-core = { path = "app/crates/backend-core" }
 backend-id = { path = "app/crates/backend-id" }
 backend-migrate = { path = "app/crates/backend-migrate" }
 backend-model = { path = "app/crates/backend-model" }
 backend-repository = { path = "app/crates/backend-repository" }
-backend-otlp = { path = "app/crates/backend-otlp" }
 backend-server = { path = "app/crates/backend-server" }
 
 gen_oas_client_cuss = { path = "app/gen/oas_client_cuss" }
@@ -62,8 +58,6 @@ tracing-appender = { version = "0.2" }
 tracing-attributes = { version = "0.1" }
 tracing = { version = "0", features = ["attributes", "async-await", "std"] }
 tracing-error = { version = "0.2" }
-tracing-flame = "0.2.0"
-inferno = "0.12.4"
 
 axum = { version = "0.8", features = ["macros", "tracing"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
@@ -74,13 +68,13 @@ chrono = { version = "0.4", features = ["serde"] }
 cuid = { version = "1" }
 regex = "1"
 getrandom = "0.4"
-goose = "0.18"
 reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "gzip", "brotli", "deflate"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 utoipa = { version = "5", features = ["macros", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 bytes = "1"
+strum = { version = "0.27", features = ["derive"] }
 
 diesel = { version = "2.3", features = ["postgres", "chrono", "serde_json", "r2d2"] }
 openssl = { version = "0.10", features = ["vendored"] }

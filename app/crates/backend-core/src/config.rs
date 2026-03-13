@@ -18,9 +18,9 @@ use std::path::{Path, PathBuf};
 /// - Server: Start only the HTTP API server
 /// - Worker: Start only the background worker for async tasks
 /// - Shared: Start both server and worker in the same process
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
-#[derive(Default)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 pub enum RuntimeMode {
     Server,
     Worker,
@@ -65,13 +65,12 @@ pub struct Server {
     pub tls: Tls,
 }
 
-/// Logging configuration with support for structured JSON and flame graphs.
+/// Logging configuration with support for structured JSON output.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Logging {
     pub level: String,
     pub data_dir: Option<String>,
     pub json: Option<bool>,
-    pub flame: Option<bool>,
     #[serde(default)]
     pub log_requests_enabled: bool,
 }

@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{
     DEPOSIT_STEP_TYPE, ensure_user_match, normalized_user_id, step_id, upsert_step_id_in_context,
     user_id_matches,
@@ -15,25 +14,11 @@ use gen_oas_server_bff::models;
 use serde_json::Value;
 use tracing::{debug, instrument};
 
-#[backend_core::async_trait]
-pub(super) trait DepositFlow {
-    async fn create_phone_deposit_request_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::CreatePhoneDepositRequest,
-    ) -> Result<InternalCreatePhoneDepositRequestResponse, Error>;
+use super::super::BackendApi;
 
-    async fn get_phone_deposit_request_flow(
-        &self,
-        claims: &JwtToken,
-        path_params: &models::InternalGetPhoneDepositRequestPathParams,
-    ) -> Result<InternalGetPhoneDepositRequestResponse, Error>;
-}
-
-#[backend_core::async_trait]
-impl DepositFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn create_phone_deposit_request_flow(
+    pub async fn create_phone_deposit_request_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreatePhoneDepositRequest,
@@ -188,7 +173,7 @@ impl DepositFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn get_phone_deposit_request_flow(
+    pub async fn get_phone_deposit_request_flow(
         &self,
         claims: &JwtToken,
         path_params: &models::InternalGetPhoneDepositRequestPathParams,

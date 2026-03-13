@@ -1,4 +1,3 @@
-use super::super::BackendApi;
 use super::shared::{
     MAGIC_ISSUE_STEP, MAGIC_RATE_LIMIT_MAX_ISSUES, MAGIC_RATE_LIMIT_WINDOW_MINUTES,
     MAGIC_STEP_TYPE, ensure_step_registered, ensure_user_match, normalized_user_id,
@@ -20,31 +19,11 @@ use gen_oas_server_bff::models;
 use serde_json::{Value, json};
 use tracing::instrument;
 
-#[backend_core::async_trait]
-pub(super) trait EmailFlow {
-    async fn create_email_magic_step_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::CreateCaseStepRequest,
-    ) -> Result<InternalCreateEmailMagicStepResponse, Error>;
+use super::super::BackendApi;
 
-    async fn issue_magic_email_challenge_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::IssueMagicEmailRequest,
-    ) -> Result<InternalIssueMagicEmailChallengeResponse, Error>;
-
-    async fn verify_magic_email_challenge_flow(
-        &self,
-        claims: &JwtToken,
-        body: &models::VerifyMagicEmailRequest,
-    ) -> Result<InternalVerifyMagicEmailChallengeResponse, Error>;
-}
-
-#[backend_core::async_trait]
-impl EmailFlow for BackendApi {
+impl BackendApi {
     #[instrument(skip(self))]
-    async fn create_email_magic_step_flow(
+    pub async fn create_email_magic_step_flow(
         &self,
         claims: &JwtToken,
         body: &models::CreateCaseStepRequest,
@@ -106,7 +85,7 @@ impl EmailFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn issue_magic_email_challenge_flow(
+    pub async fn issue_magic_email_challenge_flow(
         &self,
         claims: &JwtToken,
         body: &models::IssueMagicEmailRequest,
@@ -213,7 +192,7 @@ impl EmailFlow for BackendApi {
     }
 
     #[instrument(skip(self))]
-    async fn verify_magic_email_challenge_flow(
+    pub async fn verify_magic_email_challenge_flow(
         &self,
         claims: &JwtToken,
         body: &models::VerifyMagicEmailRequest,

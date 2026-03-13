@@ -1,4 +1,5 @@
-use crate::{Parser, Subcommand};
+use crate::RuntimeMode;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "user-storage", author, version, about = "UserStorage App", long_about = None)]
@@ -23,11 +24,4 @@ pub enum Commands {
         #[arg(long, short, env = "CONFIG_PATH")]
         config_path: String,
     },
-}
-
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum RuntimeMode {
-    Server,
-    Worker,
-    Shared,
 }

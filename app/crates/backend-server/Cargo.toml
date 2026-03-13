@@ -42,6 +42,7 @@ redis = { workspace = true }
 apalis = { workspace = true }
 apalis-redis = { workspace = true }
 bytes = { workspace = true }
+strum = { workspace = true }
 mockall = { workspace = true, optional = true }
 
 aws-config = { workspace = true }
