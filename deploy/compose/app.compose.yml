@@ -14,6 +14,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/user-storage/Dockerfile
+      target: dev
     command:
     - serve
     - --config-path
@@ -41,6 +42,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/user-storage/Dockerfile
+      target: dev
     command:
     - serve
     - --config-path

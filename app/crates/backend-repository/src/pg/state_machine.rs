@@ -34,10 +34,14 @@ impl StateMachineRepository {
 
     fn normalize_phone_regex(raw_regex: &str) -> String {
         let trimmed = raw_regex.trim();
-        if trimmed.len() >= 2 && trimmed.starts_with('/') && trimmed.ends_with('/') {
-            return trimmed[1..trimmed.len() - 1].trim().to_owned();
-        }
-        trimmed.to_owned()
+        let normalized = if trimmed.len() >= 2 && trimmed.starts_with('/') && trimmed.ends_with('/')
+        {
+            trimmed[1..trimmed.len() - 1].trim().to_owned()
+        } else {
+            trimmed.to_owned()
+        };
+        debug!(raw_regex = raw_regex, normalized = %normalized, "normalized phone regex");
+        normalized
     }
 }
 
@@ -541,7 +545,9 @@ impl StateMachineRepo for StateMachineRepository {
 
         let mut conn = self.get_conn().await?;
         let now = Utc::now();
-        let mut rows = Vec::with_capacity(recipients.len());
+        let recipient_count = recipients.len();
+        debug!(recipient_count, "syncing deposit recipients");
+        let mut rows = Vec::with_capacity(recipient_count);
         let mut seen = HashSet::new();
 
         for recipient in recipients {
@@ -551,6 +557,14 @@ impl StateMachineRepo for StateMachineRepository {
             let phone_regex =
                 StateMachineRepository::normalize_phone_regex(recipient.phone_regex.as_str());
             let currency = recipient.currency.trim().to_uppercase();
+
+            debug!(
+                provider = %provider,
+                currency = %currency,
+                phone_number = %phone_number,
+                phone_regex = %phone_regex,
+                "validated deposit recipient input"
+            );
 
             if provider.is_empty()
                 || full_name.is_empty()
@@ -578,6 +592,12 @@ impl StateMachineRepo for StateMachineRepository {
                 )
             })?;
 
+            debug!(
+                provider = %provider,
+                phone_regex = %phone_regex,
+                "deposit recipient regex validated"
+            );
+
             rows.push(db::AppDepositRecipientRow {
                 provider,
                 full_name,
@@ -587,12 +607,25 @@ impl StateMachineRepo for StateMachineRepository {
                 created_at: now,
                 updated_at: now,
             });
+
+            if let Some(last_row) = rows.last() {
+                debug!(
+                    provider = %last_row.provider,
+                    currency = %last_row.currency,
+                    "prepared deposit recipient row"
+                );
+            }
         }
 
         diesel::delete(app_deposit_recipients::table)
             .execute(&mut conn)
             .await
             .map_err(Error::from)?;
+
+        debug!(
+            rows_prepared = rows.len(),
+            "cleared deposit recipient table and ready to insert rows"
+        );
 
         if rows.is_empty() {
             info!("deposit recipients sync completed with 0 rows");
@@ -633,6 +666,12 @@ impl StateMachineRepo for StateMachineRepository {
             ));
         }
 
+        debug!(
+            user_phone = normalized_phone,
+            currency = %normalized_currency,
+            "selecting deposit recipient"
+        );
+
         let mut conn = self.get_conn().await?;
         let recipients = app_deposit_recipients::table
             .filter(app_deposit_recipients::currency.eq(&normalized_currency))
@@ -641,6 +680,12 @@ impl StateMachineRepo for StateMachineRepository {
             .load::<db::AppDepositRecipientRow>(&mut conn)
             .await
             .map_err(Error::from)?;
+
+        debug!(
+            recipient_count = recipients.len(),
+            currency = %normalized_currency,
+            "loaded deposit recipient configs"
+        );
 
         if recipients.is_empty() {
             return Err(Error::bad_request(
@@ -666,6 +711,12 @@ impl StateMachineRepo for StateMachineRepository {
                 }
             };
             if regex.is_match(normalized_phone) {
+                debug!(
+                    provider = %recipient.provider,
+                    currency = %recipient.currency,
+                    phone_regex = %recipient.phone_regex,
+                    "matched deposit recipient for user phone"
+                );
                 return Ok(DepositRecipientContact {
                     provider: recipient.provider,
                     full_name: recipient.full_name,

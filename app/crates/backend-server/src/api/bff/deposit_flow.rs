@@ -13,7 +13,7 @@ use gen_oas_server_bff::apis::deposits::{
 };
 use gen_oas_server_bff::models;
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 #[backend_core::async_trait]
 pub(super) trait DepositFlow {
@@ -40,6 +40,14 @@ impl DepositFlow for BackendApi {
     ) -> Result<InternalCreatePhoneDepositRequestResponse, Error> {
         ensure_user_match(claims, &body.user_id)?;
         let user_id = normalized_user_id(&body.user_id);
+
+        debug!(
+            session_id = %body.session_id,
+            user_id = %user_id,
+            amount = body.amount,
+            currency = %body.currency,
+            "starting phone deposit request flow"
+        );
 
         let mut instance = self
             .state
@@ -68,6 +76,12 @@ impl DepositFlow for BackendApi {
             .and_then(Value::as_object)
             .is_some_and(|deposit| !deposit.is_empty());
 
+        debug!(
+            session_id = %instance.id,
+            deposit_present = deposit_exists,
+            "deposit object presence in context"
+        );
+
         if !deposit_exists {
             let user = self
                 .state
@@ -83,6 +97,15 @@ impl DepositFlow for BackendApi {
                 .sm
                 .select_deposit_recipient_contact(&user_phone_number, &body.currency)
                 .await?;
+
+            debug!(
+                user_id = %user_id,
+                phone = %user_phone_number,
+                provider = %recipient.provider,
+                currency = %recipient.currency,
+                status = "recipient_resolved",
+                "resolved recipient contact for deposit"
+            );
 
             let expires_at = Utc::now() + Duration::hours(2);
 
@@ -111,6 +134,12 @@ impl DepositFlow for BackendApi {
                     }),
                 );
                 changed = true;
+                debug!(
+                    session_id = %instance.id,
+                    provider = %recipient.provider,
+                    action = "deposit context populated",
+                    "wrote deposit contact details into context"
+                );
             }
         }
 
@@ -120,6 +149,10 @@ impl DepositFlow for BackendApi {
         }
 
         if changed {
+            debug!(
+                session_id = %instance.id,
+                "context changed, persisting update"
+            );
             self.state
                 .sm
                 .update_instance_context(&instance.id, context)
@@ -130,13 +163,23 @@ impl DepositFlow for BackendApi {
                 .get_instance(&instance.id)
                 .await?
                 .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
+            debug!(
+                session_id = %instance.id,
+                "reloaded instance after context update"
+            );
         }
 
         let engine = Engine::new(self.state.clone());
+        debug!(
+            session_id = %instance.id,
+            step = STEP_DEPOSIT_AWAIT_PAYMENT,
+            "ensuring manual step is running"
+        );
         engine
             .ensure_manual_step_running(&instance.id, STEP_DEPOSIT_AWAIT_PAYMENT)
             .await?;
 
+        debug!(session_id = %instance.id, "deposit request flow completed");
         Ok(
             InternalCreatePhoneDepositRequestResponse::Status201_DepositRequestCreated(
                 phone_deposit_from_instance(instance)?,
@@ -158,6 +201,13 @@ impl DepositFlow for BackendApi {
             .get_instance(&path_params.deposit_request_id)
             .await?
             .ok_or_else(|| Error::not_found("DEPOSIT_NOT_FOUND", "Deposit request not found"))?;
+
+        debug!(
+            deposit_request_id = %path_params.deposit_request_id,
+            user_id = %user_id,
+            session_id = %instance.id,
+            "retrieved phone deposit request"
+        );
 
         if instance.kind != KIND_KYC_FIRST_DEPOSIT {
             return Err(Error::not_found(
@@ -251,6 +301,17 @@ fn phone_deposit_from_instance(
     } else {
         raw_status
     };
+
+    debug!(
+        deposit_request_id = %instance.id,
+        status = %raw_status,
+        effective_status = %effective_status,
+        amount = amount,
+        currency = %currency,
+        provider = ?provider,
+        expires_at = ?expires_at,
+        "mapped state machine instance to deposit response"
+    );
 
     Ok(models::PhoneDepositResponse {
         deposit_request_id: instance.id.clone(),
