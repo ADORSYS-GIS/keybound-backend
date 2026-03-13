@@ -1069,13 +1069,13 @@ dependencies = [
  "diesel",
  "diesel-async",
  "gen_oas_server_kc",
- "log",
  "openssl",
  "openssl-sys",
  "serde_json",
  "testcontainers",
  "testcontainers-modules",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
