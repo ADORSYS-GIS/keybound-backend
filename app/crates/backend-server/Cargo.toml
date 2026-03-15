@@ -10,6 +10,23 @@ authors.workspace = true
 test-utils = ["dep:mockall"]
 it-tests = []
 
+flow-deposit = []
+flow-email = []
+flow-phone = []
+flow-session = []
+flow-step = []
+flow-upload = []
+flow-user = []
+all-flows = [
+    "flow-deposit",
+    "flow-email",
+    "flow-phone",
+    "flow-session",
+    "flow-step",
+    "flow-upload",
+    "flow-user",
+]
+
 [dependencies]
 backend-auth = { workspace = true }
 backend-core = { workspace = true, features = ["axum"] }
@@ -47,7 +64,6 @@ mockall = { workspace = true, optional = true }
 
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
-aws-sdk-sns = { workspace = true }
 aws-types = { workspace = true }
 
 gen_oas_server_bff = { workspace = true }

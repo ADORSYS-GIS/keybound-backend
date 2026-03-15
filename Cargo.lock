@@ -1074,7 +1074,6 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-s3",
- "aws-sdk-sns",
  "aws-types",
  "axum",
  "axum-extra",
@@ -5278,6 +5277,31 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "sms-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apalis",
+ "apalis-redis",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-sns",
+ "aws-types",
+ "backend-core",
+ "chrono",
+ "clap",
+ "mimalloc",
+ "rand 0.10.0",
+ "redis",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "socket2"

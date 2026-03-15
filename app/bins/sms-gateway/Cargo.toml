@@ -1,0 +1,25 @@
+[package]
+name = "sms-gateway"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+backend-core = { workspace = true, features = ["cli"] }
+mimalloc = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-sns = { workspace = true }
+aws-types = { workspace = true }
+reqwest = { workspace = true }
+apalis = { workspace = true }
+apalis-redis = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }

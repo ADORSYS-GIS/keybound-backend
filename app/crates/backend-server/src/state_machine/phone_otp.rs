@@ -1,9 +1,8 @@
-use crate::sms_provider::SmsProvider;
 use crate::state::AppState;
 use crate::state_machine::jobs::StateMachineStepJob;
 use crate::state_machine::secrets::hash_secret;
 use crate::state_machine::types::*;
-use backend_core::Error;
+use backend_core::{Error, NotificationJob};
 use backend_repository::{SmStepAttemptCreateInput, SmStepAttemptPatch};
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -96,7 +95,7 @@ impl PhoneOtpEngine {
                 attempt_id: attempt.id,
             })
             .await
-            .map_err(|err| {
+            .map_err(|err: backend_core::Error| {
                 tracing::warn!(
                     instance_id = %instance_id,
                     step_name = %STEP_PHONE_ISSUE_OTP,
@@ -113,7 +112,6 @@ impl PhoneOtpEngine {
         &self,
         job: StateMachineStepJob,
         attempt: backend_model::db::SmStepAttemptRow,
-        sms_provider: Arc<dyn SmsProvider>,
     ) -> Result<PhoneIssueOtpOutcome, Error> {
         let input = attempt.input.clone();
         let msisdn = input
@@ -129,28 +127,34 @@ impl PhoneOtpEngine {
             obj.insert("otp_hash".to_owned(), Value::String(otp_hash));
         }
 
-        if let Err(err) = sms_provider.send_otp(msisdn, &otp).await {
-            let finished = Utc::now();
-            let transient = sms_error_is_transient(&err);
-            let can_retry = transient && attempt.attempt_no <= SMS_SEND_MAX_RETRIES;
+        // Enqueue notification to be sent by sms-sink
+        let notification_job = NotificationJob::Otp {
+            step_id: job.attempt_id.clone(),
+            msisdn: msisdn.to_string(),
+            otp: otp.clone(),
+        };
 
+        if let Err(err) = self.state.notification_queue.enqueue(notification_job).await {
+            let err: backend_core::Error = err;
+            // If we can't enqueue the notification, treat this as a retryable error
             warn!(
                 attempt_id = %job.attempt_id,
                 step_name = %job.step_name,
                 msisdn = %msisdn,
-                transient = transient,
-                attempt_no = attempt.attempt_no,
-                max_retries = SMS_SEND_MAX_RETRIES,
-                "SMS send failed, will retry={}", can_retry
+                error = %err,
+                "Failed to enqueue SMS notification"
             );
 
+            let finished = Utc::now();
+            let can_retry = attempt.attempt_no <= SMS_SEND_MAX_RETRIES;
             let mut retry_at = None;
+
             if can_retry {
                 let backoff_seconds = sms_retry_backoff_seconds(attempt.attempt_no);
                 retry_at = Some(finished + Duration::seconds(backoff_seconds));
 
                 let retry_attempt = self
-                    .create_sms_retry_attempt(&attempt, retry_at.expect("retry_at should be set for can_retry"))
+                    .create_sms_retry_attempt(&attempt, retry_at.unwrap())
                     .await?;
 
                 self.schedule_step_retry(
@@ -170,19 +174,21 @@ impl PhoneOtpEngine {
                         .status(ATTEMPT_STATUS_FAILED)
                         .error(json!({
                             "error": err.to_string(),
-                            "transient": transient,
+                            "transient": can_retry,
                             "will_retry": can_retry,
                         }))
                         .finished_at(finished)
                         .next_retry_at_opt(retry_at),
                 )
                 .await?;
+
             if can_retry {
                 return Ok(PhoneIssueOtpOutcome::RetryScheduled);
             }
             return Ok(PhoneIssueOtpOutcome::FailedTerminal);
         }
 
+        // Successfully enqueued notification
         let finished = Utc::now();
         let _ = self
             .state
@@ -256,15 +262,6 @@ impl PhoneOtpEngine {
     }
 }
 
-fn sms_error_is_transient(error: &Error) -> bool {
-    match error {
-        Error::Http { error_key, .. } if *error_key == "SMS_SEND_PERMANENT" => false,
-        Error::Http { error_key, .. } if *error_key == "SMS_SEND_TRANSIENT" => true,
-        Error::Server(_) => true,
-        _ => true,
-    }
-}
-
 fn sms_retry_backoff_seconds(attempt_no: i32) -> i64 {
     let exponent = attempt_no.saturating_sub(1).max(0) as u32;
     let factor = 2_i64.saturating_pow(exponent);
@@ -272,3 +269,4 @@ fn sms_retry_backoff_seconds(attempt_no: i32) -> i64 {
         .saturating_mul(factor)
         .max(1)
 }
+

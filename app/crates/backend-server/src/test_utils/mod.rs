@@ -2,9 +2,10 @@ use crate::file_storage::{EncryptionMode, MinioStorage, PresignedUpload};
 use crate::state::AppState;
 use crate::state_machine::jobs::StateMachineStepJob;
 use crate::state_machine::queue::StateMachineQueue;
-use crate::worker::{NotificationJob, NotificationQueue};
+use crate::worker::NotificationQueue;
 use backend_auth::{OidcState, SignatureState};
 use backend_core::async_trait;
+use backend_core::NotificationJob;
 use backend_core::{Config, Error};
 use backend_repository::{
     DepositRecipientContact, DepositRecipientUpsertInput, DeviceRepo, RepoResult,

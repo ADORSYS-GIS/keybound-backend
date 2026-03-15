@@ -9,9 +9,10 @@
 //! - Telemetry initialization for structured logging
 //! - Re-exports of commonly used dependencies
 
-mod config;
+pub mod config;
 mod dto;
 mod error;
+pub mod notifications;
 
 #[cfg(feature = "cli")]
 mod cli;
@@ -29,6 +30,9 @@ pub use crate::error::{AppResult, Error, ErrorMeta, ErrorPayload, Result};
 
 // Re-export configuration types
 pub use config::*;
+
+// Re-export notification types
+pub use notifications::NotificationJob;
 
 // Re-export CLI types when feature is enabled
 #[cfg(feature = "cli")]

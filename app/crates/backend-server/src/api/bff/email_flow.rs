@@ -6,7 +6,7 @@ use super::shared::{
 };
 use crate::state_machine::secrets::{hash_secret, verify_secret};
 use crate::state_machine::types::{ActorType, INSTANCE_STATUS_COMPLETED, KIND_KYC_EMAIL_MAGIC};
-use crate::worker::NotificationJob;
+use backend_core::NotificationJob;
 use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_repository::SmStepAttemptCreateInput;

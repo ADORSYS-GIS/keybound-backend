@@ -9,6 +9,8 @@ members = [
     "app/crates/backend-model",
     "app/crates/backend-repository",
     "app/crates/backend-server",
+    "app/bins/sms-gateway",
+
     "app/gen/oas_client_cuss",
     "app/gen/oas_server_bff",
     "app/gen/oas_server_kc",

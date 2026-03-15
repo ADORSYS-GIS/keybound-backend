@@ -1,4 +1,3 @@
-use crate::sms_provider::SmsProvider;
 use crate::state::AppState;
 use crate::state_machine::deposit::DepositEngine;
 use crate::state_machine::event::EventEmitter;
@@ -120,7 +119,6 @@ impl Engine {
     pub async fn process_step_job(
         &self,
         job: StateMachineStepJob,
-        sms_provider: Arc<dyn SmsProvider>,
     ) -> Result<(), Error> {
         let Some(claimed_attempt) = self.state.sm.claim_step_attempt(&job.attempt_id).await? else {
             return Ok(());
@@ -147,7 +145,7 @@ impl Engine {
             (KIND_KYC_PHONE_OTP, STEP_PHONE_ISSUE_OTP) => {
                 let outcome = self
                     .phone_otp
-                    .run_phone_issue_otp(job, claimed_attempt, sms_provider)
+                    .run_phone_issue_otp(job, claimed_attempt)
                     .await?;
                 if matches!(outcome, PhoneIssueOtpOutcome::Succeeded) {
                     self.ensure_manual_step_running(&instance.id, STEP_PHONE_VERIFY_OTP)
