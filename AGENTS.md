@@ -82,56 +82,558 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/user-storage \
 
 ## Code Style Guidelines
 
-### Imports & Dependencies
-- **Workspace dependencies only**: All third-party crates must be declared in root `Cargo.toml` `[workspace.dependencies]`
-- **Reference with workspace = true**: In crate Cargo.toml, use `serde.workspace = true` not `version = "..."`
-- **No local path overrides**: Do not use `path` dependencies for workspace crates
+### SOLID Principles (Applied in This Codebase)
 
-### Formatting
-- `rustfmt` is mandatory - always format before committing
-- Line width: default (100 chars)
-- Use stable Rust only, no nightly features
-- No `unsafe` code unless absolutely necessary
+The codebase follows SOLID principles for maintainable, testable Rust code:
 
-### Naming Conventions
-- `snake_case` for variables, functions, modules
-- `PascalCase` for types, traits, enums
-- `SCREAMING_SNAKE_CASE` for constants
-- CUID with prefixes for IDs: `usr_*`, `dvc_*`, `apr_*`, `sms_*` (never UUID)
-- Explicit, descriptive names preferred (no single-letter vars except indices)
+#### **S - Single Responsibility**
+Each module has one clear purpose. Controllers handle HTTP, repositories handle database, services orchestrate.
 
-### Type Definitions
-- Use Diesel DSL for all database queries (no raw SQL strings)
-- Map Diesel errors to `backend_core::Error` via `.map_err(Into::into)`
-- Use `RepoResult<T>` type alias from repository layer
-- Prefer `Result<T>` over panics; reserve `panic!` for unrecoverable errors
-- Use `tracing` for logging, never `println!` in production code
-
-### Error Handling
 ```rust
-// Use the shared Error type
-use backend_core::Error;
-
-// Repository pattern
-async fn get_user(&self, id: &str) -> RepoResult<Option<UserRow>> {
-    users.find(id).first(&mut conn).await.optional().map_err(Into::into)
+// ✅ GOOD: UserRepository only handles user database operations
+pub struct UserRepository {
+    pool: Pool<AsyncPgConnection>,
 }
 
-// Map Diesel errors consistently
-.map_err(Into::into)  // Converts to backend_core::Error
+impl UserRepo for UserRepository {
+    async fn get_user(&self, id: &str) -> RepoResult<Option<UserRow>> {
+        // Only user retrieval logic
+        users.find(id).first(&mut conn).await.optional().map_err(Into::into)
+    }
+    
+    async fn create_user(&self, input: &UserUpsert) -> RepoResult<UserRow> {
+        // Only user creation logic
+    }
+}
+
+// ❌ BAD: Mixed responsibilities
+struct UserHandler {
+    db_pool: Pool<AsyncPgConnection>,  // Database logic
+    email_client: EmailClient,         // External service
+    validator: Validator,              // Validation logic
+    // This would violate SRP
+}
 ```
 
-### Async Code
-- Keep async boundaries explicit
-- Never block in async context
-- Use `tokio::spawn` for concurrent tasks
-- Return `impl Future` from traits when needed
+#### **O - Open/Closed Principle**
+Extend behavior via traits and feature flags, not by modifying existing code.
 
-### Traits & Abstraction
-- Define behavior behind traits (e.g., `UserRepo`, `SmsProvider`)
-- Use `mockall` for test mocks (see `test_utils/mod.rs`)
-- Implement traits with `Arc<dyn Trait>` in `AppState`
-- Add default methods on traits for common logic
+```rust
+// ✅ GOOD: Open for extension via trait
+pub trait SmsProvider: Send + Sync {
+    async fn send_otp(&self, phone: &str, otp: &str) -> Result<(), SmsError>;
+}
+
+// Extend with new implementations without modifying trait
+pub struct ConsoleSmsProvider;
+pub struct SnsSmsProvider;
+
+// Feature-gated extension
+#[cfg(feature = "flow-phone-otp")]
+registry.register_step(Arc::new(IssuePhoneOtpStep));
+```
+
+#### **L - Liskov Substitution**
+Trait objects can be substituted without breaking behavior.
+
+```rust
+// ✅ GOOD: All repositories implement same trait
+pub trait UserRepo {
+    async fn get_user(&self, id: &str) -> RepoResult<Option<UserRow>>;
+}
+
+// In AppState, any implementation works
+pub struct AppState {
+    pub user_repo: Arc<dyn UserRepo>,  // Can be mock or real
+}
+
+// Usage remains consistent
+let user = state.user_repo.get_user("usr_123").await?;
+```
+
+#### **I - Interface Segregation**
+Small, focused traits rather than monolithic interfaces.
+
+```rust
+// ✅ GOOD: Separate traits for different concerns
+pub trait DeviceRepo {
+    async fn create_device(&self, input: &DeviceBindInput) -> RepoResult<DeviceRow>;
+    async fn lookup_device(&self, id: &str, jkt: &str) -> RepoResult<Option<DeviceRow>>;
+}
+
+pub trait FlowRepo {
+    async fn create_session(&self, input: FlowSessionCreateInput) -> RepoResult<FlowSessionRow>;
+    async fn create_instance(&self, input: FlowInstanceCreateInput) -> RepoResult<FlowInstanceRow>;
+}
+
+// ❌ BAD: One trait for everything
+pub trait BackendRepo {  // Too large!
+    async fn user_ops(&self, ...) -> ...;
+    async fn device_ops(&self, ...) -> ...;
+    async fn flow_ops(&self, ...) -> ...;
+}
+```
+
+#### **D - Dependency Inversion**
+Depend on abstractions (traits) not concrete implementations.
+
+```rust
+// ✅ GOOD: Controller depends on trait
+pub struct DeviceController {
+    device_repo: Arc<dyn DeviceRepo>,  // Abstract dependency
+}
+
+impl DeviceController {
+    pub async fn bind_device(&self, input: BindDeviceRequest) -> Result<DeviceRecordId> {
+        let device = self.device_repo.create_device(&input).await?;
+        Ok(device.device_record_id)
+    }
+}
+
+// In app setup (main.rs or binary)
+let device_repo = Arc::new(DeviceRepository::new(pool));
+let controller = DeviceController { device_repo };
+
+// For tests: inject mock
+let mock_repo = Arc::new(MockDeviceRepo::new());
+let controller = DeviceController { device_repo: mock_repo };
+```
+
+### Architectural Patterns
+
+#### **Repository Pattern (Data Access Layer)**
+Isolates database logic behind traits.
+
+```rust
+// Trait definition (domain interface)
+#[async_trait]
+pub trait UserRepo {
+    async fn get_user(&self, id: &str) -> RepoResult<Option<UserRow>>;
+    async fn create_user(&self, input: &UserUpsert) -> RepoResult<UserRow>;
+}
+
+// Implementation (infrastructure)
+pub struct UserRepository {
+    pool: Pool<AsyncPgConnection>,
+}
+
+#[async_trait]
+impl UserRepo for UserRepository {
+    async fn get_user(&self, id: &str) -> RepoResult<Option<UserRow>> {
+        use backend_model::schema::app_user::dsl::*;
+        let mut conn = self.get_conn().await?;
+        
+        app_user
+            .filter(user_id.eq(id))
+            .first::<UserRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::into)  // Maps Diesel -> backend_core::Error
+    }
+}
+
+// Usage in controller
+pub async fn handler(state: State<AppState>, Path(user_id): Path<String>) -> Result<Json<User>> {
+    let user = state.user_repo.get_user(&user_id).await?;
+    Ok(Json(user))
+}
+```
+
+#### **Flow SDK Pattern (Orchestration)**
+Registry-based workflow engine with step-driven state machine.
+
+```rust
+// Step trait (extensible workflow building block)
+#[async_trait]
+pub trait Step: Send + Sync {
+    fn step_type(&self) -> &'static str;
+    fn actor(&self) -> Actor;
+    fn feature(&self) -> Option<&'static str>;
+    
+    async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError>;
+}
+
+// Registry pattern (central lookup)
+pub struct FlowRegistry {
+    steps: HashMap<String, Arc<dyn Step>>,
+    flows: HashMap<String, Arc<dyn Flow>>,
+}
+
+impl FlowRegistry {
+    pub fn register_step(&mut self, step: Arc<dyn Step>) {
+        self.steps.insert(step.step_type().to_owned(), step);
+    }
+    
+    pub fn get_step(&self, step_type: &str) -> Option<&dyn Step> {
+        self.steps.get(step_type).map(Arc::as_ref)
+    }
+}
+
+// Concrete implementation
+pub struct IssuePhoneOtpStep;
+
+#[async_trait]
+impl Step for IssuePhoneOtpStep {
+    fn step_type(&self) -> &'static str { "ISSUE_PHONE_OTP" }
+    fn actor(&self) -> Actor { Actor::System }
+    fn feature(&self) -> Option<&'static str> { Some("flow-phone-otp") }
+    
+    async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        // Business logic here
+        Ok(StepOutcome::Done { output: None, updates: None })
+    }
+}
+```
+
+#### **Strategy Pattern (Feature Gating)**
+Conditional compilation for flow modules.
+
+```rust
+// In backend-server/src/flow_registry.rs
+pub fn build_registry() -> FlowRegistry {
+    let mut registry = FlowRegistry::new();
+    
+    // Static flows with feature flags
+    #[cfg(feature = "flow-phone-otp")]
+    {
+        registry.register_flow(Arc::new(PhoneOtpFlow));
+        registry.register_step(Arc::new(IssuePhoneOtpStep));
+        registry.register_step(Arc::new(VerifyPhoneOtpStep));
+    }
+    
+    #[cfg(feature = "flow-email-magic")]
+    {
+        registry.register_flow(Arc::new(EmailMagicFlow));
+        registry.register_step(Arc::new(IssueEmailMagicStep));
+        registry.register_step(Arc::new(VerifyEmailMagicStep));
+    }
+    
+    // Dynamic flows loaded from YAML at runtime
+    if let Some(dynamic_flows) = config.dynamic_flows {
+        for flow_def in dynamic_flows {
+            apply_flow_import(&mut registry, flow_def)?;
+        }
+    }
+    
+    registry
+}
+```
+
+#### **MVC Pattern (Request Flow)**
+Controller → Service → Repository → Model.
+
+```rust
+// Model (data structures - in backend-model)
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = app_user)]
+pub struct UserRow {
+    pub user_id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+// Controller (HTTP handlers - in backend-server/src/api/)
+pub async fn get_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>
+) -> Result<Json<UserResponse>, Error> {
+    // Extract params, call service/repo
+    let user = state.user_repo.get_user(&user_id).await?;
+    let device = state.device_repo.lookup_device(&user_id, &jkt).await?;
+    
+    Ok(Json(UserResponse {
+        user_id: user.user_id,
+        devices: vec![device],
+    }))
+}
+
+// Repository (data access - in backend-repository/src/pg/)
+pub struct UserRepository {
+    pool: Pool<AsyncPgConnection>,
+}
+
+impl UserRepo for UserRepository {
+    async fn get_user(&self, id: &str) -> RepoResult<Option<UserRow>> {
+        // Diesel query here
+    }
+}
+
+// Request/Response DTOs
+#[derive(Deserialize)]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub email: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UserResponse {
+    pub user_id: String,
+    pub devices: Vec<DeviceRow>,
+}
+```
+
+#### **Middleware Pattern (Authentication)**
+Composable HTTP layer behavior.
+
+```rust
+// In backend-auth/src/jwt_auth.rs
+pub struct JwtAuthLayer {
+    pub oidc_state: Arc<OidcState>,
+    pub validate_expiry: bool,
+}
+
+impl<S> Layer<S> for JwtAuthLayer {
+    type Service = JwtAuthService<S>;
+    
+    fn layer(&self, inner: S) -> Self::Service {
+        JwtAuthService {
+            inner,
+            oidc_state: self.oidc_state.clone(),
+            validate_expiry: self.validate_expiry,
+        }
+    }
+}
+
+// Usage in router
+Router::new()
+    .route("/api/staff/*", staff_routes())
+    .layer(JwtAuthLayer {
+        oidc_state: app_state.oidc_state.clone(),
+        validate_expiry: true,
+    })
+```
+
+#### **Factory Pattern (Database Connections)**
+Centralized resource creation.
+
+```rust
+// In backend-migrate/src/lib.rs
+pub struct DbFactory {
+    pool: Pool<AsyncPgConnection>,
+}
+
+impl DbFactory {
+    pub async fn postgres(url: &str) -> Result<Self, Error> {
+        let config = AsyncDieselConnectionManager::new(url);
+        let pool = Pool::builder(config).build()?;
+        
+        // Run migrations
+        let mut conn = pool.get().await?;
+        conn.run_pending_migrations(MIGRATIONS)?;
+        
+        Ok(Self { pool })
+    }
+    
+    pub fn get_repo<T: From<Pool<AsyncPgConnection>>>(&self) -> T {
+        T::from(self.pool.clone())
+    }
+}
+
+// Usage
+let factory = DbFactory::postgres("postgres://...").await?;
+let user_repo: UserRepository = factory.get_repo();
+let device_repo: DeviceRepository = factory.get_repo();
+```
+
+#### **Command Pattern (Background Jobs)**
+Encapsulate operations as objects for async execution.
+
+```rust
+// Job definitions
+#[derive(Serialize, Deserialize)]
+pub enum NotificationJob {
+    OtpSms { phone: String, otp: String },
+    EmailVerification { email: String, token: String },
+}
+
+// Queue trait
+pub trait NotificationQueue {
+    async fn enqueue(&self, job: NotificationJob) -> Result<()>;
+}
+
+// Implementation (Redis-backed)
+pub struct RedisNotificationQueue {
+    redis: redis::aio::ConnectionManager,
+}
+
+#[async_trait]
+impl NotificationQueue for RedisNotificationQueue {
+    async fn enqueue(&self, job: NotificationJob) -> Result<()> {
+        let serialized = serde_json::to_string(&job)?;
+        self.redis.rpush("notification_queue", serialized).await?;
+        Ok(())
+    }
+}
+
+// Worker processing
+pub async fn process_notification_queue(state: Arc<AppState>) -> Result<()> {
+    loop {
+        let job: NotificationJob = state.redis.blpop("notification_queue").await?;
+        match job {
+            NotificationJob::OtpSms { phone, otp } => {
+                state.sms_provider.send_otp(&phone, &otp).await?;
+            }
+        }
+    }
+}
+```
+
+#### **Observer Pattern (Event Tracking)**
+Decoupled event handling for audit trails.
+
+```rust
+// Event types
+#[derive(Serialize)]
+pub struct FlowEvent {
+    pub timestamp: DateTime<Utc>,
+    pub session_id: String,
+    pub flow_type: String,
+    pub step_type: String,
+    pub status: String,
+    pub metadata: Option<Value>,
+}
+
+// Event sink trait
+pub trait EventSink: Send + Sync {
+    async fn record(&self, event: FlowEvent) -> Result<()>;
+}
+
+// Multiple implementations
+pub struct DatabaseEventSink {
+    pool: Pool<AsyncPgConnection>,
+}
+
+pub struct LoggingEventSink {
+    logger: Logger,
+}
+
+// Composite sink (Observer pattern)
+pub struct CompositeEventSink {
+    sinks: Vec<Box<dyn EventSink>>,
+}
+
+impl EventSink for CompositeEventSink {
+    async fn record(&self, event: FlowEvent) -> Result<()> {
+        for sink in &self.sinks {
+            sink.record(event.clone()).await?;
+        }
+        Ok(())
+    }
+}
+
+// Usage in flow execution
+impl Step for PhoneOtpStep {
+    async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        let outcome = self.execute_business_logic(ctx).await?;
+        
+        // Notify observers
+        let event = FlowEvent {
+            timestamp: Utc::now(),
+            session_id: ctx.session_id.clone(),
+            flow_type: "PHONE_OTP".to_string(),
+            step_type: self.step_type().to_string(),
+            status: outcome.status(),
+            metadata: None,
+        };
+        ctx.event_sink.record(event).await?;
+        
+        Ok(outcome)
+    }
+}
+```
+
+### Feature Flag & Configuration Patterns
+
+#### **Compile-Time Features**
+```toml
+# In Cargo.toml
+[features]
+default = ["all-flows"]
+all-flows = ["flow-phone-otp", "flow-email-magic", "flow-first-deposit"]
+flow-phone-otp = ["flow-sdk"]
+flow-email-magic = ["flow-sdk"]
+flow-sdk = ["dep:backend-flow-sdk"]
+```
+
+```rust
+// Conditional compilation
+#[cfg(feature = "flow-phone-otp")]
+{
+    registry.register_flow(Arc::new(PhoneOtpFlow));
+}
+
+// Runtime validation
+registry.validate_features(&["flow-phone-otp", "flow-email-magic"])?;
+```
+
+#### **Environment-Based Configuration**
+```rust
+// In backend-core/src/config.rs
+#[derive(Deserialize)]
+pub struct Config {
+    pub database: DatabaseConfig,
+    pub redis: RedisConfig,
+    pub sms: SmsConfig,
+}
+
+#[derive(Deserialize)]
+pub struct SmsConfig {
+    pub provider: String,  // "console" or "sns"
+    pub aws_region: Option<String>,
+}
+
+// Usage with expansion
+let config = Config::load("config/app.yaml")?;
+// ${AWS_REGION:-us-east-1} expands automatically
+```
+
+### Error Handling Patterns
+
+#### **Result Type Aliases**
+```rust
+// Standard result with custom error
+type Result<T> = std::result::Result<T, backend_core::Error>;
+type RepoResult<T> = Result<T>;  // From repository layer
+
+// Never use generic Box<dyn Error>
+// ❌ BAD: fn foo() -> Result<T, Box<dyn std::error::Error>>
+// ✅ GOOD: fn foo() -> Result<T, backend_core::Error>
+```
+
+#### **Error Mapping**
+```rust
+// Diesel to application error
+app_user
+    .filter(user_id.eq(id))
+    .first::<UserRow>(&mut conn)
+    .await
+    .optional()
+    .map_err(Into::into)  // DieselError -> backend_core::Error
+
+// Custom error conversion
+impl From<argon2::Error> for backend_core::Error {
+    fn from(err: argon2::Error) -> Self {
+        backend_core::Error::InvalidArgument(err.to_string())
+    }
+}
+```
+
+#### **Error Context**
+```rust
+// Add context to errors
+let user = state.user_repo.get_user(&user_id).await
+    .map_err(|e| e.with_context(|| format!("Failed to get user: {}", user_id)))?;
+
+// Pattern matching
+match result {
+    Err(backend_core::Error::NotFound(_)) => {
+        // Handle not found
+    }
+    Err(e) => return Err(e),
+    Ok(user) => user,
+}
+```
 
 ## Database & Migrations
 
