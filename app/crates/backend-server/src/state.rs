@@ -1,12 +1,10 @@
 use crate::file_storage::{MinioStorage, S3CompatibleMinioStorage};
 use crate::flow_registry;
-use crate::state_machine::queue::{RedisStateMachineQueue, StateMachineQueue};
 use crate::worker::{NotificationQueue, RedisNotificationQueue};
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
 use backend_repository::{
-    DepositRecipientUpsertInput, DeviceRepo, DeviceRepository, FlowRepo, FlowRepository,
-    StateMachineRepo, StateMachineRepository, UserRepo, UserRepository,
+    DeviceRepo, DeviceRepository, FlowRepo, FlowRepository, UserRepo, UserRepository,
 };
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -16,12 +14,10 @@ use tracing::info;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub sm: Arc<dyn StateMachineRepo>,
     pub flow: Arc<dyn FlowRepo>,
     pub flow_registry: Arc<backend_flow_sdk::FlowRegistry>,
     pub user: Arc<dyn UserRepo>,
     pub device: Arc<dyn DeviceRepo>,
-    pub sm_queue: Arc<dyn StateMachineQueue>,
     pub notification_queue: Arc<dyn NotificationQueue>,
     pub minio: Arc<dyn MinioStorage>,
     pub config: Config,
@@ -33,12 +29,10 @@ pub struct AppState {
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
-            .field("sm", &"<StateMachineRepository>")
             .field("flow", &"<FlowRepository>")
             .field("flow_registry", &"<FlowRegistry>")
             .field("user", &"<UserRepository>")
             .field("device", &"<DeviceRepository>")
-            .field("sm_queue", &"<StateMachineQueue>")
             .field("minio", &"<MinioStorage>")
             .field("config", &self.config)
             .field("oidc_state", &"<OidcState>")
@@ -114,35 +108,11 @@ impl AppState {
             }
         };
 
-        let sm_repo = StateMachineRepository::new(pool.clone());
-        let deposit_flow_configured = cfg.deposit_flow.is_some();
-        let recipient_rows = cfg
-            .deposit_flow
-            .as_ref()
-            .map(|deposit_flow| deposit_flow.staff.recipients.as_slice())
-            .unwrap_or_default()
-            .iter()
-            .map(|recipient| DepositRecipientUpsertInput {
-                provider: recipient.provider.clone(),
-                full_name: recipient.full_name.clone(),
-                phone_number: recipient.phone_number.clone(),
-                phone_regex: recipient.regex.clone(),
-                currency: recipient.currency.clone(),
-            })
-            .collect::<Vec<_>>();
-        if deposit_flow_configured {
-            let synced_rows = sm_repo.sync_deposit_recipients(recipient_rows).await?;
-            info!(
-                synced_rows,
-                "deposit recipients synchronized from configuration"
-            );
-        } else {
-            info!("deposit recipient sync skipped; deposit_flow not configured");
-        }
-
-        let sm: Arc<dyn StateMachineRepo> = Arc::new(sm_repo);
         let flow: Arc<dyn FlowRepo> = Arc::new(FlowRepository::new(pool.clone()));
-        let flow_registry = Arc::new(flow_registry::build_registry(imports).map_err(|e| backend_core::Error::Server(e.to_string()))?);
+        let flow_registry = Arc::new(
+            flow_registry::build_registry(imports)
+                .map_err(|e| backend_core::Error::Server(e.to_string()))?,
+        );
         let user: Arc<dyn UserRepo> = Arc::new(UserRepository::new(pool.clone()));
         let device: Arc<dyn DeviceRepo> = Arc::new(DeviceRepository::new(pool.clone()));
 
@@ -150,7 +120,7 @@ impl AppState {
 
         let oidc_state = Arc::new(OidcState::new(
             cfg.oauth2.issuer.clone(),
-            None, // TODO: add audiences to config if needed
+            None,
             Duration::from_secs(3600),
             Duration::from_secs(3600),
             http_client,
@@ -162,19 +132,17 @@ impl AppState {
             max_body_bytes: cfg.kc.max_body_bytes,
         });
 
-        let sm_queue: Arc<dyn StateMachineQueue> =
-            Arc::new(RedisStateMachineQueue::new(cfg.redis.url.clone()));
         let notification_queue = Arc::new(RedisNotificationQueue::new(cfg.redis.url.clone()));
-        
-        let replay_guard = Arc::new(crate::auth_signature::RedisReplayGuard::new(cfg.redis.url.clone()));
+
+        let replay_guard = Arc::new(crate::auth_signature::RedisReplayGuard::new(
+            cfg.redis.url.clone(),
+        ));
 
         Ok(Self {
-            sm,
             flow,
             flow_registry,
             user,
             device,
-            sm_queue,
             notification_queue,
             minio,
             config: cfg.clone(),
@@ -227,13 +195,14 @@ cuss:
 "#;
         let cfg: Config = serde_yaml::from_str(config_yaml).unwrap();
 
-        // Create a dummy pool. It won't be used for actual DB ops in this test.
         let manager = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(
             "postgres://localhost/test",
         );
         let pool = Pool::builder(manager).build().unwrap();
 
-        let state = AppState::from_config(&cfg, pool, flow_registry::RegistryImports::default()).await.unwrap();
+        let state = AppState::from_config(&cfg, pool, flow_registry::RegistryImports::default())
+            .await
+            .unwrap();
 
         assert_eq!(state.config.server.port, 8080);
     }

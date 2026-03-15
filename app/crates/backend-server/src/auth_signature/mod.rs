@@ -3,9 +3,9 @@ pub mod replay;
 pub mod verify;
 
 pub use canonical::{canonicalize_payload, canonicalize_public_key};
-pub use replay::{RedisReplayGuard, ReplayGuard};
 #[cfg(any(test, feature = "test-utils"))]
 pub use replay::in_memory::{InMemoryReplayGuard, SharedInMemoryReplayGuard};
+pub use replay::{RedisReplayGuard, ReplayGuard};
 pub use verify::verify_signature;
 
 use backend_core::{Error, Result};
@@ -91,7 +91,8 @@ mod tests {
             "{\"kty\":\"EC\"}",
             "dvc_123",
             Some("usr_456"),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(
             result,
@@ -110,7 +111,8 @@ mod tests {
             "{\"kty\":\"EC\"}",
             "dvc_123",
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(
             result,
@@ -132,3 +134,6 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+#[cfg(test)]
+mod replay_tests;

@@ -12,6 +12,12 @@ pub trait Flow: Send + Sync + 'static {
     fn steps(&self) -> &[StepRef];
     fn initial_step(&self) -> &str;
     fn transitions(&self) -> &HashMap<String, StepTransition>;
+
+    fn find_next_step(&self, current_step: &str) -> Option<&str> {
+        self.transitions()
+            .get(current_step)
+            .map(|t| t.on_success.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

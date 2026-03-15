@@ -376,7 +376,11 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
-    async fn update_metadata(&self, user_id_val: &str, metadata_patch: serde_json::Value) -> RepoResult<()> {
+    async fn update_metadata(
+        &self,
+        user_id_val: &str,
+        metadata_patch: serde_json::Value,
+    ) -> RepoResult<()> {
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -389,7 +393,9 @@ impl UserRepo for UserRepository {
             .optional()
             .map_err(Into::<backend_core::Error>::into)?
         {
-            if let (Some(base_obj), Some(patch_obj)) = (user.metadata.as_object_mut(), metadata_patch.as_object()) {
+            if let (Some(base_obj), Some(patch_obj)) =
+                (user.metadata.as_object_mut(), metadata_patch.as_object())
+            {
                 for (k, v) in patch_obj {
                     if v.is_null() {
                         base_obj.remove(k);
@@ -397,7 +403,7 @@ impl UserRepo for UserRepository {
                         base_obj.insert(k.clone(), v.clone());
                     }
                 }
-                
+
                 diesel::update(app_user.filter(user_id.eq(user_id_val)))
                     .set((
                         metadata.eq(user.metadata),

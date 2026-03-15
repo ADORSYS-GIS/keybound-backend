@@ -1,7 +1,7 @@
 use crate::api::{BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_USER_ID_HEADER};
 use crate::auth_signature::{
-    canonicalize_payload, canonicalize_public_key, validate_public_key_match,
-    validate_timestamp, validate_user_id_hint, verify_signature, ReplayGuard,
+    ReplayGuard, canonicalize_payload, canonicalize_public_key, validate_public_key_match,
+    validate_timestamp, validate_user_id_hint, verify_signature,
 };
 use crate::state::AppState;
 use axum::body::{Body, to_bytes};
@@ -94,12 +94,15 @@ async fn authenticate_signature(
 
     validate_timestamp(timestamp, state.config.auth.max_clock_skew_seconds)?;
 
-    state.replay_guard.check_and_record(
-        &device_id,
-        &nonce,
-        timestamp,
-        state.config.auth.max_clock_skew_seconds,
-    ).await?;
+    state
+        .replay_guard
+        .check_and_record(
+            &device_id,
+            &nonce,
+            timestamp,
+            state.config.auth.max_clock_skew_seconds,
+        )
+        .await?;
 
     let lookup = backend_model::kc::DeviceLookupRequest {
         device_id: Some(device_id.clone()),
@@ -144,4 +147,3 @@ fn header_value(headers: &HeaderMap, key: &str) -> Option<String> {
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned)
 }
-

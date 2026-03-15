@@ -1,7 +1,10 @@
 use async_trait::async_trait;
-use backend_flow_sdk::{Actor, FlowError, Step, StepContext, StepOutcome};
 use backend_flow_sdk::step::ContextUpdates;
-use reqwest::{Client, Method, header::{HeaderMap, HeaderName, HeaderValue}};
+use backend_flow_sdk::{Actor, FlowError, Step, StepContext, StepOutcome};
+use reqwest::{
+    Client, Method,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -111,7 +114,8 @@ impl Step for WebhookHttpStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
-        let config_val = ctx.flow_config("webhook_config")
+        let config_val = ctx
+            .flow_config("webhook_config")
             .or_else(|| ctx.session_config("webhook_config"))
             .cloned()
             .unwrap_or_default();
@@ -144,17 +148,18 @@ impl Step for WebhookHttpStep {
         let mut headers = HeaderMap::new();
         for (k, v) in &config.headers {
             let rendered_v = render_template_str(v, ctx);
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_str(k),
-                HeaderValue::from_str(&rendered_v),
-            ) {
+            if let (Ok(name), Ok(val)) =
+                (HeaderName::from_str(k), HeaderValue::from_str(&rendered_v))
+            {
                 headers.insert(name, val);
             }
         }
 
         let payload = config.payload.map(|p| render_template_val(&p, ctx));
 
-        let mut req_builder = self.client.request(method, &url)
+        let mut req_builder = self
+            .client
+            .request(method, &url)
             .headers(headers)
             .timeout(Duration::from_millis(config.timeout_ms));
 
@@ -188,11 +193,15 @@ impl Step for WebhookHttpStep {
                             let mut updates = ContextUpdates::default();
                             let mut step_output = serde_json::Map::new();
 
-                            if !config.extraction_rules.is_empty() || config.success_condition.is_some() {
+                            if !config.extraction_rules.is_empty()
+                                || config.success_condition.is_some()
+                            {
                                 if let Ok(resp_json) = response.json::<Value>().await {
                                     // check specific json pointer condition if needed
                                     if let Some(cond) = &config.success_condition {
-                                        if let (Some(ptr), Some(exp)) = (&cond.json_pointer, &cond.expected_value) {
+                                        if let (Some(ptr), Some(exp)) =
+                                            (&cond.json_pointer, &cond.expected_value)
+                                        {
                                             if let Some(val) = resp_json.pointer(ptr) {
                                                 if val != exp {
                                                     is_success = false;
@@ -205,26 +214,66 @@ impl Step for WebhookHttpStep {
 
                                     if is_success {
                                         for rule in &config.extraction_rules {
-                                            if let Some(extracted) = resp_json.pointer(&rule.json_pointer) {
+                                            if let Some(extracted) =
+                                                resp_json.pointer(&rule.json_pointer)
+                                            {
                                                 match rule.target_context {
                                                     ExtractionTarget::SessionContext => {
-                                                        let mut patch = updates.session_context_patch.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                                                        apply_patch(&mut patch, &rule.target_path, extracted.clone());
+                                                        let mut patch =
+                                                            updates
+                                                                .session_context_patch
+                                                                .unwrap_or_else(|| {
+                                                                    Value::Object(
+                                                                        serde_json::Map::new(),
+                                                                    )
+                                                                });
+                                                        apply_patch(
+                                                            &mut patch,
+                                                            &rule.target_path,
+                                                            extracted.clone(),
+                                                        );
                                                         updates.session_context_patch = Some(patch);
                                                     }
                                                     ExtractionTarget::FlowContext => {
-                                                        let mut patch = updates.flow_context_patch.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                                                        apply_patch(&mut patch, &rule.target_path, extracted.clone());
+                                                        let mut patch =
+                                                            updates
+                                                                .flow_context_patch
+                                                                .unwrap_or_else(|| {
+                                                                    Value::Object(
+                                                                        serde_json::Map::new(),
+                                                                    )
+                                                                });
+                                                        apply_patch(
+                                                            &mut patch,
+                                                            &rule.target_path,
+                                                            extracted.clone(),
+                                                        );
                                                         updates.flow_context_patch = Some(patch);
                                                     }
                                                     ExtractionTarget::UserMetadata => {
-                                                        let mut patch = updates.user_metadata_patch.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                                                        apply_patch(&mut patch, &rule.target_path, extracted.clone());
+                                                        let mut patch =
+                                                            updates
+                                                                .user_metadata_patch
+                                                                .unwrap_or_else(|| {
+                                                                    Value::Object(
+                                                                        serde_json::Map::new(),
+                                                                    )
+                                                                });
+                                                        apply_patch(
+                                                            &mut patch,
+                                                            &rule.target_path,
+                                                            extracted.clone(),
+                                                        );
                                                         updates.user_metadata_patch = Some(patch);
                                                     }
                                                     ExtractionTarget::StepOutput => {
-                                                        let mut patch = Value::Object(step_output.clone());
-                                                        apply_patch(&mut patch, &rule.target_path, extracted.clone());
+                                                        let mut patch =
+                                                            Value::Object(step_output.clone());
+                                                        apply_patch(
+                                                            &mut patch,
+                                                            &rule.target_path,
+                                                            extracted.clone(),
+                                                        );
                                                         if let Value::Object(m) = patch {
                                                             step_output = m;
                                                         }
@@ -245,7 +294,8 @@ impl Step for WebhookHttpStep {
                         }
 
                         warn!("Webhook non-success status: {}", status);
-                        let retryable = status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
+                        let retryable = status.is_server_error()
+                            || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
                         if retryable {
                             if let Some(policy) = config.retry_policy {
                                 // Normally we would track attempts. For now, just retry
@@ -278,11 +328,11 @@ impl Step for WebhookHttpStep {
 }
 
 // Simple templating utility: replaces {{var}} with actual values
-fn render_template_str(template: &str, ctx: &StepContext) -> String {
+pub(crate) fn render_template_str(template: &str, ctx: &StepContext) -> String {
     let mut result = template.to_string();
     // A proper implementation would use regex or a templating engine
     // For now, simple manual replace for common paths
-    
+
     // session.*
     if result.contains("{{session.") {
         if let Value::Object(map) = &ctx.session_context {
@@ -322,7 +372,7 @@ fn render_template_str(template: &str, ctx: &StepContext) -> String {
     result
 }
 
-fn render_template_val(val: &Value, ctx: &StepContext) -> Value {
+pub(crate) fn render_template_val(val: &Value, ctx: &StepContext) -> Value {
     match val {
         Value::String(s) => Value::String(render_template_str(s, ctx)),
         Value::Array(arr) => {
@@ -340,12 +390,12 @@ fn render_template_val(val: &Value, ctx: &StepContext) -> Value {
 }
 
 // Applies a JSON pointer patch
-fn apply_patch(target: &mut Value, path: &str, value: Value) {
+pub(crate) fn apply_patch(target: &mut Value, path: &str, value: Value) {
     let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {
         return;
     }
-    
+
     let mut current = target;
     for (i, part) in parts.iter().enumerate() {
         if i == parts.len() - 1 {

@@ -488,7 +488,7 @@ async fn create_step_chain(
         {
             StepOutcome::Done { output, updates } => {
                 let actual_output = output.unwrap_or_else(|| json!({"result": "done"}));
-                
+
                 api.state
                     .flow
                     .patch_step(
@@ -502,25 +502,39 @@ async fn create_step_chain(
                     )
                     .await?;
 
-                let mut context = store_step_output(flow.context.clone(), &step_type, &actual_output);
-                
+                let mut context =
+                    store_step_output(flow.context.clone(), &step_type, &actual_output);
+
                 if let Some(updates) = updates {
                     if let Some(flow_patch) = updates.flow_context_patch {
                         context = merge_json(context, flow_patch);
                     }
                     if let Some(session_patch) = updates.session_context_patch {
-                        let current_session = api.state.flow.get_session(&flow.session_id).await?
-                            .ok_or_else(|| Error::internal("SESSION_NOT_FOUND", "Session not found"))?;
-                        let new_session_context = merge_json(current_session.context.clone(), session_patch);
-                        api.state.flow.update_session_context(&flow.session_id, new_session_context).await?;
+                        let current_session = api
+                            .state
+                            .flow
+                            .get_session(&flow.session_id)
+                            .await?
+                            .ok_or_else(|| {
+                            Error::internal("SESSION_NOT_FOUND", "Session not found")
+                        })?;
+                        let new_session_context =
+                            merge_json(current_session.context.clone(), session_patch);
+                        api.state
+                            .flow
+                            .update_session_context(&flow.session_id, new_session_context)
+                            .await?;
                     }
                     if let Some(metadata_patch) = updates.user_metadata_patch {
                         if let Some(user_id) = session.user_id.as_deref() {
-                            api.state.user.update_metadata(user_id, metadata_patch).await?;
+                            api.state
+                                .user
+                                .update_metadata(user_id, metadata_patch)
+                                .await?;
                         }
                     }
                 }
-                
+
                 flow = api
                     .state
                     .flow

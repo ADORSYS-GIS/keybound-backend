@@ -10,10 +10,10 @@ pub(crate) mod auth_signature;
 pub(crate) mod bff_signature;
 pub(crate) mod file_storage;
 pub(crate) mod flow_logic;
+pub(crate) mod flow_executor;
 pub mod flow_registry;
 pub(crate) mod health;
 pub(crate) mod state;
-pub(crate) mod state_machine;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 pub(crate) mod worker;

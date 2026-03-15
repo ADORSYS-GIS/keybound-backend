@@ -1,16 +1,14 @@
-//! Background worker for async tasks and state machine processing.
+//! Background worker for async tasks and flow step processing.
 //!
 //! This module implements a distributed worker system using Redis for coordination.
 //! It processes two types of jobs:
-//! - State machine steps (KYC flows, etc.)
+//! - Flow steps (KYC flows, etc.)
 //! - Notifications (SMS OTP, email magic links)
 //!
 //! The worker uses a distributed lock to ensure only one instance runs at a time.
 
+use crate::flow_executor::FlowExecutor;
 use crate::state::AppState;
-use crate::state_machine::engine::Engine;
-use crate::state_machine::jobs::StateMachineStepJob;
-use crate::state_machine::queue::queue_namespace as sm_queue_namespace;
 use apalis::prelude::{BoxDynError, TaskSink, WorkerBuilder};
 use apalis_redis::{RedisConfig, RedisStorage};
 use async_trait::async_trait;
@@ -260,7 +258,7 @@ pub async fn run(state: Arc<AppState>) -> backend_core::Result<()> {
 
     loop {
         let state_clone = state.clone();
-        
+
         // Wait for next eligible step
         let maybe_step = match state_clone.flow.claim_next_system_step().await {
             Ok(step) => step,
@@ -273,8 +271,8 @@ pub async fn run(state: Arc<AppState>) -> backend_core::Result<()> {
 
         match maybe_step {
             Some(step) => {
-                let engine = Engine::new(state_clone);
-                if let Err(e) = engine.process_flow_step(step).await {
+                let executor = FlowExecutor::new(state_clone);
+                if let Err(e) = executor.process_flow_step(step).await {
                     warn!("failed to process system flow step: {}", e);
                 }
             }

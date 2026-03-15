@@ -4,17 +4,17 @@ use redis::AsyncCommands;
 use std::sync::Arc;
 
 /// Trait for nonce replay protection.
-/// 
+///
 /// Implementations must ensure that a nonce is unique within the allowed time window
 /// for a given device. This prevents replay attacks where an attacker reuses a valid
 /// signature.
 #[async_trait]
 pub trait ReplayGuard: Send + Sync {
     /// Checks and records a nonce for the given device.
-    /// 
+    ///
     /// Returns `Ok(())` if the nonce is unique and has been recorded.
     /// Returns `Err` if the nonce has already been used within the time window.
-    /// 
+    ///
     /// # Arguments
     /// * `device_id` - The device identifier
     /// * `nonce` - The nonce value from the request
@@ -30,7 +30,7 @@ pub trait ReplayGuard: Send + Sync {
 }
 
 /// Redis-backed replay guard implementation.
-/// 
+///
 /// This is the production-ready implementation that provides multi-instance correctness.
 pub struct RedisReplayGuard {
     redis_url: String,
@@ -51,15 +51,26 @@ impl ReplayGuard for RedisReplayGuard {
         _timestamp: i64,
         skew_seconds: i64,
     ) -> Result<()> {
-        let client = redis::Client::open(self.redis_url.clone())
-            .map_err(|error| Error::internal("REDIS_CLIENT_FAILED", format!("failed to open redis client: {error}")))?;
-        
-        let mut conn = client.get_multiplexed_async_connection().await
-            .map_err(|error| Error::internal("REDIS_CONNECT_FAILED", format!("failed to connect to redis: {error}")))?;
+        let client = redis::Client::open(self.redis_url.clone()).map_err(|error| {
+            Error::internal(
+                "REDIS_CLIENT_FAILED",
+                format!("failed to open redis client: {error}"),
+            )
+        })?;
+
+        let mut conn = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|error| {
+                Error::internal(
+                    "REDIS_CONNECT_FAILED",
+                    format!("failed to connect to redis: {error}"),
+                )
+            })?;
 
         let key = format!("replay:{}:{}", device_id, nonce);
         let ttl = (skew_seconds * 2).max(1); // Set TTL to double the skew to be safe, min 1 sec
-        
+
         // SET key "" EX ttl NX
         let set_result: Option<String> = redis::cmd("SET")
             .arg(&key)
@@ -69,7 +80,12 @@ impl ReplayGuard for RedisReplayGuard {
             .arg("NX")
             .query_async(&mut conn)
             .await
-            .map_err(|error| Error::internal("REDIS_CMD_FAILED", format!("redis SET command failed: {error}")))?;
+            .map_err(|error| {
+                Error::internal(
+                    "REDIS_CMD_FAILED",
+                    format!("redis SET command failed: {error}"),
+                )
+            })?;
 
         match set_result {
             Some(_) => Ok(()), // Key was set successfully (was not present)
@@ -79,7 +95,7 @@ impl ReplayGuard for RedisReplayGuard {
 }
 
 /// In-memory replay guard for testing and development.
-/// 
+///
 /// This implementation uses a simple in-memory map and is NOT suitable for
 /// production deployments with multiple server instances.
 #[cfg(any(test, feature = "test-utils"))]
@@ -120,10 +136,9 @@ pub mod in_memory {
             let cutoff = now - skew_seconds.max(1);
             let nonce_key = format!("{device_id}:{nonce}");
 
-            let mut entries = self
-                .cache
-                .lock()
-                .map_err(|_| Error::internal("NONCE_CACHE_LOCK_FAILED", "failed to lock nonce cache"))?;
+            let mut entries = self.cache.lock().map_err(|_| {
+                Error::internal("NONCE_CACHE_LOCK_FAILED", "failed to lock nonce cache")
+            })?;
 
             entries.retain(|_, seen_at| *seen_at >= cutoff);
 
@@ -142,15 +157,17 @@ pub mod in_memory {
 
 #[cfg(test)]
 mod tests {
-    use super::in_memory::InMemoryReplayGuard;
     use super::ReplayGuard;
+    use super::in_memory::InMemoryReplayGuard;
 
     #[tokio::test]
     async fn test_in_memory_replay_guard_allows_unique_nonce() {
         let guard = InMemoryReplayGuard::new();
         let timestamp = chrono::Utc::now().timestamp();
-        
-        let result = guard.check_and_record("dev_123", "nonce_abc", timestamp, 300).await;
+
+        let result = guard
+            .check_and_record("dev_123", "nonce_abc", timestamp, 300)
+            .await;
         assert!(result.is_ok());
     }
 
@@ -158,11 +175,15 @@ mod tests {
     async fn test_in_memory_replay_guard_rejects_reused_nonce() {
         let guard = InMemoryReplayGuard::new();
         let timestamp = chrono::Utc::now().timestamp();
-        
-        let result1 = guard.check_and_record("dev_123", "nonce_abc", timestamp, 300).await;
+
+        let result1 = guard
+            .check_and_record("dev_123", "nonce_abc", timestamp, 300)
+            .await;
         assert!(result1.is_ok());
 
-        let result2 = guard.check_and_record("dev_123", "nonce_abc", timestamp, 300).await;
+        let result2 = guard
+            .check_and_record("dev_123", "nonce_abc", timestamp, 300)
+            .await;
         assert!(result2.is_err());
         assert_eq!(result2.unwrap_err().to_string(), "Nonce already used");
     }

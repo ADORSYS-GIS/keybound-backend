@@ -246,14 +246,12 @@ pub fn apply_flow_import(
         })?;
 
     for step_def in definition.spec.steps {
-        let base_step = registry
-            .get_step(&step_def.step_type)
-            .ok_or_else(|| {
-                FlowError::InvalidDefinition(format!(
-                    "Flow '{}' references unknown step '{}'",
-                    flow_type, step_def.step_type
-                ))
-            })?;
+        let base_step = registry.get_step(&step_def.step_type).ok_or_else(|| {
+            FlowError::InvalidDefinition(format!(
+                "Flow '{}' references unknown step '{}'",
+                flow_type, step_def.step_type
+            ))
+        })?;
 
         // Extract a cloned Arc for the base step by relying on the fact that `FlowRegistry`
         // allows cloning step implementations when accessed properly. Wait, `get_step` returns `&dyn Step`.

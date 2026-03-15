@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
             if dry_run {
                 info!(path = %path.display(), flows = imports.flows.len(), sessions = imports.sessions.len(), "import dry-run validation succeeded");
             } else {
-                // If not dry-run, we should probably print that we can't persist them without DB, 
+                // If not dry-run, we should probably print that we can't persist them without DB,
                 // but wait, imports are runtime only in this system right now!
                 // "Startup import becomes real runtime behavior" implies they're just loaded into the registry at boot!
                 info!(path = %path.display(), flows = imports.flows.len(), sessions = imports.sessions.len(), "flow definition import validated");
@@ -107,7 +107,10 @@ async fn run_runtime(config_path: &str, mode: RuntimeMode, import: Option<&Path>
         }
         RuntimeMode::Shared => {
             info!("starting in shared mode");
-            tokio::try_join!(serve(&config, imports.clone()), run_worker(&config, imports))?;
+            tokio::try_join!(
+                serve(&config, imports.clone()),
+                run_worker(&config, imports)
+            )?;
         }
     }
 
@@ -124,7 +127,10 @@ fn load_imports(path: &Path) -> Result<backend_server::flow_registry::RegistryIm
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if ext.eq_ignore_ascii_case("json") || ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml") {
+                    if ext.eq_ignore_ascii_case("json")
+                        || ext.eq_ignore_ascii_case("yaml")
+                        || ext.eq_ignore_ascii_case("yml")
+                    {
                         parse_import_file(&path, &mut imports)?;
                     }
                 }
@@ -137,7 +143,10 @@ fn load_imports(path: &Path) -> Result<backend_server::flow_registry::RegistryIm
     Ok(imports)
 }
 
-fn parse_import_file(path: &Path, imports: &mut backend_server::flow_registry::RegistryImports) -> Result<()> {
+fn parse_import_file(
+    path: &Path,
+    imports: &mut backend_server::flow_registry::RegistryImports,
+) -> Result<()> {
     let content = std::fs::read_to_string(path)?;
     let format = ImportFormat::from_path(path);
 
@@ -173,8 +182,9 @@ fn parse_import_file(path: &Path, imports: &mut backend_server::flow_registry::R
 
 fn run_export(target: Option<&str>, all: bool, output: Option<&Path>) -> Result<()> {
     let imports = backend_server::flow_registry::RegistryImports::default();
-    let registry = backend_server::flow_registry::build_registry(imports).map_err(|e| backend_core::Error::Server(e.to_string()))?;
-    
+    let registry = backend_server::flow_registry::build_registry(imports)
+        .map_err(|e| backend_core::Error::Server(e.to_string()))?;
+
     let mut definitions = Vec::new();
     for flow_type in registry.flow_types() {
         if let Some(flow) = registry.get_flow(&flow_type) {
@@ -264,4 +274,3 @@ fn run_export(target: Option<&str>, all: bool, output: Option<&Path>) -> Result<
 
     Ok(())
 }
-

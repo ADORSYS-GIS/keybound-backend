@@ -15,7 +15,7 @@ pub fn canonicalize_payload(
     user_id_hint: Option<&str>,
 ) -> Result<String> {
     let provided_public_key = canonicalize_public_key(public_key_json)?;
-    
+
     let canonical = format!(
         "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         timestamp,
@@ -35,7 +35,7 @@ pub fn canonicalize_payload(
 pub fn canonicalize_public_key(raw: &str) -> Result<String> {
     let parsed: Value = serde_json::from_str(raw)
         .map_err(|_| Error::unauthorized("x-auth-public-key must be valid JSON"))?;
-    
+
     let object = parsed
         .as_object()
         .ok_or_else(|| Error::unauthorized("x-auth-public-key must be a JSON object"))?;

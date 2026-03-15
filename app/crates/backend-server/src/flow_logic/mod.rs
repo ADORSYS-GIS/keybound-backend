@@ -8,3 +8,6 @@ pub mod first_deposit;
 pub mod id_document;
 pub mod phone_otp;
 pub mod webhook_http;
+
+#[cfg(test)]
+mod webhook_http_tests;

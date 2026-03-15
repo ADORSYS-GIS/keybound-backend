@@ -35,7 +35,7 @@ All agents now use **Markdown frontmatter** format:
 ---
 name: agent-name
 description: What this agent does
-llm: model-name
+model: cdigital-test/model-name
 commands:
   - command-1
   - command-2

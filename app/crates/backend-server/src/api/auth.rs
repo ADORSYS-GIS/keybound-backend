@@ -6,6 +6,7 @@ use axum::{
     Json, Router,
     routing::{delete, get, post},
 };
+use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_model::kc::EnrollmentBindRequest;
 use backend_repository::{
@@ -13,7 +14,6 @@ use backend_repository::{
     SigningKeyCreateInput,
 };
 use base64::Engine;
-use backend_auth::JwtToken;
 use chrono::Utc;
 use gen_oas_server_kc::types::Object;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -535,20 +535,17 @@ async fn jwks(State(api): State<BackendApi>) -> Result<Json<JwksResponse>, Error
     }))
 }
 
-async fn extract_bearer_token(
-    headers: &HeaderMap,
-    api: &BackendApi,
-) -> Result<JwtToken, Error> {
+async fn extract_bearer_token(headers: &HeaderMap, api: &BackendApi) -> Result<JwtToken, Error> {
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
-        
+
     let prefix = "Bearer ";
     if !auth_header.to_ascii_lowercase().starts_with("bearer ") {
         return Err(Error::unauthorized("Missing bearer token"));
     }
-    
+
     let token = &auth_header[prefix.len()..];
     JwtToken::verify(token, &api.oidc_state).await
 }
@@ -703,15 +700,21 @@ async fn verify_signature_with_jwk(
     let timestamp = timestamp_str
         .parse::<i64>()
         .map_err(|_| Error::unauthorized("Invalid x-auth-signature-timestamp"))?;
-    
-    crate::auth_signature::validate_timestamp(timestamp, api.state.config.auth.max_clock_skew_seconds)?;
 
-    api.state.replay_guard.check_and_record(
-        &device_id,
-        &nonce,
+    crate::auth_signature::validate_timestamp(
         timestamp,
         api.state.config.auth.max_clock_skew_seconds,
-    ).await?;
+    )?;
+
+    api.state
+        .replay_guard
+        .check_and_record(
+            &device_id,
+            &nonce,
+            timestamp,
+            api.state.config.auth.max_clock_skew_seconds,
+        )
+        .await?;
 
     crate::auth_signature::validate_public_key_match(&public_key_header, public_jwk)?;
 

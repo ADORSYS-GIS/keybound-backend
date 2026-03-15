@@ -142,65 +142,6 @@ pub struct SigningKeyRow {
 }
 
 /// State machine instance - represents a single KYC flow execution.
-/// Status: pending, running, completed, failed
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::sm_instance)]
-pub struct SmInstanceRow {
-    pub id: String,
-    /// Process kind: KYC_PHONE_OTP, KYC_FIRST_DEPOSIT, etc.
-    pub kind: String,
-    pub user_id: Option<String>,
-    /// Idempotency key for deduplication
-    pub idempotency_key: String,
-    pub status: String,
-    /// JSON context with flow-specific data
-    pub context: Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
-}
-
-/// State machine event - records transitions and external inputs.
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::sm_event)]
-pub struct SmEventRow {
-    pub id: String,
-    pub instance_id: String,
-    /// Event kind: step_started, step_completed, external_input, etc.
-    pub kind: String,
-    /// Actor type: user, system, staff
-    pub actor_type: String,
-    pub actor_id: Option<String>,
-    pub payload: Value,
-    pub created_at: DateTime<Utc>,
-}
-
-/// State machine step attempt - tracks individual step executions with retry support.
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::sm_step_attempt)]
-pub struct SmStepAttemptRow {
-    pub id: String,
-    pub instance_id: String,
-    /// Step identifier within the state machine
-    pub step_name: String,
-    /// Retry count (1 for first attempt)
-    pub attempt_no: i32,
-    /// Status: pending, running, succeeded, failed
-    pub status: String,
-    /// External reference (e.g., SMS ID, CUSS transaction ID)
-    pub external_ref: Option<String>,
-    /// Input parameters for the step
-    pub input: Value,
-    /// Output from successful execution
-    pub output: Option<Value>,
-    /// Error details from failed execution
-    pub error: Option<Value>,
-    pub queued_at: Option<DateTime<Utc>>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub finished_at: Option<DateTime<Utc>>,
-    /// Scheduled time for next retry
-    pub next_retry_at: Option<DateTime<Utc>>,
-}
 
 impl diesel::associations::HasTable for UserRow {
     type Table = crate::schema::app_user::table;
@@ -263,30 +204,6 @@ impl diesel::associations::HasTable for SigningKeyRow {
 
     fn table() -> Self::Table {
         crate::schema::signing_key::table
-    }
-}
-
-impl diesel::associations::HasTable for SmInstanceRow {
-    type Table = crate::schema::sm_instance::table;
-
-    fn table() -> Self::Table {
-        crate::schema::sm_instance::table
-    }
-}
-
-impl diesel::associations::HasTable for SmEventRow {
-    type Table = crate::schema::sm_event::table;
-
-    fn table() -> Self::Table {
-        crate::schema::sm_event::table
-    }
-}
-
-impl diesel::associations::HasTable for SmStepAttemptRow {
-    type Table = crate::schema::sm_step_attempt::table;
-
-    fn table() -> Self::Table {
-        crate::schema::sm_step_attempt::table
     }
 }
 
@@ -355,29 +272,5 @@ impl<'a> diesel::Identifiable for &'a SigningKeyRow {
 
     fn id(self) -> Self::Id {
         self.kid.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a SmInstanceRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.id.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a SmEventRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.id.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a SmStepAttemptRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.id.as_str()
     }
 }
