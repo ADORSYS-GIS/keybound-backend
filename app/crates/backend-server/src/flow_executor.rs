@@ -5,6 +5,7 @@ use backend_repository::FlowStepPatch;
 use chrono::Utc;
 use serde_json::Value;
 use std::sync::Arc;
+use tracing::{debug, info, instrument};
 
 pub struct FlowExecutor {
     state: Arc<AppState>,
@@ -15,10 +16,15 @@ impl FlowExecutor {
         Self { state }
     }
 
+    #[instrument(skip(self, step))]
     pub async fn process_flow_step(
         &self,
         step: backend_model::db::FlowStepRow,
     ) -> Result<(), Error> {
+        debug!(
+            "Processing step: {} for flow: {}",
+            step.step_type, step.flow_id
+        );
         let flow = self
             .state
             .flow
@@ -70,6 +76,7 @@ impl FlowExecutor {
             .map_err(|e| Error::internal("STEP_EXECUTION_FAILED", e.to_string()))?
         {
             StepOutcome::Done { output, updates } => {
+                debug!("Step execution done: {}", step.step_type);
                 let actual_output = output.unwrap_or_else(|| serde_json::json!({"result": "done"}));
 
                 self.state
@@ -95,8 +102,8 @@ impl FlowExecutor {
                 }
 
                 if let Some(updates) = updates {
-                    if let Some(flow_patch) = updates.flow_context_patch {
-                        if let (Some(base_obj), Some(patch_obj)) =
+                    if let Some(flow_patch) = updates.flow_context_patch
+                        && let (Some(base_obj), Some(patch_obj)) =
                             (next_flow_context.as_object_mut(), flow_patch.as_object())
                         {
                             for (k, v) in patch_obj {
@@ -107,7 +114,6 @@ impl FlowExecutor {
                                 }
                             }
                         }
-                    }
                     if let Some(session_patch) = updates.session_context_patch {
                         let mut new_session_context = session.context.clone();
                         if let (Some(base_obj), Some(patch_obj)) = (
@@ -127,14 +133,13 @@ impl FlowExecutor {
                             .update_session_context(&session.id, new_session_context)
                             .await?;
                     }
-                    if let Some(metadata_patch) = updates.user_metadata_patch {
-                        if let Some(user_id) = session.user_id.as_deref() {
+                    if let Some(metadata_patch) = updates.user_metadata_patch
+                        && let Some(user_id) = session.user_id.as_deref() {
                             self.state
                                 .user
                                 .update_metadata(user_id, metadata_patch)
                                 .await?;
                         }
-                    }
                 }
 
                 if let Some(next_step_type) = flow_def.find_next_step(&step.step_type) {
@@ -225,12 +230,17 @@ impl FlowExecutor {
                 }
             }
             StepOutcome::Waiting { .. } => {
+                debug!("Step execution waiting: {}", step.step_type);
                 self.state
                     .flow
                     .patch_step(&step.id, FlowStepPatch::new().status("WAITING"))
                     .await?;
             }
             StepOutcome::Failed { error, retryable } => {
+                info!(
+                    "Step execution failed: {} (error={}, retryable={})",
+                    step.step_type, error, retryable
+                );
                 self.state
                     .flow
                     .patch_step(
@@ -251,6 +261,10 @@ impl FlowExecutor {
                     .await?;
             }
             StepOutcome::Retry { after } => {
+                debug!(
+                    "Step execution retry: {} (after={:?})",
+                    step.step_type, after
+                );
                 use chrono::Duration;
                 self.state
                     .flow

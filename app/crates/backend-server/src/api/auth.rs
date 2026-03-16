@@ -20,8 +20,9 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 use std::collections::{BTreeMap, HashMap};
+use tracing::{debug, instrument};
 use utoipa::{OpenApi, ToSchema};
 
 const HEADER_SIGNATURE: &str = "x-auth-signature";
@@ -197,10 +198,12 @@ struct TokenClaims {
     ),
     tag = "Auth"
 )]
+#[instrument(skip(api))]
 async fn enroll(
     State(api): State<BackendApi>,
     Json(body): Json<EnrollRequest>,
 ) -> Result<Json<EnrollResponse>, Error> {
+    debug!("Starting device enrollment for user: {}", body.user_id);
     let session_id = backend_id::flow_session_id()?;
     let flow_id = backend_id::flow_instance_id()?;
     let step_id = backend_id::flow_step_id()?;
@@ -292,6 +295,7 @@ async fn enroll(
     ),
     tag = "Auth"
 )]
+#[instrument(skip(api, body_bytes, headers))]
 async fn bind_enroll(
     State(api): State<BackendApi>,
     Path(id): Path<String>,
@@ -300,6 +304,7 @@ async fn bind_enroll(
     headers: HeaderMap,
     body_bytes: axum::body::Bytes,
 ) -> Result<Json<BindEnrollResponse>, Error> {
+    debug!("Binding device for enrollment session: {}", id);
     let body: BindEnrollRequest = serde_json::from_slice(&body_bytes)
         .map_err(|error| Error::bad_request("INVALID_BODY", error.to_string()))?;
 
@@ -390,12 +395,14 @@ async fn bind_enroll(
     ),
     tag = "Auth"
 )]
+#[instrument(skip(api))]
 async fn list_devices(
     State(api): State<BackendApi>,
     method: Method,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Result<Json<DevicesResponse>, Error> {
+    debug!("Listing devices");
     let auth = authenticate_device(&api, &method, uri.path(), &headers, &[]).await?;
     let devices = api
         .state
@@ -429,6 +436,7 @@ async fn list_devices(
     ),
     tag = "Auth"
 )]
+#[instrument(skip(api))]
 async fn revoke_device(
     State(api): State<BackendApi>,
     Path(device_id): Path<String>,
@@ -436,6 +444,7 @@ async fn revoke_device(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, Error> {
+    debug!("Revoking device: {}", device_id);
     let auth = authenticate_device(&api, &method, uri.path(), &headers, &[]).await?;
 
     let device = api
@@ -462,6 +471,7 @@ async fn revoke_device(
     ),
     tag = "Auth"
 )]
+#[instrument(skip(api, body_bytes))]
 async fn exchange_token(
     State(api): State<BackendApi>,
     method: Method,
@@ -469,6 +479,7 @@ async fn exchange_token(
     headers: HeaderMap,
     body_bytes: axum::body::Bytes,
 ) -> Result<Json<TokenResponse>, Error> {
+    debug!("Exchanging signature for token");
     let body: TokenRequest = serde_json::from_slice(&body_bytes)
         .map_err(|error| Error::bad_request("INVALID_BODY", error.to_string()))?;
 
@@ -643,6 +654,7 @@ struct AuthenticatedDevice {
     user_id: String,
 }
 
+#[instrument(skip(api, headers, body))]
 async fn authenticate_device(
     api: &BackendApi,
     method: &Method,
@@ -652,6 +664,7 @@ async fn authenticate_device(
 ) -> Result<AuthenticatedDevice, Error> {
     let device_id = header_value(headers, HEADER_DEVICE_ID)
         .ok_or_else(|| Error::unauthorized("Missing x-auth-device-id"))?;
+    debug!("Authenticating device: {}", device_id);
 
     let lookup = backend_model::kc::DeviceLookupRequest {
         device_id: Some(device_id.clone()),
@@ -677,6 +690,7 @@ async fn authenticate_device(
     })
 }
 
+#[instrument(skip(api, headers, body, public_jwk))]
 async fn verify_signature_with_jwk(
     api: &BackendApi,
     method: &Method,
@@ -685,6 +699,7 @@ async fn verify_signature_with_jwk(
     body: &[u8],
     public_jwk: &str,
 ) -> Result<(), Error> {
+    debug!("Verifying request signature for path: {}", path);
     let signature = header_value(headers, HEADER_SIGNATURE)
         .ok_or_else(|| Error::unauthorized("Missing x-auth-signature"))?;
     let timestamp_str = header_value(headers, HEADER_TIMESTAMP)

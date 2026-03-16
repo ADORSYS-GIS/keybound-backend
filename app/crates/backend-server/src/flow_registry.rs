@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use crate::flow_logic;
 
+use tracing::{debug, info};
+
 pub const SESSION_TYPE_KYC_FULL: &str = "KYC_FULL";
 pub const SESSION_TYPE_ACCOUNT_MANAGEMENT: &str = "ACCOUNT_MANAGEMENT";
 pub const SESSION_TYPE_ADMIN_OPERATIONS: &str = "ADMIN_OPERATIONS";
@@ -16,6 +18,7 @@ pub struct RegistryImports {
 }
 
 pub fn build_registry(imports: RegistryImports) -> Result<FlowRegistry, FlowError> {
+    info!("Building flow registry...");
     let mut registry = FlowRegistry::new();
     let mut kyc_allowed_flows = Vec::new();
     let mut account_allowed_flows = Vec::new();
@@ -208,10 +211,12 @@ pub fn build_registry(imports: RegistryImports) -> Result<FlowRegistry, FlowErro
     });
 
     for flow_def in imports.flows {
+        debug!("Importing flow: {}", flow_def.metadata.flow_type);
         apply_flow_import(&mut registry, flow_def)?;
     }
 
     for session_def in imports.sessions {
+        debug!("Importing session: {}", session_def.session_type);
         apply_session_import(&mut registry, session_def)?;
     }
 
@@ -246,7 +251,7 @@ pub fn apply_flow_import(
         })?;
 
     for step_def in definition.spec.steps {
-        let base_step = registry.get_step(&step_def.step_type).ok_or_else(|| {
+        let _base_step = registry.get_step(&step_def.step_type).ok_or_else(|| {
             FlowError::InvalidDefinition(format!(
                 "Flow '{}' references unknown step '{}'",
                 flow_type, step_def.step_type
@@ -263,7 +268,7 @@ pub fn apply_flow_import(
 
         let proxy = Arc::new(ProxyStep {
             step_type: step_def.step_type.clone(),
-            actor: step_def.actor.clone(),
+            actor: step_def.actor,
             human_id: step_def.human_id.clone(),
             feature: step_def.feature.clone(),
             inner: base_step_arc,
@@ -335,7 +340,7 @@ impl backend_flow_sdk::Step for ProxyStep {
     }
 
     fn actor(&self) -> Actor {
-        self.actor.clone()
+        self.actor
     }
 
     fn human_id(&self) -> &str {

@@ -17,10 +17,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use tracing::error;
+use tracing::{debug, error, instrument};
 
 /// Validates Keycloak signature on incoming requests.
 /// Returns the request if valid, or an error response if signature is invalid or missing.
+#[instrument(skip(state, req))]
 pub async fn require_kc_signature(
     enabled: bool,
     state: &SignatureState,
@@ -36,6 +37,8 @@ pub async fn require_kc_signature(
         .get::<OriginalUri>()
         .map(|u| u.0.clone())
         .unwrap_or_else(|| req.uri().clone());
+
+    debug!("Checking KC signature for {} {}", method, uri.path());
 
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, state.max_body_bytes).await {
@@ -124,6 +127,8 @@ where
             if !is_protected {
                 return inner.call(req).await;
             }
+
+            debug!("JWT middleware protecting path: {}", path);
 
             let token = match bearer_token(req.headers()) {
                 Some(value) => value,
@@ -245,6 +250,10 @@ where
         let enabled = self.enabled;
         let state = Arc::clone(&self.state);
         let mut inner = self.inner.clone();
+
+        let path = req.uri().path().to_owned();
+        debug!("KC signature middleware protecting path: {}", path);
+
         Box::pin(async move {
             match require_kc_signature(enabled, &state, req).await {
                 Ok(req) => inner.call(req).await,

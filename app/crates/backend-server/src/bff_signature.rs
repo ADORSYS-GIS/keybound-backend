@@ -1,12 +1,12 @@
 use crate::api::{BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_USER_ID_HEADER};
 use crate::auth_signature::{
-    ReplayGuard, canonicalize_device_auth_payload, validate_public_key_match,
-    validate_timestamp, validate_user_id_hint, verify_signature,
+    ReplayGuard, canonicalize_device_auth_payload, validate_public_key_match, validate_timestamp,
+    validate_user_id_hint, verify_signature,
 };
 use crate::state::AppState;
 use axum::body::{Body, to_bytes};
-use axum::extract::{OriginalUri, State};
-use axum::http::{HeaderMap, HeaderValue, Method, Request};
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderValue, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use backend_auth::JwtToken;
@@ -36,11 +36,10 @@ pub async fn require_bff_signature(
         Err(_) => return Error::unauthorized("Invalid request body").into_response(),
     };
 
-    let (user_id, device_id) =
-        match authenticate(&state, &parts.headers).await {
-            Ok(claims) => claims,
-            Err(error) => return error.into_response(),
-        };
+    let (user_id, device_id) = match authenticate(&state, &parts.headers).await {
+        Ok(claims) => claims,
+        Err(error) => return error.into_response(),
+    };
 
     let user_header = match HeaderValue::from_str(&user_id) {
         Ok(value) => value,
@@ -62,11 +61,14 @@ pub async fn require_bff_signature(
     next.run(req).await
 }
 
-async fn authenticate(state: &Arc<AppState>, headers: &HeaderMap) -> Result<(String, String), Error> {
+async fn authenticate(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+) -> Result<(String, String), Error> {
     if let Some(token) = extract_bearer_token(headers) {
         return authenticate_bearer(state, &token).await;
     }
-    
+
     authenticate_signature(state, headers).await
 }
 
@@ -83,16 +85,19 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     Some(auth_header[prefix.len()..].to_owned())
 }
 
-async fn authenticate_bearer(state: &Arc<AppState>, token: &str) -> Result<(String, String), Error> {
+async fn authenticate_bearer(
+    state: &Arc<AppState>,
+    token: &str,
+) -> Result<(String, String), Error> {
     let jwt = JwtToken::verify(token, &state.oidc_state).await?;
     let user_id = jwt.user_id().to_owned();
     let device_id = "bff".to_owned();
-    
+
     tracing::info!(
         user_id = %user_id,
         "Bearer token authentication successful"
     );
-    
+
     Ok((user_id, device_id))
 }
 
@@ -155,12 +160,8 @@ async fn authenticate_signature(
     validate_user_id_hint(user_id_hint.as_deref(), &device.user_id)?;
     validate_public_key_match(&public_key, &device.public_jwk)?;
 
-    let canonical_payload = canonicalize_device_auth_payload(
-        &device_id,
-        &nonce,
-        &public_key,
-        timestamp,
-    )?;
+    let canonical_payload =
+        canonicalize_device_auth_payload(&device_id, &nonce, &public_key, timestamp)?;
 
     tracing::debug!(
         canonical_payload = %canonical_payload,

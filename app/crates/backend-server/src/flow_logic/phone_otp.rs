@@ -3,6 +3,7 @@ use backend_flow_sdk::flow::StepRef;
 use backend_flow_sdk::{Actor, FlowError, Step, StepContext, StepOutcome};
 use serde_json::Value;
 use std::sync::Arc;
+use tracing::{debug, instrument};
 
 pub fn steps() -> Vec<StepRef> {
     vec![Arc::new(IssuePhoneOtpStep), Arc::new(VerifyPhoneOtpStep)]
@@ -28,7 +29,9 @@ impl Step for IssuePhoneOtpStep {
         Some("flow-phone-otp")
     }
 
+    #[instrument(skip(self, _ctx))]
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        debug!("Executing IssuePhoneOtpStep");
         Ok(StepOutcome::Done {
             output: None,
             updates: None,
@@ -56,7 +59,9 @@ impl Step for VerifyPhoneOtpStep {
         Some("flow-phone-otp")
     }
 
+    #[instrument(skip(self, _ctx))]
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        debug!("Executing VerifyPhoneOtpStep (waiting for user)");
         Ok(StepOutcome::Waiting {
             actor: Actor::EndUser,
         })

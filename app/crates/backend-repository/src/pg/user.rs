@@ -7,6 +7,7 @@ use diesel::upsert::excluded;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
+use tracing::{debug, instrument};
 
 #[derive(Clone)]
 pub struct UserRepository {
@@ -52,7 +53,9 @@ fn normalize_search_field(value: Option<&String>) -> Option<String> {
 
 #[async_trait]
 impl UserRepo for UserRepository {
+    #[instrument(skip(self))]
     async fn create_user(&self, req: &kc_map::UserUpsert) -> RepoResult<db::UserRow> {
+        debug!("Creating user: {:?}", req.username);
         use backend_model::schema::app_user::dsl::*;
 
         let user_id_val = backend_id::user_id()?;
@@ -89,7 +92,9 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn get_user(&self, user_id_val: &str) -> RepoResult<Option<db::UserRow>> {
+        debug!("Getting user: {}", user_id_val);
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -102,11 +107,13 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn update_user(
         &self,
         user_id_val: &str,
         req: &kc_map::UserUpsert,
     ) -> RepoResult<Option<db::UserRow>> {
+        debug!("Updating user: {}", user_id_val);
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -133,7 +140,9 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn delete_user(&self, user_id_val: &str) -> RepoResult<u64> {
+        debug!("Deleting user: {}", user_id_val);
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -145,7 +154,12 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn search_users(&self, req: &kc_map::UserSearch) -> RepoResult<Vec<db::UserRow>> {
+        debug!(
+            "Searching users: realm={}, search={:?}",
+            req.realm, req.search
+        );
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -271,11 +285,13 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn resolve_user_by_phone(
         &self,
         realm_val: &str,
         phone: &str,
     ) -> RepoResult<Option<db::UserRow>> {
+        debug!("Resolving user by phone: {} in realm: {}", phone, realm_val);
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -289,11 +305,13 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn resolve_or_create_user_by_phone(
         &self,
         realm_val: &str,
         phone: &str,
     ) -> RepoResult<(db::UserRow, bool)> {
+        debug!("Resolving or creating user by phone: {}", phone);
         if let Some(user) = self.resolve_user_by_phone(realm_val, phone).await? {
             return Ok((user, false));
         }
@@ -328,7 +346,12 @@ impl UserRepo for UserRepository {
         Ok((user, true))
     }
 
+    #[instrument(skip(self))]
     async fn upsert_user_data(&self, input: UserDataUpsertInput) -> RepoResult<db::UserDataRow> {
+        debug!(
+            "Upserting user data: user_id={}, name={}",
+            input.user_id, input.name
+        );
         use backend_model::schema::app_user_data::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -356,11 +379,16 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn list_user_data(
         &self,
         user_id_val: &str,
         eager_fetch_only: bool,
     ) -> RepoResult<Vec<db::UserDataRow>> {
+        debug!(
+            "Listing user data: user_id={}, eager_only={}",
+            user_id_val, eager_fetch_only
+        );
         use backend_model::schema::app_user_data::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -376,11 +404,13 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn update_metadata(
         &self,
         user_id_val: &str,
         metadata_patch: serde_json::Value,
     ) -> RepoResult<()> {
+        debug!("Updating user metadata: user_id={}", user_id_val);
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -392,8 +422,7 @@ impl UserRepo for UserRepository {
             .await
             .optional()
             .map_err(Into::<backend_core::Error>::into)?
-        {
-            if let (Some(base_obj), Some(patch_obj)) =
+            && let (Some(base_obj), Some(patch_obj)) =
                 (user.metadata.as_object_mut(), metadata_patch.as_object())
             {
                 for (k, v) in patch_obj {
@@ -413,7 +442,6 @@ impl UserRepo for UserRepository {
                     .await
                     .map_err(Into::<backend_core::Error>::into)?;
             }
-        }
 
         Ok(())
     }

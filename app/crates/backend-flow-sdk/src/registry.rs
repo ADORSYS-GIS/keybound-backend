@@ -1,6 +1,7 @@
 use crate::{Flow, FlowError, SessionDefinition, Step};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tracing::debug;
 
 #[derive(Default)]
 pub struct FlowRegistry {
@@ -15,14 +16,17 @@ impl FlowRegistry {
     }
 
     pub fn register_step(&mut self, step: Arc<dyn Step>) {
+        debug!("Registering step: {}", step.step_type());
         self.steps.insert(step.step_type().to_owned(), step);
     }
 
     pub fn register_flow(&mut self, flow: Arc<dyn Flow>) {
+        debug!("Registering flow: {}", flow.flow_type());
         self.flows.insert(flow.flow_type().to_owned(), flow);
     }
 
     pub fn register_session(&mut self, session: SessionDefinition) {
+        debug!("Registering session: {}", session.session_type);
         self.sessions.insert(session.session_type.clone(), session);
     }
 

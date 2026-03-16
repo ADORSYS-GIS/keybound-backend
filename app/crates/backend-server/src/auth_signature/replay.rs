@@ -1,7 +1,5 @@
 use async_trait::async_trait;
 use backend_core::{Error, Result};
-use redis::AsyncCommands;
-use std::sync::Arc;
 
 /// Trait for nonce replay protection.
 ///

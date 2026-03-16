@@ -9,6 +9,7 @@ use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
 use serde_json::Value;
+use tracing::{debug, instrument};
 
 #[derive(Clone)]
 pub struct FlowRepository {
@@ -32,10 +33,12 @@ impl FlowRepository {
 
 #[async_trait]
 impl FlowRepo for FlowRepository {
+    #[instrument(skip(self))]
     async fn create_session(
         &self,
         input: FlowSessionCreateInput,
     ) -> RepoResult<db::FlowSessionRow> {
+        debug!("Creating session: {}", input.session_type);
         use backend_model::schema::flow_session;
 
         let mut conn = self.get_conn().await?;
@@ -74,7 +77,9 @@ impl FlowRepo for FlowRepository {
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_session(&self, session_id: &str) -> RepoResult<Option<db::FlowSessionRow>> {
+        debug!("Getting session: {}", session_id);
         use backend_model::schema::flow_session;
 
         let mut conn = self.get_conn().await?;
@@ -87,10 +92,12 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn list_sessions(
         &self,
         filter: FlowSessionFilter,
     ) -> RepoResult<(Vec<db::FlowSessionRow>, i64)> {
+        debug!("Listing sessions with filter: {:?}", filter);
         use backend_model::schema::flow_session;
 
         let filter = filter.normalized();
@@ -130,12 +137,14 @@ impl FlowRepo for FlowRepository {
         Ok((rows, total))
     }
 
+    #[instrument(skip(self))]
     async fn update_session_status(
         &self,
         session_id: &str,
         status: &str,
         completed_at: Option<DateTime<Utc>>,
     ) -> RepoResult<()> {
+        debug!("Updating session status: {} -> {}", session_id, status);
         use backend_model::schema::flow_session;
 
         let mut conn = self.get_conn().await?;
@@ -151,7 +160,9 @@ impl FlowRepo for FlowRepository {
         Ok(())
     }
 
+    #[instrument(skip(self, context))]
     async fn update_session_context(&self, session_id: &str, context: Value) -> RepoResult<()> {
+        debug!("Updating session context: {}", session_id);
         use backend_model::schema::flow_session;
 
         let mut conn = self.get_conn().await?;
@@ -166,7 +177,9 @@ impl FlowRepo for FlowRepository {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn create_flow(&self, input: FlowInstanceCreateInput) -> RepoResult<db::FlowInstanceRow> {
+        debug!("Creating flow instance: {}", input.flow_type);
         use backend_model::schema::flow_instance;
 
         let mut conn = self.get_conn().await?;
@@ -204,7 +217,9 @@ impl FlowRepo for FlowRepository {
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_flow(&self, flow_id: &str) -> RepoResult<Option<db::FlowInstanceRow>> {
+        debug!("Getting flow: {}", flow_id);
         use backend_model::schema::flow_instance;
 
         let mut conn = self.get_conn().await?;
@@ -217,10 +232,12 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn list_flows_for_session(
         &self,
         session_id: &str,
     ) -> RepoResult<Vec<db::FlowInstanceRow>> {
+        debug!("Listing flows for session: {}", session_id);
         use backend_model::schema::flow_instance;
 
         let mut conn = self.get_conn().await?;
@@ -233,6 +250,7 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self, step_ids, context))]
     async fn update_flow(
         &self,
         flow_id: &str,
@@ -241,6 +259,7 @@ impl FlowRepo for FlowRepository {
         step_ids: Option<Value>,
         context: Option<Value>,
     ) -> RepoResult<db::FlowInstanceRow> {
+        debug!("Updating flow: {}", flow_id);
         use backend_model::schema::flow_instance;
 
         let mut conn = self.get_conn().await?;
@@ -275,7 +294,12 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn create_step(&self, input: FlowStepCreateInput) -> RepoResult<db::FlowStepRow> {
+        debug!(
+            "Creating step: {} for flow: {}",
+            input.step_type, input.flow_id
+        );
         use backend_model::schema::flow_step;
 
         let mut conn = self.get_conn().await?;
@@ -317,7 +341,9 @@ impl FlowRepo for FlowRepository {
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_step(&self, step_id: &str) -> RepoResult<Option<db::FlowStepRow>> {
+        debug!("Getting step: {}", step_id);
         use backend_model::schema::flow_step;
 
         let mut conn = self.get_conn().await?;
@@ -330,7 +356,9 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn list_steps_for_flow(&self, flow_id: &str) -> RepoResult<Vec<db::FlowStepRow>> {
+        debug!("Listing steps for flow: {}", flow_id);
         use backend_model::schema::flow_step;
 
         let mut conn = self.get_conn().await?;
@@ -343,7 +371,9 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self, patch))]
     async fn patch_step(&self, step_id: &str, patch: FlowStepPatch) -> RepoResult<db::FlowStepRow> {
+        debug!("Patching step: {}", step_id);
         use backend_model::schema::flow_step;
 
         let mut conn = self.get_conn().await?;
@@ -444,11 +474,11 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
+    #[instrument(skip(self))]
     async fn claim_next_system_step(&self) -> RepoResult<Option<db::FlowStepRow>> {
-        use backend_model::schema::flow_step;
+        debug!("Claiming next system step");
 
         let mut conn = self.get_conn().await?;
-        let now = Utc::now();
 
         // Find a step that is either RUNNING or WAITING+retry_due, and is a SYSTEM step.
         // We update its status to RUNNING to claim it.
@@ -476,12 +506,12 @@ impl FlowRepo for FlowRepository {
             "#,
         );
 
-        let result = sql
+        
+
+        sql
             .get_result::<db::FlowStepRow>(&mut conn)
             .await
             .optional()
-            .map_err(Into::into);
-
-        result
+            .map_err(Into::into)
     }
 }

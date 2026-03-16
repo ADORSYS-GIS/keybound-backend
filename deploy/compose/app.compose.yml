@@ -62,3 +62,22 @@ services:
         condition: service_started
       minio-create-bucket:
         condition: service_completed_successfully
+
+  sms-gateway:
+    image: user-storage-app
+    build:
+      context: ../..
+      dockerfile: deploy/docker/user-storage/Dockerfile
+      target: dev
+    entrypoint:
+      - /app/sms-gateway
+    command:
+      - --config
+      - config/dev.yaml
+    volumes:
+      - ../../config:/app/config/
+    environment:
+      <<: *env
+    depends_on:
+      redis:
+        condition: service_healthy

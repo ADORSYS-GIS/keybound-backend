@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -183,23 +183,21 @@ impl Step for WebhookHttpStep {
                         let status = response.status();
                         let mut is_success = status.is_success();
 
-                        if let Some(cond) = &config.success_condition {
-                            if let Some(codes) = &cond.status_codes {
+                        if let Some(cond) = &config.success_condition
+                            && let Some(codes) = &cond.status_codes {
                                 is_success = codes.contains(&status.as_u16());
                             }
-                        }
 
                         if is_success {
                             let mut updates = ContextUpdates::default();
                             let mut step_output = serde_json::Map::new();
 
-                            if !config.extraction_rules.is_empty()
-                                || config.success_condition.is_some()
-                            {
-                                if let Ok(resp_json) = response.json::<Value>().await {
+                            if (!config.extraction_rules.is_empty()
+                                || config.success_condition.is_some())
+                                && let Ok(resp_json) = response.json::<Value>().await {
                                     // check specific json pointer condition if needed
-                                    if let Some(cond) = &config.success_condition {
-                                        if let (Some(ptr), Some(exp)) =
+                                    if let Some(cond) = &config.success_condition
+                                        && let (Some(ptr), Some(exp)) =
                                             (&cond.json_pointer, &cond.expected_value)
                                         {
                                             if let Some(val) = resp_json.pointer(ptr) {
@@ -210,7 +208,6 @@ impl Step for WebhookHttpStep {
                                                 is_success = false;
                                             }
                                         }
-                                    }
 
                                     if is_success {
                                         for rule in &config.extraction_rules {
@@ -283,7 +280,6 @@ impl Step for WebhookHttpStep {
                                         }
                                     }
                                 }
-                            }
 
                             if is_success {
                                 return Ok(StepOutcome::Done {
@@ -296,14 +292,13 @@ impl Step for WebhookHttpStep {
                         warn!("Webhook non-success status: {}", status);
                         let retryable = status.is_server_error()
                             || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
-                        if retryable {
-                            if let Some(policy) = config.retry_policy {
+                        if retryable
+                            && let Some(policy) = config.retry_policy {
                                 // Normally we would track attempts. For now, just retry
                                 return Ok(StepOutcome::Retry {
                                     after: Duration::from_millis(policy.backoff_ms),
                                 });
                             }
-                        }
                         Ok(StepOutcome::Failed {
                             error: format!("http_error_{}", status.as_u16()),
                             retryable: false,
@@ -334,8 +329,8 @@ pub(crate) fn render_template_str(template: &str, ctx: &StepContext) -> String {
     // For now, simple manual replace for common paths
 
     // session.*
-    if result.contains("{{session.") {
-        if let Value::Object(map) = &ctx.session_context {
+    if result.contains("{{session.")
+        && let Value::Object(map) = &ctx.session_context {
             for (k, v) in map {
                 let pattern = format!("{{{{session.{}}}}}", k);
                 if result.contains(&pattern) {
@@ -347,11 +342,10 @@ pub(crate) fn render_template_str(template: &str, ctx: &StepContext) -> String {
                 }
             }
         }
-    }
 
     // flow.context.*
-    if result.contains("{{flow.context.") {
-        if let Value::Object(map) = &ctx.flow_context {
+    if result.contains("{{flow.context.")
+        && let Value::Object(map) = &ctx.flow_context {
             for (k, v) in map {
                 let pattern = format!("{{{{flow.context.{}}}}}", k);
                 if result.contains(&pattern) {
@@ -363,7 +357,6 @@ pub(crate) fn render_template_str(template: &str, ctx: &StepContext) -> String {
                 }
             }
         }
-    }
 
     // Also support session_id, flow_id
     result = result.replace("{{session_id}}", &ctx.session_id);

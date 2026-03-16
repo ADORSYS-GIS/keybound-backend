@@ -3,8 +3,8 @@ use crate::flow_registry;
 use crate::state::AppState;
 use crate::worker::NotificationQueue;
 use backend_auth::{OidcState, SignatureState};
-use backend_core::async_trait;
 use backend_core::NotificationJob;
+use backend_core::async_trait;
 use backend_core::{Config, Error};
 use backend_repository::{
     DeviceRepo, FlowInstanceCreateInput, FlowRepo, FlowSessionCreateInput, FlowSessionFilter,

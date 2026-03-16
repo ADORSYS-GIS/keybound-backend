@@ -12,6 +12,7 @@ ENV PORT=3000
 WORKDIR /app
 
 COPY backend /app/server
+COPY sms-gateway /app/sms-gateway
 COPY healthcheck /app/healthcheck
 
 USER nonroot:nonroot

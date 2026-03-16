@@ -1,3 +1,8 @@
+use super::models::{
+    AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, KycLevel,
+    KycLevelResponse, SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest,
+    UserResponse,
+};
 use crate::api::BackendApi;
 use crate::flow_registry::{actor_label, waiting_status};
 use axum::http::HeaderMap;
@@ -10,12 +15,7 @@ use backend_repository::{
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
-use tracing::{debug, instrument};
-use super::models::{
-    AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, KycLevel,
-    KycLevelResponse, SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest,
-    UserResponse,
-};
+use tracing::{debug, info, instrument};
 
 const FLOW_STATUS_RUNNING: &str = "RUNNING";
 const FLOW_STATUS_COMPLETED: &str = "COMPLETED";
@@ -36,11 +36,13 @@ pub async fn require_user_id(api: &BackendApi, headers: &HeaderMap) -> Result<St
     Ok(claims.user_id)
 }
 
+#[instrument(skip(api))]
 pub async fn create_session(
     api: &BackendApi,
     user_id: String,
     body: CreateSessionRequest,
 ) -> Result<SessionResponse, Error> {
+    debug!("Creating session of type: {}", body.session_type);
     let session_definition = api
         .state
         .flow_registry
@@ -79,10 +81,12 @@ pub async fn create_session(
     Ok(row.into())
 }
 
+#[instrument(skip(api))]
 pub async fn list_sessions(
     api: &BackendApi,
     user_id: String,
 ) -> Result<Vec<SessionResponse>, Error> {
+    debug!("Listing sessions for user: {}", user_id);
     let (rows, _) = api
         .state
         .flow
@@ -98,11 +102,13 @@ pub async fn list_sessions(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+#[instrument(skip(api))]
 pub async fn get_session(
     api: &BackendApi,
     session_id: String,
     user_id: String,
 ) -> Result<SessionDetailResponse, Error> {
+    debug!("Getting session: {}", session_id);
     let session = ensure_session_owner(api, &session_id, &user_id).await?;
     let flows = api.state.flow.list_flows_for_session(&session.id).await?;
 
@@ -122,12 +128,17 @@ pub async fn list_session_flows(
     Ok(flows.into_iter().map(Into::into).collect())
 }
 
+#[instrument(skip(api))]
 pub async fn add_flow_to_session(
     api: &BackendApi,
     session_id: String,
     user_id: String,
     body: AddFlowRequest,
 ) -> Result<FlowResponse, Error> {
+    debug!(
+        "Adding flow `{}` to session: {}",
+        body.flow_type, session_id
+    );
     let session = ensure_session_owner(api, &session_id, &user_id).await?;
 
     let flow_definition = get_flow_definition(api, &body.flow_type)?;
@@ -172,11 +183,13 @@ pub async fn add_flow_to_session(
     Ok(advanced.into())
 }
 
+#[instrument(skip(api))]
 pub async fn get_flow(
     api: &BackendApi,
     flow_id: String,
     user_id: String,
 ) -> Result<FlowDetailResponse, Error> {
+    debug!("Getting flow: {}", flow_id);
     let flow = api
         .state
         .flow
@@ -193,11 +206,13 @@ pub async fn get_flow(
     })
 }
 
+#[instrument(skip(api))]
 pub async fn list_flow_steps(
     api: &BackendApi,
     flow_id: String,
     user_id: String,
 ) -> Result<Vec<StepResponse>, Error> {
+    debug!("Listing steps for flow: {}", flow_id);
     let flow = api
         .state
         .flow
@@ -211,11 +226,13 @@ pub async fn list_flow_steps(
     Ok(steps.into_iter().map(Into::into).collect())
 }
 
+#[instrument(skip(api))]
 pub async fn get_step(
     api: &BackendApi,
     step_id: String,
     user_id: String,
 ) -> Result<StepResponse, Error> {
+    debug!("Getting step: {}", step_id);
     let step = api
         .state
         .flow
@@ -234,12 +251,14 @@ pub async fn get_step(
     Ok(step.into())
 }
 
+#[instrument(skip(api))]
 pub async fn submit_step(
     api: &BackendApi,
     step_id: String,
     user_id: String,
     body: SubmitStepRequest,
 ) -> Result<StepResponse, Error> {
+    debug!("Submitting step: {}", step_id);
     let step = api
         .state
         .flow
@@ -404,6 +423,7 @@ fn validate_session_flow_compatibility(
     ))
 }
 
+#[instrument(skip(api, session, flow))]
 async fn create_step_chain(
     api: &BackendApi,
     session: &FlowSessionRow,
@@ -411,11 +431,17 @@ async fn create_step_chain(
     mut step_type: String,
     initial_input: Option<Value>,
 ) -> Result<FlowInstanceRow, Error> {
+    debug!("Entering step chain at: {}", step_type);
     let mut pending_input = initial_input;
 
     loop {
         let flow_definition = get_flow_definition(api, &flow.flow_type)?;
         let step_definition = get_step_definition(flow_definition, &step_type)?;
+        debug!(
+            "Processing step: {} (actor={:?})",
+            step_type,
+            step_definition.actor()
+        );
 
         let existing_steps = api.state.flow.list_steps_for_flow(&flow.id).await?;
         let attempt_no = existing_steps
@@ -488,6 +514,7 @@ async fn create_step_chain(
             .map_err(flow_error_to_http)?
         {
             StepOutcome::Done { output, updates } => {
+                debug!("Step completed: {}", step_type);
                 let actual_output = output.unwrap_or_else(|| json!({"result": "done"}));
 
                 api.state
@@ -526,14 +553,13 @@ async fn create_step_chain(
                             .update_session_context(&flow.session_id, new_session_context)
                             .await?;
                     }
-                    if let Some(metadata_patch) = updates.user_metadata_patch {
-                        if let Some(user_id) = session.user_id.as_deref() {
+                    if let Some(metadata_patch) = updates.user_metadata_patch
+                        && let Some(user_id) = session.user_id.as_deref() {
                             api.state
                                 .user
                                 .update_metadata(user_id, metadata_patch)
                                 .await?;
                         }
-                    }
                 }
 
                 flow = api
@@ -554,6 +580,7 @@ async fn create_step_chain(
                 pending_input = None;
             }
             StepOutcome::Waiting { .. } => {
+                debug!("Step waiting: {}", step_type);
                 api.state
                     .flow
                     .patch_step(&created_step.id, FlowStepPatch::new().status("WAITING"))
@@ -561,6 +588,10 @@ async fn create_step_chain(
                 return Ok(flow);
             }
             StepOutcome::Failed { error, retryable } => {
+                info!(
+                    "Step failed: {} (error={}, retryable={})",
+                    step_type, error, retryable
+                );
                 api.state
                     .flow
                     .patch_step(
@@ -575,6 +606,7 @@ async fn create_step_chain(
                 return finalize_flow(api, &flow, FLOW_STATUS_FAILED).await;
             }
             StepOutcome::Retry { after } => {
+                debug!("Step retry: {} (after={:?})", step_type, after);
                 api.state
                     .flow
                     .patch_step(

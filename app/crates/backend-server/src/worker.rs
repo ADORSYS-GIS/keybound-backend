@@ -9,7 +9,7 @@
 
 use crate::flow_executor::FlowExecutor;
 use crate::state::AppState;
-use apalis::prelude::{BoxDynError, TaskSink, WorkerBuilder};
+use apalis::prelude::TaskSink;
 use apalis_redis::{RedisConfig, RedisStorage};
 use async_trait::async_trait;
 use backend_core::NotificationJob;
@@ -17,7 +17,7 @@ use redis::AsyncCommands;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::time::{Duration, interval};
-use tracing::{info, warn};
+use tracing::{debug, info, instrument, warn};
 
 /// Redis namespace for notification queue
 const NOTIFICATION_QUEUE_NAMESPACE: &str = "backend:notifications";
@@ -253,10 +253,12 @@ impl NotificationQueue for RedisNotificationQueue {
     }
 }
 
+#[instrument(skip(state))]
 pub async fn run(state: Arc<AppState>) -> backend_core::Result<()> {
     info!("starting flow sdk system worker");
 
     loop {
+        debug!("Polling for next system step...");
         let state_clone = state.clone();
 
         // Wait for next eligible step

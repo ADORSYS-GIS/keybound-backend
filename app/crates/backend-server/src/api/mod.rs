@@ -49,14 +49,17 @@ impl BackendApi {
 
     pub(crate) fn require_bff_claims(&self, headers: &HeaderMap) -> AppResult<BffSignatureClaims> {
         if !self.state.config.bff.enabled {
+            debug!("BFF auth disabled, returning mock claims");
             return Ok(BffSignatureClaims {
                 user_id: "usr_auth_disabled".to_owned(),
                 device_id: "dvc_auth_disabled".to_owned(),
             });
         }
 
-        Self::extract_bff_claims(headers)
-            .ok_or_else(|| Error::unauthorized("Missing signature-authenticated BFF claims"))
+        Self::extract_bff_claims(headers).ok_or_else(|| {
+            debug!("Missing BFF claims in headers");
+            Error::unauthorized("Missing signature-authenticated BFF claims")
+        })
     }
 
     pub(crate) fn extract_bff_claims(headers: &HeaderMap) -> Option<BffSignatureClaims> {

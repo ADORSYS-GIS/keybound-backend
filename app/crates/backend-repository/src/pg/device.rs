@@ -6,6 +6,7 @@ use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
+use tracing::{debug, instrument};
 
 #[derive(Clone)]
 pub struct DeviceRepository {
@@ -29,10 +30,12 @@ impl DeviceRepository {
 
 #[async_trait]
 impl DeviceRepo for DeviceRepository {
+    #[instrument(skip(self))]
     async fn lookup_device(
         &self,
         req: &kc_map::DeviceLookupRequest,
     ) -> RepoResult<Option<db::DeviceRow>> {
+        debug!("Looking up device: {:?}", req.device_id);
         use backend_model::schema::device::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -146,7 +149,9 @@ impl DeviceRepo for DeviceRepository {
             .map_err(Into::<Error>::into)
     }
 
+    #[instrument(skip(self))]
     async fn bind_device(&self, req: &kc_map::EnrollmentBindRequest) -> RepoResult<String> {
+        debug!("Binding device: {} to user: {}", req.device_id, req.user_id);
         use backend_model::schema::device::dsl::*;
 
         let mut conn = self.get_conn().await?;

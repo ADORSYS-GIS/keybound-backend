@@ -2,9 +2,11 @@ pub mod canonical;
 pub mod replay;
 pub mod verify;
 
-pub use canonical::{canonicalize_device_auth_payload, canonicalize_payload, canonicalize_public_key};
+pub use canonical::{
+    canonicalize_device_auth_payload, canonicalize_payload, canonicalize_public_key,
+};
 #[cfg(any(test, feature = "test-utils"))]
-pub use replay::in_memory::{InMemoryReplayGuard, SharedInMemoryReplayGuard};
+pub use replay::in_memory::InMemoryReplayGuard;
 pub use replay::{RedisReplayGuard, ReplayGuard};
 pub use verify::verify_signature;
 
@@ -39,13 +41,12 @@ pub fn validate_public_key_match(provided_jwk: &str, bound_jwk: &str) -> Result<
 
 /// Validates that the optional user ID hint matches the device owner.
 pub fn validate_user_id_hint(hint: Option<&str>, device_owner_id: &str) -> Result<()> {
-    if let Some(hint_id) = hint {
-        if hint_id != device_owner_id {
+    if let Some(hint_id) = hint
+        && hint_id != device_owner_id {
             return Err(Error::unauthorized(
                 "x-auth-user-id does not match device owner",
             ));
         }
-    }
 
     Ok(())
 }
@@ -137,13 +138,9 @@ mod tests {
     #[test]
     fn test_canonicalize_device_auth_payload() {
         let public_key = r#"{"crv":"P-256","kty":"EC","x":"abc","y":"def"}"#;
-        let result = canonicalize_device_auth_payload(
-            "dvc_123",
-            "nonce456",
-            public_key,
-            1234567890,
-        )
-        .unwrap();
+        let result =
+            canonicalize_device_auth_payload("dvc_123", "nonce456", public_key, 1234567890)
+                .unwrap();
 
         assert!(result.starts_with(r#"{"deviceId":"dvc_123","publicKey":"{"#));
         assert!(result.contains(r#""ts":"1234567890""#));

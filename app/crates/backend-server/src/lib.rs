@@ -9,8 +9,8 @@ pub(crate) mod api;
 pub(crate) mod auth_signature;
 pub(crate) mod bff_signature;
 pub(crate) mod file_storage;
-pub(crate) mod flow_logic;
 pub(crate) mod flow_executor;
+pub(crate) mod flow_logic;
 pub mod flow_registry;
 pub(crate) mod health;
 pub(crate) mod state;
@@ -106,7 +106,10 @@ pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports
 ///
 /// # Errors
 /// Returns an error if Redis is unavailable or worker initialization fails
-pub async fn run_worker(core_config: &Config, imports: flow_registry::RegistryImports) -> Result<()> {
+pub async fn run_worker(
+    core_config: &Config,
+    imports: flow_registry::RegistryImports,
+) -> Result<()> {
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let _conn = pool
         .get()

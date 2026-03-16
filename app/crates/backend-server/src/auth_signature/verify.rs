@@ -72,7 +72,7 @@ pub fn verify_signature(
     match jwk.kty.as_str() {
         "RSA" => verify_rsa(&jwk, canonical_payload, &signature_bytes),
         "EC" => verify_ec(&jwk, canonical_payload, &signature_bytes),
-        unsupported => Err(Error::unauthorized(&format!(
+        unsupported => Err(Error::unauthorized(format!(
             "Unsupported key type: {}",
             unsupported
         ))),
@@ -121,7 +121,7 @@ fn verify_rsa(jwk: &Jwk, payload: &str, signature: &[u8]) -> Result<()> {
 fn verify_ec(jwk: &Jwk, payload: &str, signature: &[u8]) -> Result<()> {
     let crv = jwk.crv.as_deref().unwrap_or_default();
     if crv != "P-256" {
-        return Err(Error::unauthorized(&format!(
+        return Err(Error::unauthorized(format!(
             "Unsupported EC curve: {}",
             crv
         )));
@@ -176,7 +176,7 @@ fn verify_ec(jwk: &Jwk, payload: &str, signature: &[u8]) -> Result<()> {
 
     let digest = Sha256::digest(payload.as_bytes());
 
-    tracing::debug!(payload_hash = %hex::encode(&digest), "Payload SHA256 hash");
+    tracing::debug!(payload_hash = %hex::encode(digest), "Payload SHA256 hash");
 
     let is_valid = sig.verify(&digest, &ec_key).map_err(|e| {
         tracing::error!(error = %e, "EC signature verification failed");
