@@ -1,0 +1,124 @@
+apiVersion: flow.adorsys.kyc/v1
+kind: Flow
+metadata:
+  name: FIRST_DEPOSIT
+spec:
+  humanIdPrefix: first_deposit
+  overrideExisting: true
+  steps:
+    - id: initiate_deposit
+      actor: END_USER
+      config:
+        type: form_input
+        title: "Initiate First Deposit"
+        fields:
+          - name: phone_number
+            label: "Phone Number"
+            type: text
+            required: true
+          - name: amount
+            label: "Amount"
+            type: number
+            required: true
+          - name: currency
+            label: "Currency"
+            type: select
+            options: ["USD", "EUR"]
+            required: true
+          - name: provider
+            label: "Provider"
+            type: text
+            required: true
+      onSuccess: check_user_exists
+      onFailure: failed
+
+    - id: check_user_exists
+      actor: SYSTEM
+      config:
+        type: check_user_exists
+        timeout_ms: 2000
+      onSuccess: validate_amount
+      onFailure: failed
+
+    - id: validate_amount
+      actor: SYSTEM
+      config:
+        type: validate_deposit
+        timeout_ms: 2000
+        rules:
+          max_amount: 10000
+          allowed_currencies: ["USD", "EUR"]
+      onSuccess: await_approval
+      onFailure: invalid_amount
+
+    - id: invalid_amount
+      actor: SYSTEM
+      config: {}
+      onSuccess: failed
+
+    - id: await_approval
+      actor: STAFF
+      config:
+        type: manual_approval
+        timeout_hours: 24
+        required_fields:
+          - admin_decision
+        form_schema:
+          - name: admin_decision
+            label: "Decision"
+            type: select
+            options: ["APPROVED", "REJECTED"]
+          - name: notes
+            label: "Notes"
+            type: textarea
+      onSuccess: process_deposit
+      onFailure: timeout
+
+    - id: process_deposit
+      actor: SYSTEM
+      config:
+        type: webhook_http
+        url: "${DEPOSIT_PROCESSOR_URL}"
+        method: "POST"
+        timeout_ms: 10000
+        headers:
+          X-API-Key: "${DEPOSIT_PROCESSOR_API_KEY}"
+        retry_policy:
+          max_attempts: 3
+          backoff_ms: 5000
+      onSuccess: update_metadata
+      onFailure: retry_process
+
+    - id: retry_process
+      actor: SYSTEM
+      config:
+        type: delay
+        delay_ms: 10000
+      onSuccess: process_deposit
+      onFailure: failed
+
+    - id: update_metadata
+      actor: SYSTEM
+      config:
+        type: persist_deposit_result
+      onSuccess: complete
+      onFailure: failed
+
+    - id: timeout
+      actor: SYSTEM
+      config: {}
+      onSuccess: failed
+
+    - id: failed
+      actor: SYSTEM
+      config: {}
+      onSuccess: end
+
+    - id: complete
+      actor: SYSTEM
+      config: {}
+      onSuccess: end
+
+    - id: end
+      actor: SYSTEM
+      config: {}

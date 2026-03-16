@@ -14,6 +14,7 @@ pub(crate) mod flow_executor;
 pub mod flow_registry;
 pub(crate) mod health;
 pub(crate) mod state;
+pub(crate) mod swagger;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 pub(crate) mod worker;
@@ -221,6 +222,9 @@ fn build_router(
         let auth_router = api::auth::router(api.clone());
         router = router.nest(auth_base, auth_router);
     }
+
+    // Mount Swagger UI
+    router = router.merge(Into::<Router>::into(swagger::swagger_ui()));
 
     // 404 fallback for unmatched routes
     router = router.fallback_service(service_fn(|_| async {

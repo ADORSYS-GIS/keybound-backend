@@ -6,14 +6,49 @@ use backend_core::Error;
 use crate::api::BackendApi;
 
 use super::models::{
-    AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, SessionDetailResponse,
-    SessionResponse, StepResponse, SubmitStepRequest,
+    AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, KycLevelResponse,
+    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use super::service;
 
 #[utoipa::path(
     get,
+    path = "/users/{userId}",
+    tag = "users",
+    params(("userId" = String, Path)),
+    responses((status = 200, body = UserResponse))
+)]
+pub async fn get_user(
+    State(api): State<BackendApi>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<UserResponse>, Error> {
+    let caller_id = service::require_user_id(&api, &headers).await?;
+    let user = service::get_user(&api, user_id, caller_id).await?;
+    Ok(Json(user))
+}
+
+#[utoipa::path(
+    get,
+    path = "/users/{userId}/kyc-level",
+    tag = "users",
+    params(("userId" = String, Path)),
+    responses((status = 200, body = KycLevelResponse))
+)]
+pub async fn get_kyc_level(
+    State(api): State<BackendApi>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<KycLevelResponse>, Error> {
+    let caller_id = service::require_user_id(&api, &headers).await?;
+    let kyc_level = service::get_kyc_level(&api, user_id, caller_id).await?;
+    Ok(Json(kyc_level))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions",
+    tag = "sessions",
     responses((status = 200, body = [SessionResponse]))
 )]
 pub async fn list_sessions(
@@ -28,6 +63,7 @@ pub async fn list_sessions(
 #[utoipa::path(
     post,
     path = "/sessions",
+    tag = "sessions",
     request_body = CreateSessionRequest,
     responses((status = 200, body = SessionResponse))
 )]
@@ -44,6 +80,7 @@ pub async fn create_session(
 #[utoipa::path(
     get,
     path = "/sessions/{sessionId}",
+    tag = "sessions",
     params(("sessionId" = String, Path)),
     responses((status = 200, body = SessionDetailResponse))
 )]
@@ -60,6 +97,7 @@ pub async fn get_session(
 #[utoipa::path(
     get,
     path = "/sessions/{sessionId}/flows",
+    tag = "sessions",
     params(("sessionId" = String, Path)),
     responses((status = 200, body = [FlowResponse]))
 )]
@@ -76,6 +114,7 @@ pub async fn list_session_flows(
 #[utoipa::path(
     post,
     path = "/sessions/{sessionId}/flows",
+    tag = "sessions",
     params(("sessionId" = String, Path)),
     request_body = AddFlowRequest,
     responses((status = 200, body = FlowResponse))
@@ -94,6 +133,7 @@ pub async fn add_flow_to_session(
 #[utoipa::path(
     get,
     path = "/flows/{flowId}",
+    tag = "flows",
     params(("flowId" = String, Path)),
     responses((status = 200, body = FlowDetailResponse))
 )]
@@ -110,6 +150,7 @@ pub async fn get_flow(
 #[utoipa::path(
     get,
     path = "/flows/{flowId}/steps",
+    tag = "flows",
     params(("flowId" = String, Path)),
     responses((status = 200, body = [StepResponse]))
 )]
@@ -126,6 +167,7 @@ pub async fn list_flow_steps(
 #[utoipa::path(
     get,
     path = "/steps/{stepId}",
+    tag = "steps",
     params(("stepId" = String, Path)),
     responses((status = 200, body = StepResponse))
 )]
@@ -142,6 +184,7 @@ pub async fn get_step(
 #[utoipa::path(
     post,
     path = "/steps/{stepId}",
+    tag = "steps",
     params(("stepId" = String, Path)),
     request_body = SubmitStepRequest,
     responses((status = 200, body = StepResponse))

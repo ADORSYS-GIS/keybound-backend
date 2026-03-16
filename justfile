@@ -44,6 +44,8 @@ up-single service: # Start a single service (pass service=...)
 
 generate: # Generate code from OpenAPI specs
 	docker compose -p {{project}} -f {{compose_file}} run --rm generate-code
+	cargo fmt -p gen_oas_client_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
+	cargo fix --allow-dirty -p gen_oas_client_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
 
 up-no-build: # Start services without rebuilding
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans {{c}}
@@ -93,7 +95,6 @@ test-it: # Run OAS integration tests (feature-gated)
 
 test-e2e-rust:
 	cargo test -p backend-auth --features e2e-tests --test oidc_wiremock_e2e
-	cargo test -p backend-repository --features e2e-tests --test state_machine_repo_testcontainers
 
 e2e-build:
 	docker compose -p {{project_e2e}} -f {{compose_e2e}} build

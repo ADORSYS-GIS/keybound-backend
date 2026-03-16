@@ -2,16 +2,88 @@
 
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+use rand_core::OsRng;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tokio_postgres::NoTls;
 
 const E2E_BFF_DEVICE_ID: &str = "dvc_e2e_bff_signature";
 const E2E_BFF_DEVICE_JKT: &str = "jkt_e2e_bff_signature";
-const E2E_BFF_PUBLIC_JWK: &str = "{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"e2e-bff\",\"kty\":\"EC\",\"x\":\"e2e-x\",\"y\":\"e2e-y\"}";
+
+static BFF_FIXTURE: OnceLock<BffTestFixture> = OnceLock::new();
+
+#[derive(Clone)]
+pub struct BffTestFixture {
+    pub device_id: String,
+    pub user_id: String,
+    pub jkt: String,
+    pub public_jwk: String,
+    pub signing_key: SigningKey,
+}
+
+impl BffTestFixture {
+    pub fn generate(user_id: &str) -> Self {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let point = verifying_key.to_encoded_point(false);
+
+        let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
+        let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
+
+        let public_jwk = format!(
+            r#"{{"kty":"EC","crv":"P-256","alg":"ES256","x":"{}","y":"{}"}}"#,
+            x, y
+        );
+
+        Self {
+            device_id: E2E_BFF_DEVICE_ID.to_owned(),
+            user_id: user_id.to_owned(),
+            jkt: E2E_BFF_DEVICE_JKT.to_owned(),
+            public_jwk,
+            signing_key,
+        }
+    }
+
+    pub fn get() -> Option<&'static Self> {
+        BFF_FIXTURE.get()
+    }
+
+    pub fn sign_bff_request(&self, canonical_payload: &str) -> String {
+        let signature: Signature = self.signing_key.sign(canonical_payload.as_bytes());
+        URL_SAFE_NO_PAD.encode(signature.to_bytes())
+    }
+
+    pub fn build_canonical_payload(
+        &self,
+        timestamp: i64,
+        nonce: &str,
+        method: &str,
+        path: &str,
+        body: &str,
+        user_id_hint: Option<&str>,
+    ) -> String {
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            timestamp,
+            nonce,
+            method.to_uppercase(),
+            path,
+            body,
+            self.public_jwk,
+            self.device_id,
+            user_id_hint.unwrap_or(""),
+        )
+    }
+
+    fn store_global(self) -> &'static Self {
+        BFF_FIXTURE.get_or_init(|| self)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Env {
@@ -103,6 +175,17 @@ pub async fn send_json(
     bearer: Option<&str>,
     body: Option<Value>,
 ) -> Result<JsonResponse> {
+    send_json_with_bff(client, method, url, bearer, body, None).await
+}
+
+pub async fn send_json_with_bff(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    bearer: Option<&str>,
+    body: Option<Value>,
+    bff_fixture: Option<&BffTestFixture>,
+) -> Result<JsonResponse> {
     let request_path = request_path(url)?;
     let body_json = body
         .as_ref()
@@ -111,33 +194,41 @@ pub async fn send_json(
         .with_context(|| format!("failed to serialize request body for {url}"))?;
 
     let mut request = client
-        .request(method, url)
+        .request(method.clone(), url)
         .header(CONTENT_TYPE, "application/json");
 
     if let Some(token) = bearer {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
 
-    if should_sign_bff_request(&request_path) {
-        let timestamp = chrono::Utc::now().timestamp();
-        let nonce = format!(
-            "e2e-{}",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        );
-        let payload = body_json.as_deref().unwrap_or("");
-        let signature = bff_signature(
-            timestamp,
-            &nonce,
-            request.method().as_str(),
-            &request_path,
-            payload,
-        );
-        request = request
-            .header("x-auth-device-id", E2E_BFF_DEVICE_ID)
-            .header("x-auth-signature-timestamp", timestamp.to_string())
-            .header("x-auth-public-key", E2E_BFF_PUBLIC_JWK)
-            .header("x-auth-nonce", nonce)
-            .header("x-auth-signature", signature);
+    let should_sign = should_sign_bff_request(&request_path);
+    if should_sign {
+        let fixture = bff_fixture.or_else(|| BffTestFixture::get());
+
+        if let Some(fixture) = fixture {
+            let timestamp = chrono::Utc::now().timestamp();
+            let nonce = format!(
+                "e2e-{}",
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            );
+            let payload = body_json.as_deref().unwrap_or("");
+            let canonical = fixture.build_canonical_payload(
+                timestamp,
+                &nonce,
+                method.as_str(),
+                &request_path,
+                payload,
+                None,
+            );
+            let signature = fixture.sign_bff_request(&canonical);
+
+            request = request
+                .header("x-auth-device-id", &fixture.device_id)
+                .header("x-auth-signature-timestamp", timestamp.to_string())
+                .header("x-auth-public-key", &fixture.public_jwk)
+                .header("x-auth-nonce", nonce)
+                .header("x-auth-signature", signature);
+        }
     }
 
     if let Some(payload) = body_json {
@@ -176,22 +267,6 @@ fn request_path(url: &str) -> Result<String> {
 
 fn should_sign_bff_request(path: &str) -> bool {
     path == "/bff" || path.starts_with("/bff/")
-}
-
-fn bff_signature(timestamp: i64, nonce: &str, method: &str, path: &str, body: &str) -> String {
-    let canonical_payload = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-        timestamp,
-        nonce,
-        method.to_uppercase(),
-        path,
-        body,
-        E2E_BFF_PUBLIC_JWK,
-        E2E_BFF_DEVICE_ID,
-        "",
-    );
-    let digest = Sha256::digest(canonical_payload.as_bytes());
-    URL_SAFE_NO_PAD.encode(digest)
 }
 
 pub async fn get_client_token_and_subject(
@@ -253,6 +328,8 @@ fn jwt_subject(token: &str) -> Result<String> {
 }
 
 pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()> {
+    let fixture = BffTestFixture::generate(user_id);
+
     let (client, connection) = tokio_postgres::connect(database_url, NoTls)
         .await
         .context("failed to connect to postgres")?;
@@ -334,8 +411,8 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
         .context("failed to upsert staff user fixture")?;
 
     let device_record_id = {
-        let hash = Sha256::digest(E2E_BFF_PUBLIC_JWK.as_bytes());
-        format!("{E2E_BFF_DEVICE_ID}:{:x}", hash)
+        let hash = Sha256::digest(fixture.public_jwk.as_bytes());
+        format!("{}:{:x}", fixture.device_id, hash)
     };
     client
         .execute(
@@ -372,16 +449,17 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 last_seen_at = NOW()
             "#,
             &[
-                &E2E_BFF_DEVICE_ID,
-                &user_id,
-                &E2E_BFF_DEVICE_JKT,
-                &E2E_BFF_PUBLIC_JWK,
+                &fixture.device_id,
+                &fixture.user_id,
+                &fixture.jkt,
+                &fixture.public_jwk,
                 &device_record_id,
             ],
         )
         .await
         .context("failed to upsert bff signature device fixture")?;
 
+    fixture.store_global();
     Ok(())
 }
 

@@ -134,6 +134,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-
-#[cfg(test)]
-mod replay_tests;

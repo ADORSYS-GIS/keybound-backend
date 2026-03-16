@@ -12,8 +12,9 @@ use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 
 use super::models::{
-    AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, SessionDetailResponse,
-    SessionResponse, StepResponse, SubmitStepRequest,
+    AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, KycLevel,
+    KycLevelResponse, SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest,
+    UserResponse,
 };
 
 const FLOW_STATUS_RUNNING: &str = "RUNNING";
@@ -781,4 +782,77 @@ fn flow_error_to_http(error: FlowError) -> Error {
         FlowError::Serialization(reason) => Error::internal("FLOW_SERIALIZATION_ERROR", reason),
         FlowError::Io(error) => Error::internal("FLOW_IO_ERROR", error.to_string()),
     }
+}
+
+pub async fn get_user(
+    api: &BackendApi,
+    user_id: String,
+    caller_id: String,
+) -> Result<UserResponse, Error> {
+    if user_id != caller_id {
+        return Err(Error::unauthorized("Cannot access other users' data"));
+    }
+
+    let user = api
+        .state
+        .user
+        .get_user(&user_id)
+        .await?
+        .ok_or_else(|| Error::not_found("USER_NOT_FOUND", "User not found"))?;
+
+    Ok(user.into())
+}
+
+pub async fn get_kyc_level(
+    api: &BackendApi,
+    user_id: String,
+    caller_id: String,
+) -> Result<KycLevelResponse, Error> {
+    if user_id != caller_id {
+        return Err(Error::unauthorized("Cannot access other users' data"));
+    }
+
+    let filter = backend_repository::FlowSessionFilter {
+        user_id: Some(user_id.clone()),
+        session_type: None,
+        status: None,
+        page: 1,
+        limit: 100,
+    };
+
+    let (sessions, _) = api.state.flow.list_sessions(filter.normalized()).await?;
+
+    let mut level = vec![KycLevel::None];
+    let mut phone_otp_verified = false;
+    let mut first_deposit_verified = false;
+
+    for session in sessions {
+        let flows = api.state.flow.list_flows_for_session(&session.id).await?;
+        for flow in flows {
+            if flow.status == "COMPLETED" {
+                match flow.flow_type.as_str() {
+                    "PHONE_OTP" => {
+                        phone_otp_verified = true;
+                        if !level.contains(&KycLevel::PhoneOtpVerified) {
+                            level.push(KycLevel::PhoneOtpVerified);
+                        }
+                    }
+                    "FIRST_DEPOSIT" => {
+                        first_deposit_verified = true;
+                        if !level.contains(&KycLevel::FirstDepositVerified) {
+                            level.push(KycLevel::FirstDepositVerified);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(KycLevelResponse {
+        user_id,
+        level,
+        phone_otp_verified,
+        first_deposit_verified,
+    })
 }

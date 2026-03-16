@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum KycLevel {
+    None,
+    PhoneOtpVerified,
+    FirstDepositVerified,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionRequest {
@@ -30,6 +38,30 @@ pub struct AddFlowRequest {
 pub struct SubmitStepRequest {
     #[serde(default)]
     pub input: Value,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserResponse {
+    pub user_id: String,
+    pub realm: String,
+    pub username: String,
+    pub full_name: Option<String>,
+    pub email: Option<String>,
+    pub email_verified: bool,
+    pub phone_number: Option<String>,
+    pub disabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KycLevelResponse {
+    pub user_id: String,
+    pub level: Vec<KycLevel>,
+    pub phone_otp_verified: bool,
+    pub first_deposit_verified: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -142,6 +174,23 @@ impl From<backend_model::db::FlowStepRow> for StepResponse {
             created_at: row.created_at,
             updated_at: row.updated_at,
             finished_at: row.finished_at,
+        }
+    }
+}
+
+impl From<backend_model::db::UserRow> for UserResponse {
+    fn from(row: backend_model::db::UserRow) -> Self {
+        Self {
+            user_id: row.user_id,
+            realm: row.realm,
+            username: row.username,
+            full_name: row.full_name,
+            email: row.email,
+            email_verified: row.email_verified,
+            phone_number: row.phone_number,
+            disabled: row.disabled,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }
     }
 }

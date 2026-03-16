@@ -77,6 +77,7 @@ json-patch = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
 jsonpath_lib = { workspace = true, optional = true }
 base64 = { workspace = true }
 jsonwebtoken = { workspace = true }

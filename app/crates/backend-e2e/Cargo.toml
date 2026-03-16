@@ -15,6 +15,8 @@ argon2.workspace = true
 base64.workspace = true
 chrono.workspace = true
 hmac.workspace = true
+p256 = { version = "0.13", features = ["ecdsa"] }
+rand_core = "0.6"
 reqwest = { workspace = true, features = ["json", "form"] }
 serde.workspace = true
 serde_json.workspace = true

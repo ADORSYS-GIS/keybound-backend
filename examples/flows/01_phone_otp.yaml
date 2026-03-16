@@ -1,0 +1,71 @@
+apiVersion: flow.adorsys.kyc/v1
+kind: Flow
+metadata:
+  name: PHONE_OTP
+spec:
+  humanIdPrefix: phone_otp
+  overrideExisting: true
+  steps:
+    - id: validate_user_exists
+      actor: SYSTEM
+      config:
+        type: validate_user_exists
+        timeout_ms: 3000
+      onSuccess: send_otp
+      onFailure: failed
+
+    - id: send_otp
+      actor: SYSTEM
+      config:
+        type: send_sms_otp
+        timeout_ms: 5000
+        retry_policy:
+          max_attempts: 2
+          backoff_ms: 1000
+      onSuccess: wait_for_otp
+      onFailure: retry_send
+
+    - id: wait_for_otp
+      actor: END_USER
+      config:
+        type: manual_input
+        timeout_seconds: 300
+        title: "Enter OTP"
+        description: "Enter the 6-digit code sent to your phone"
+      onSuccess: verify_otp
+      onFailure: timeout
+
+    - id: verify_otp
+      actor: SYSTEM
+      config:
+        type: verify_otp
+        timeout_ms: 3000
+      onSuccess: complete
+      onFailure: failed
+
+    - id: retry_send
+      actor: SYSTEM
+      config:
+        type: delay
+        delay_ms: 5000
+      onSuccess: send_otp
+      onFailure: failed
+
+    - id: timeout
+      actor: SYSTEM
+      config: {}
+      onSuccess: failed
+
+    - id: failed
+      actor: SYSTEM
+      config: {}
+      onSuccess: end
+
+    - id: complete
+      actor: SYSTEM
+      config: {}
+      onSuccess: end
+
+    - id: end
+      actor: SYSTEM
+      config: {}

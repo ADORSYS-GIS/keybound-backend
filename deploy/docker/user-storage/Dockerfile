@@ -24,7 +24,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
     zlib-static \
     clang-dev \
     llvm-dev \
-    cmake
+    cmake \
+    curl
 
 RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 

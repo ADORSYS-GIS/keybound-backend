@@ -1,18 +1,15 @@
 use crate::file_storage::{EncryptionMode, MinioStorage, PresignedUpload};
 use crate::flow_registry;
 use crate::state::AppState;
-use crate::state_machine::jobs::StateMachineStepJob;
-use crate::state_machine::queue::StateMachineQueue;
 use crate::worker::NotificationQueue;
 use backend_auth::{OidcState, SignatureState};
-use backend_core::NotificationJob;
 use backend_core::async_trait;
+use backend_core::NotificationJob;
 use backend_core::{Config, Error};
 use backend_repository::{
-    DepositRecipientContact, DepositRecipientUpsertInput, DeviceRepo, FlowInstanceCreateInput,
-    FlowRepo, FlowSessionCreateInput, FlowSessionFilter, FlowStepCreateInput, FlowStepPatch,
-    RepoResult, SigningKeyCreateInput, SmEventCreateInput, SmInstanceCreateInput, SmInstanceFilter,
-    SmStepAttemptCreateInput, SmStepAttemptPatch, StateMachineRepo, UserDataUpsertInput, UserRepo,
+    DeviceRepo, FlowInstanceCreateInput, FlowRepo, FlowSessionCreateInput, FlowSessionFilter,
+    FlowStepCreateInput, FlowStepPatch, RepoResult, SigningKeyCreateInput, UserDataUpsertInput,
+    UserRepo,
 };
 use bytes::Bytes;
 use mockall::mock;
@@ -24,14 +21,6 @@ mock! {
     #[async_trait]
     impl NotificationQueue for NotificationQueue {
         async fn enqueue(&self, job: NotificationJob) -> backend_core::Result<()>;
-    }
-}
-
-mock! {
-    pub StateMachineQueue {}
-    #[async_trait]
-    impl StateMachineQueue for StateMachineQueue {
-        async fn enqueue(&self, job: StateMachineStepJob) -> backend_core::Result<()>;
     }
 }
 
@@ -68,113 +57,6 @@ mock! {
             expires_in: Duration,
             content_disposition: Option<String>,
         ) -> std::result::Result<String, Error>;
-    }
-}
-
-mock! {
-    pub StateMachineRepo {}
-    #[async_trait]
-    impl StateMachineRepo for StateMachineRepo {
-        async fn create_instance(
-            &self,
-            input: SmInstanceCreateInput,
-        ) -> RepoResult<backend_model::db::SmInstanceRow>;
-
-        async fn get_instance(
-            &self,
-            instance_id: &str,
-        ) -> RepoResult<Option<backend_model::db::SmInstanceRow>>;
-
-        async fn get_instance_by_idempotency_key(
-            &self,
-            idempotency_key: &str,
-        ) -> RepoResult<Option<backend_model::db::SmInstanceRow>>;
-
-        async fn list_instances(
-            &self,
-            filter: SmInstanceFilter,
-        ) -> RepoResult<(Vec<backend_model::db::SmInstanceRow>, i64)>;
-
-        async fn update_instance_status(
-            &self,
-            instance_id: &str,
-            status: &str,
-            completed_at: Option<chrono::DateTime<chrono::Utc>>,
-        ) -> RepoResult<()>;
-
-        async fn update_instance_context(
-            &self,
-            instance_id: &str,
-            context: serde_json::Value,
-        ) -> RepoResult<()>;
-
-        async fn append_event(
-            &self,
-            input: SmEventCreateInput,
-        ) -> RepoResult<backend_model::db::SmEventRow>;
-
-        async fn list_events(
-            &self,
-            instance_id: &str,
-        ) -> RepoResult<Vec<backend_model::db::SmEventRow>>;
-
-        async fn create_step_attempt(
-            &self,
-            input: SmStepAttemptCreateInput,
-        ) -> RepoResult<backend_model::db::SmStepAttemptRow>;
-
-        async fn patch_step_attempt(
-            &self,
-            attempt_id: &str,
-            patch: SmStepAttemptPatch,
-        ) -> RepoResult<backend_model::db::SmStepAttemptRow>;
-
-        async fn claim_step_attempt(
-            &self,
-            attempt_id: &str,
-        ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
-
-        async fn list_step_attempts(
-            &self,
-            instance_id: &str,
-        ) -> RepoResult<Vec<backend_model::db::SmStepAttemptRow>>;
-
-        async fn get_latest_step_attempt(
-            &self,
-            instance_id: &str,
-            step_name: &str,
-        ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
-
-        async fn get_step_attempt_by_external_ref(
-            &self,
-            instance_id: &str,
-            step_name: &str,
-            external_ref: &str,
-        ) -> RepoResult<Option<backend_model::db::SmStepAttemptRow>>;
-
-        async fn cancel_other_attempts_for_step(
-            &self,
-            instance_id: &str,
-            step_name: &str,
-            keep_attempt_id: &str,
-        ) -> RepoResult<()>;
-
-        async fn next_attempt_no(
-            &self,
-            instance_id: &str,
-            step_name: &str,
-        ) -> RepoResult<i32>;
-
-        async fn sync_deposit_recipients(
-            &self,
-            recipients: Vec<DepositRecipientUpsertInput>,
-        ) -> RepoResult<usize>;
-
-        async fn select_deposit_recipient_contact(
-            &self,
-            user_phone_number: &str,
-            currency: &str,
-        ) -> RepoResult<DepositRecipientContact>;
     }
 }
 
@@ -343,11 +225,9 @@ mock! {
 
 #[derive(Default)]
 pub struct TestAppStateBuilder {
-    pub sm: Option<Arc<dyn StateMachineRepo>>,
     pub flow: Option<Arc<dyn FlowRepo>>,
     pub user: Option<Arc<dyn UserRepo>>,
     pub device: Option<Arc<dyn DeviceRepo>>,
-    pub sm_queue: Option<Arc<dyn StateMachineQueue>>,
     pub notification_queue: Option<Arc<dyn NotificationQueue>>,
     pub minio: Option<Arc<dyn MinioStorage>>,
     pub config: Option<Config>,
@@ -356,11 +236,6 @@ pub struct TestAppStateBuilder {
 impl TestAppStateBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_sm(mut self, sm: Arc<dyn StateMachineRepo>) -> Self {
-        self.sm = Some(sm);
-        self
     }
 
     pub fn with_flow(mut self, flow: Arc<dyn FlowRepo>) -> Self {
@@ -375,11 +250,6 @@ impl TestAppStateBuilder {
 
     pub fn with_device(mut self, device: Arc<dyn DeviceRepo>) -> Self {
         self.device = Some(device);
-        self
-    }
-
-    pub fn with_sm_queue(mut self, q: Arc<dyn StateMachineQueue>) -> Self {
-        self.sm_queue = Some(q);
         self
     }
 
@@ -448,18 +318,14 @@ cuss:
         });
 
         AppState {
-            sm: self
-                .sm
-                .unwrap_or_else(|| Arc::new(MockStateMachineRepo::new())),
             flow: self.flow.unwrap_or_else(|| Arc::new(MockFlowRepo::new())),
-            flow_registry: Arc::new(flow_registry::build_registry(flow_registry::RegistryImports::default()).unwrap()),
+            flow_registry: Arc::new(
+                flow_registry::build_registry(flow_registry::RegistryImports::default()).unwrap(),
+            ),
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
             device: self
                 .device
                 .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
-            sm_queue: self
-                .sm_queue
-                .unwrap_or_else(|| Arc::new(MockStateMachineQueue::new())),
             notification_queue: self
                 .notification_queue
                 .unwrap_or_else(|| Arc::new(MockNotificationQueue::new())),

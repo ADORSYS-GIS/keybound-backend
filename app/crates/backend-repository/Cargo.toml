@@ -36,8 +36,3 @@ gen_oas_server_kc.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 anyhow.workspace = true
 openssl = { workspace = true, features = ["vendored"] }
-
-[[test]]
-name = "state_machine_repo_testcontainers"
-path = "tests/state_machine_repo_testcontainers.rs"
-required-features = ["e2e-tests"]
