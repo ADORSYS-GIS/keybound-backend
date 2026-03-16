@@ -1119,6 +1119,7 @@ dependencies = [
  "gen_oas_server_kc",
  "gen_oas_server_staff",
  "headers",
+ "hex",
  "http 1.4.0",
  "hyper 1.8.1",
  "json-patch",

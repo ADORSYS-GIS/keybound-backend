@@ -1,6 +1,6 @@
 use crate::api::{BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_USER_ID_HEADER};
 use crate::auth_signature::{
-    ReplayGuard, canonicalize_device_auth_payload, canonicalize_public_key, validate_public_key_match,
+    ReplayGuard, canonicalize_device_auth_payload, validate_public_key_match,
     validate_timestamp, validate_user_id_hint, verify_signature,
 };
 use crate::state::AppState;
@@ -9,6 +9,7 @@ use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, HeaderValue, Method, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use backend_auth::JwtToken;
 use backend_core::Error;
 use std::sync::Arc;
 
@@ -18,6 +19,7 @@ const HEADER_PUBLIC_KEY: &str = "x-auth-public-key";
 const HEADER_DEVICE_ID: &str = "x-auth-device-id";
 const HEADER_NONCE: &str = "x-auth-nonce";
 const HEADER_USER_ID: &str = "x-auth-user-id";
+const HEADER_AUTHORIZATION: &str = "authorization";
 
 pub async fn require_bff_signature(
     State(state): State<Arc<AppState>>,
@@ -28,13 +30,6 @@ pub async fn require_bff_signature(
         return next.run(req).await;
     }
 
-    let method = req.method().clone();
-    let path = req
-        .extensions()
-        .get::<OriginalUri>()
-        .map(|uri| uri.0.path().to_owned())
-        .unwrap_or_else(|| req.uri().path().to_owned());
-
     let (mut parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, state.config.kc.max_body_bytes).await {
         Ok(value) => value,
@@ -42,9 +37,7 @@ pub async fn require_bff_signature(
     };
 
     let (user_id, device_id) =
-        match authenticate_signature(&state, &method, &path, &parts.headers, body_bytes.as_ref())
-            .await
-        {
+        match authenticate(&state, &parts.headers).await {
             Ok(claims) => claims,
             Err(error) => return error.into_response(),
         };
@@ -69,12 +62,43 @@ pub async fn require_bff_signature(
     next.run(req).await
 }
 
+async fn authenticate(state: &Arc<AppState>, headers: &HeaderMap) -> Result<(String, String), Error> {
+    if let Some(token) = extract_bearer_token(headers) {
+        return authenticate_bearer(state, &token).await;
+    }
+    
+    authenticate_signature(state, headers).await
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+    let auth_header = headers
+        .get(HEADER_AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())?;
+
+    let prefix = "Bearer ";
+    if !auth_header.to_ascii_lowercase().starts_with("bearer ") {
+        return None;
+    }
+
+    Some(auth_header[prefix.len()..].to_owned())
+}
+
+async fn authenticate_bearer(state: &Arc<AppState>, token: &str) -> Result<(String, String), Error> {
+    let jwt = JwtToken::verify(token, &state.oidc_state).await?;
+    let user_id = jwt.user_id().to_owned();
+    let device_id = "bff".to_owned();
+    
+    tracing::info!(
+        user_id = %user_id,
+        "Bearer token authentication successful"
+    );
+    
+    Ok((user_id, device_id))
+}
+
 async fn authenticate_signature(
     state: &Arc<AppState>,
-    method: &Method,
-    path: &str,
     headers: &HeaderMap,
-    body: &[u8],
 ) -> Result<(String, String), Error> {
     let device_id = header_value(headers, HEADER_DEVICE_ID)
         .ok_or_else(|| Error::unauthorized("Missing x-auth-device-id"))?;
@@ -131,18 +155,26 @@ async fn authenticate_signature(
     validate_user_id_hint(user_id_hint.as_deref(), &device.user_id)?;
     validate_public_key_match(&public_key, &device.public_jwk)?;
 
-    let timestamp_i64 = timestamp_str
-        .parse::<i64>()
-        .map_err(|_| Error::unauthorized("Invalid x-auth-signature-timestamp"))?;
-
     let canonical_payload = canonicalize_device_auth_payload(
         &device_id,
         &nonce,
         &public_key,
-        timestamp_i64,
+        timestamp,
     )?;
 
+    tracing::debug!(
+        canonical_payload = %canonical_payload,
+        device_public_jwk = %device.public_jwk,
+        "Verifying signature"
+    );
+
     verify_signature(&public_key, &canonical_payload, &signature)?;
+
+    tracing::info!(
+        device_id = %device_id,
+        user_id = %device.user_id,
+        "Signature authentication successful"
+    );
 
     Ok((device.user_id, device.device_id))
 }

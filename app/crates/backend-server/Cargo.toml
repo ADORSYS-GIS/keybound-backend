@@ -80,6 +80,7 @@ utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 jsonpath_lib = { workspace = true, optional = true }
 base64 = { workspace = true }
+hex = { workspace = true }
 jsonwebtoken = { workspace = true }
 redis = { workspace = true }
 apalis = { workspace = true }

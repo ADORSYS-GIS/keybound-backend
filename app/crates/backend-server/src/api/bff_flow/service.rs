@@ -10,7 +10,7 @@ use backend_repository::{
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
-
+use tracing::{debug, instrument};
 use super::models::{
     AddFlowRequest, CreateSessionRequest, FlowDetailResponse, FlowResponse, KycLevel,
     KycLevelResponse, SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest,
@@ -784,6 +784,7 @@ fn flow_error_to_http(error: FlowError) -> Error {
     }
 }
 
+#[instrument(skip(api))]
 pub async fn get_user(
     api: &BackendApi,
     user_id: String,
@@ -803,11 +804,13 @@ pub async fn get_user(
     Ok(user.into())
 }
 
+#[instrument(skip(api))]
 pub async fn get_kyc_level(
     api: &BackendApi,
     user_id: String,
     caller_id: String,
 ) -> Result<KycLevelResponse, Error> {
+    debug!("Will get kyc level");
     if user_id != caller_id {
         return Err(Error::unauthorized("Cannot access other users' data"));
     }

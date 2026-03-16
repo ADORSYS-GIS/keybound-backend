@@ -50,10 +50,24 @@ pub fn verify_signature(
     canonical_payload: &str,
     signature_base64url: &str,
 ) -> Result<()> {
-    let jwk: Jwk = serde_json::from_str(public_key_json)
-        .map_err(|_| Error::unauthorized("Invalid JWK JSON format"))?;
+    tracing::debug!(
+        public_key_json = %public_key_json,
+        canonical_payload = %canonical_payload,
+        signature_base64url = %signature_base64url,
+        "verify_signature called"
+    );
+
+    let jwk: Jwk = serde_json::from_str(public_key_json).map_err(|e| {
+        tracing::error!(error = %e, "Failed to parse JWK");
+        Error::unauthorized("Invalid JWK JSON format")
+    })?;
 
     let signature_bytes = decode_base64_url(signature_base64url)?;
+
+    tracing::debug!(
+        signature_len = signature_bytes.len(),
+        "Decoded signature bytes"
+    );
 
     match jwk.kty.as_str() {
         "RSA" => verify_rsa(&jwk, canonical_payload, &signature_bytes),
@@ -122,6 +136,8 @@ fn verify_ec(jwk: &Jwk, payload: &str, signature: &[u8]) -> Result<()> {
         .as_ref()
         .ok_or_else(|| Error::unauthorized("Missing y for EC"))?;
 
+    tracing::debug!(x = %x_str, y = %y_str, "EC JWK coordinates");
+
     let x = decode_base64_url(x_str)?;
     let y = decode_base64_url(y_str)?;
 
@@ -133,12 +149,18 @@ fn verify_ec(jwk: &Jwk, payload: &str, signature: &[u8]) -> Result<()> {
     let y_bn =
         BigNum::from_slice(&y).map_err(|_| Error::unauthorized("Invalid EC y coordinate"))?;
 
-    let ec_key = EcKey::from_public_key_affine_coordinates(&group, &x_bn, &y_bn)
-        .map_err(|_| Error::unauthorized("Failed to construct EC key"))?;
+    let ec_key = EcKey::from_public_key_affine_coordinates(&group, &x_bn, &y_bn).map_err(|e| {
+        tracing::error!(error = %e, "Failed to construct EC key");
+        Error::unauthorized("Failed to construct EC key")
+    })?;
 
     // WebCrypto / ES256 produces raw r || s
     // For P-256, r and s are each 32 bytes, total 64 bytes.
     if signature.len() != 64 {
+        tracing::error!(
+            sig_len = signature.len(),
+            "Invalid EC signature length (expected 64)"
+        );
         return Err(Error::unauthorized("Invalid EC signature length"));
     }
 
@@ -147,18 +169,25 @@ fn verify_ec(jwk: &Jwk, payload: &str, signature: &[u8]) -> Result<()> {
     let s_bn = BigNum::from_slice(&signature[32..64])
         .map_err(|_| Error::unauthorized("Invalid EC s component"))?;
 
-    let sig = EcdsaSig::from_private_components(r_bn, s_bn)
-        .map_err(|_| Error::unauthorized("Failed to parse ECDSA signature"))?;
+    let sig = EcdsaSig::from_private_components(r_bn, s_bn).map_err(|e| {
+        tracing::error!(error = %e, "Failed to parse ECDSA signature");
+        Error::unauthorized("Failed to parse ECDSA signature")
+    })?;
 
     let digest = Sha256::digest(payload.as_bytes());
 
-    let is_valid = sig
-        .verify(&digest, &ec_key)
-        .map_err(|_| Error::unauthorized("EC signature verification failed"))?;
+    tracing::debug!(payload_hash = %hex::encode(&digest), "Payload SHA256 hash");
+
+    let is_valid = sig.verify(&digest, &ec_key).map_err(|e| {
+        tracing::error!(error = %e, "EC signature verification failed");
+        Error::unauthorized("EC signature verification failed")
+    })?;
 
     if !is_valid {
+        tracing::error!("Signature is invalid");
         return Err(Error::unauthorized("Invalid signature"));
     }
 
+    tracing::debug!("EC signature verified successfully");
     Ok(())
 }

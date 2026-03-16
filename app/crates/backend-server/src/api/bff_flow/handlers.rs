@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use tracing::instrument;
 use backend_core::Error;
 
 use crate::api::BackendApi;
@@ -18,6 +19,7 @@ use super::service;
     params(("userId" = String, Path)),
     responses((status = 200, body = UserResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn get_user(
     State(api): State<BackendApi>,
     Path(user_id): Path<String>,
@@ -35,6 +37,7 @@ pub async fn get_user(
     params(("userId" = String, Path)),
     responses((status = 200, body = KycLevelResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn get_kyc_level(
     State(api): State<BackendApi>,
     Path(user_id): Path<String>,
@@ -51,6 +54,7 @@ pub async fn get_kyc_level(
     tag = "sessions",
     responses((status = 200, body = [SessionResponse]))
 )]
+#[instrument(skip(api, headers))]
 pub async fn list_sessions(
     State(api): State<BackendApi>,
     headers: HeaderMap,
@@ -67,6 +71,7 @@ pub async fn list_sessions(
     request_body = CreateSessionRequest,
     responses((status = 200, body = SessionResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn create_session(
     State(api): State<BackendApi>,
     headers: HeaderMap,
@@ -84,6 +89,7 @@ pub async fn create_session(
     params(("sessionId" = String, Path)),
     responses((status = 200, body = SessionDetailResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn get_session(
     State(api): State<BackendApi>,
     Path(session_id): Path<String>,
@@ -101,6 +107,7 @@ pub async fn get_session(
     params(("sessionId" = String, Path)),
     responses((status = 200, body = [FlowResponse]))
 )]
+#[instrument(skip(api, headers))]
 pub async fn list_session_flows(
     State(api): State<BackendApi>,
     Path(session_id): Path<String>,
@@ -119,6 +126,7 @@ pub async fn list_session_flows(
     request_body = AddFlowRequest,
     responses((status = 200, body = FlowResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn add_flow_to_session(
     State(api): State<BackendApi>,
     Path(session_id): Path<String>,
@@ -137,6 +145,7 @@ pub async fn add_flow_to_session(
     params(("flowId" = String, Path)),
     responses((status = 200, body = FlowDetailResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn get_flow(
     State(api): State<BackendApi>,
     Path(flow_id): Path<String>,
@@ -154,6 +163,7 @@ pub async fn get_flow(
     params(("flowId" = String, Path)),
     responses((status = 200, body = [StepResponse]))
 )]
+#[instrument(skip(api, headers))]
 pub async fn list_flow_steps(
     State(api): State<BackendApi>,
     Path(flow_id): Path<String>,
@@ -171,6 +181,7 @@ pub async fn list_flow_steps(
     params(("stepId" = String, Path)),
     responses((status = 200, body = StepResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn get_step(
     State(api): State<BackendApi>,
     Path(step_id): Path<String>,
@@ -189,6 +200,7 @@ pub async fn get_step(
     request_body = SubmitStepRequest,
     responses((status = 200, body = StepResponse))
 )]
+#[instrument(skip(api, headers))]
 pub async fn submit_step(
     State(api): State<BackendApi>,
     Path(step_id): Path<String>,
