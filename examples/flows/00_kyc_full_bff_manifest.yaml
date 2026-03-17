@@ -1,0 +1,205 @@
+name: kyc_full_bff_happy_path
+version: 1
+purpose: >
+  Guide an agent through the v2 BFF happy path for the full KYC journey:
+  first verify the phone number, then start the first deposit flow and wait
+  for staff review.
+
+openapi:
+  file: openapi/user-storage-bff.yaml
+  base_path: /bff
+
+session:
+  session_type: kyc_full
+  user_identity: authenticated_subject
+
+rules:
+  - Prefer the green path.
+  - Use `POST` to mutate state and `GET` to observe state.
+  - After each `POST`, confirm the response status before moving on.
+  - Reuse the same `sessionId`, `flowId`, and `stepId` values once extracted.
+  - For waiting steps, poll the matching `GET` endpoint until the target step is `WAITING`.
+  - Read the OTP from the SMS sink, then submit it through the waiting phone verification step.
+  - Pause the BFF path at first deposit review, then resume BFF checks after staff approval.
+
+api_calls:
+  - name: create_session
+    operationId: createFlowSession
+    method: POST
+    path: /flow/sessions
+    request:
+      sessionType: kyc_full
+    expect:
+      status: 201
+      extract:
+        sessionId: id
+
+  - name: start_phone_flow
+    operationId: addFlowToSession
+    method: POST
+    path: /flow/sessions/{sessionId}/flows
+    request:
+      flowType: phone_otp
+    expect:
+      status: 201
+      extract:
+        phoneFlowId: id
+
+  - name: wait_for_phone_init
+    operationId: listFlowSteps
+    method: GET
+    path: /flow/flows/{phoneFlowId}/steps
+    expect:
+      status: 200
+      waiting_step:
+        stepType: init_phone
+        actor: END_USER
+
+  - name: submit_phone_number
+    operationId: submitFlowStep
+    method: POST
+    path: /flow/steps/{initPhoneStepId}
+    request:
+      input:
+        phone_number: "+237690000033"
+    expect:
+      status: 200
+
+  - name: wait_for_otp_step
+    operationId: listFlowSteps
+    method: GET
+    path: /flow/flows/{phoneFlowId}/steps
+    expect:
+      status: 200
+      waiting_step:
+        stepType: verify_otp
+        actor: END_USER
+
+  - name: read_otp_from_sms
+    source: sms_sink
+    match:
+      phone_number: "+237690000033"
+    extract:
+      otp: code
+
+  - name: submit_otp
+    operationId: submitFlowStep
+    method: POST
+    path: /flow/steps/{verifyOtpStepId}
+    request:
+      input:
+        code: "{otp}"
+    expect:
+      status: 200
+
+  - name: verify_phone_metadata
+    operationId: getFlowUser
+    method: GET
+    path: /flow/users/{userId}
+    expect:
+      status: 200
+      assertions:
+        metadata.phone.number: "+237690000033"
+        metadata.phone.verified: true
+        metadata.kyc.phoneOtpVerified: true
+
+  - name: verify_phone_kyc_level
+    operationId: getFlowUserKycLevel
+    method: GET
+    path: /flow/users/{userId}/kyc-level
+    expect:
+      status: 200
+      assertions:
+        level_contains:
+          - PHONE_OTP_VERIFIED
+        phoneOtpVerified: true
+
+  - name: start_first_deposit_flow
+    operationId: addFlowToSession
+    method: POST
+    path: /flow/sessions/{sessionId}/flows
+    request:
+      flowType: first_deposit
+    expect:
+      status: 201
+      extract:
+        depositFlowId: id
+
+  - name: wait_for_deposit_init
+    operationId: listFlowSteps
+    method: GET
+    path: /flow/flows/{depositFlowId}/steps
+    expect:
+      status: 200
+      waiting_step:
+        stepType: init_first_deposit
+        actor: END_USER
+
+  - name: submit_first_deposit
+    operationId: submitFlowStep
+    method: POST
+    path: /flow/steps/{initFirstDepositStepId}
+    request:
+      input:
+        amount: 5000
+        currency: XAF
+    expect:
+      status: 200
+
+  - name: wait_for_admin_review
+    operationId: listFlowSteps
+    method: GET
+    path: /flow/flows/{depositFlowId}/steps
+    expect:
+      status: 200
+      waiting_step:
+        stepType: await_admin_decision
+        actor: ADMIN
+
+  - name: wait_for_first_deposit_completion
+    operationId: getFlow
+    method: GET
+    path: /flow/flows/{depositFlowId}
+    expect:
+      status: 200
+      waiting_for:
+        staff_approval: true
+        final_status: COMPLETED
+
+  - name: verify_first_deposit_metadata
+    operationId: getFlowUser
+    method: GET
+    path: /flow/users/{userId}
+    expect:
+      status: 200
+      assertions:
+        metadata.fineractId: 1
+        metadata.savingsAccountId: 2
+        metadata.firstDeposit.status: APPROVED
+
+  - name: verify_first_deposit_kyc_level
+    operationId: getFlowUserKycLevel
+    method: GET
+    path: /flow/users/{userId}/kyc-level
+    expect:
+      status: 200
+      assertions:
+        level_contains:
+          - PHONE_OTP_VERIFIED
+          - FIRST_DEPOSIT_VERIFIED
+        firstDepositVerified: true
+
+handoff:
+  note: >
+    The BFF flow pauses at admin review. The reviewer approves the pending
+    admin step on the staff surface, then the agent resumes with BFF checks
+    until the flow reaches `COMPLETED` and the user metadata reflects the
+    first deposit.
+
+observables:
+  successful_bff_end_state:
+    - phone OTP step completed
+    - first deposit step waiting for admin review
+    - first deposit flow completes after staff approval
+    - user metadata includes `phone.verified`, `fineractId`, and `savingsAccountId`
+    - KYC level contains `PHONE_OTP_VERIFIED` and `FIRST_DEPOSIT_VERIFIED`

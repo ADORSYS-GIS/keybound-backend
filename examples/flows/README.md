@@ -54,6 +54,14 @@ Supported step fields:
 - metadata persistence
 - clean reject closure
 
+## BFF manifest
+
+`00_kyc_full_bff_manifest.yaml` is not a runtime flow definition. It is a
+machine-readable playbook that tells an agent which BFF endpoints to call,
+which IDs to extract, and where the happy-path flow pauses for staff review.
+It is meant to drive the full `kyc_full` journey across phone verification and
+first deposit setup.
+
 ## Expected API flow
 
 End user:
@@ -61,6 +69,8 @@ End user:
 - `POST /bff/flow/sessions/{sessionId}/flows`
 - `POST /bff/flow/steps/{stepId}`
 - `GET /bff/flow/users/{userId}`
+- `GET /bff/flow/users/{userId}/kyc-level`
+- `GET /bff/flow/flows/{flowId}`
 
 Staff:
 - `GET /staff/flow/steps`
