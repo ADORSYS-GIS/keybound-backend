@@ -17,7 +17,7 @@ steps:
     next: send
 
   send:
-    action: WEBHOOK
+    action: WEBHOOK_HTTP
     actor: SYSTEM
     config:
       url: "${NOTIFICATION_SERVICE_URL}/send-magic-email"

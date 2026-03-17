@@ -1,8 +1,5 @@
 use backend_flow_sdk::flow::StepRef;
-use backend_flow_sdk::{
-    Actor, Flow, FlowConfigLoader, FlowError, FlowRegistry, LoadedConfigs, SessionDefinition,
-    StepTransition,
-};
+use backend_flow_sdk::{Actor, Flow, FlowConfigLoader, FlowError, FlowRegistry, LoadedConfigs, SessionDefinition, StepTransition};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -531,7 +528,7 @@ fn static_flow(
 fn register_builtin_actions(registry: &mut FlowRegistry) {
     use backend_flow_sdk::{
         ErrorAction, GenerateOtpAction, NoopAction, RetryAction, ReviewDocumentAction, SetAction,
-        UploadDocumentAction, ValidateDepositAction, VerifyOtpAction, WaitAction,
+        UploadDocumentAction, ValidateDepositAction, VerifyOtpAction, WaitAction, WebhookStep,
     };
 
     debug!("Registering built-in action steps...");
@@ -546,6 +543,7 @@ fn register_builtin_actions(registry: &mut FlowRegistry) {
     registry.register_step(Arc::new(UploadDocumentAction));
     registry.register_step(Arc::new(ReviewDocumentAction));
     registry.register_step(Arc::new(ValidateDepositAction));
+    registry.register_step(Arc::new(WebhookStep::new()));
 
     debug!("Registered {} built-in actions", registry.step_types().len());
 }

@@ -8,7 +8,6 @@ pub mod external_kyc;
 pub mod first_deposit;
 pub mod id_document;
 pub mod phone_otp;
-pub mod webhook_http;
 
 #[cfg(feature = "flow-cuss-integration")]
 pub mod cuss_integration;

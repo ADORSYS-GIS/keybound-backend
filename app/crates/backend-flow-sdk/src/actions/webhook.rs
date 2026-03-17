@@ -111,7 +111,7 @@ impl WebhookStep {
 #[async_trait]
 impl Step for WebhookStep {
     fn step_type(&self) -> &'static str {
-        "WEBHOOK"
+        "WEBHOOK_HTTP"
     }
 
     fn actor(&self) -> Actor {

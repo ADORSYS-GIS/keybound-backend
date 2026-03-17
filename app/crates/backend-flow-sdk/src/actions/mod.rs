@@ -5,8 +5,6 @@ mod otp;
 mod retry;
 mod set;
 mod wait;
-
-#[cfg(feature = "webhook")]
 mod webhook;
 
 pub use error::ErrorAction;
@@ -17,7 +15,6 @@ pub use retry::RetryAction;
 pub use set::SetAction;
 pub use wait::WaitAction;
 
-#[cfg(feature = "webhook")]
 pub use webhook::{
     ExtractionTarget, WebhookBehavior, WebhookExtractionRule, WebhookHttpConfig,
     WebhookRetryPolicy, WebhookStep, WebhookSuccessCondition,
