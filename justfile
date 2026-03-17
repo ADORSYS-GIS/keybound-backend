@@ -140,7 +140,7 @@ test-e2e-smoke:
 	    if [ $i -eq 90 ]; then echo \"user-storage-server did not become healthy\"; exit 1; fi; \
 	  done; \
 	  docker compose -p {{project_e2e}} -f {{compose_e2e}} up -d user-storage-worker; \
-	  USER_STORAGE_URL=http://127.0.0.1:3002 \
+	  BACKEND_BASE_URL=http://127.0.0.1:3002 \
 	  KEYCLOAK_URL=http://127.0.0.1:9026 \
 	  CUSS_URL=http://127.0.0.1:18080 \
 	  SMS_SINK_URL=http://127.0.0.1:18081 \
@@ -172,9 +172,9 @@ test-e2e-full:
 	  done; \
 	  docker compose -p {{project_e2e}} -f {{compose_e2e}} up -d \
 	    user-storage-server-blank-base user-storage-server-auth-disabled user-storage-worker user-storage-worker-secondary; \
-	  USER_STORAGE_URL=http://127.0.0.1:3002 \
-	  USER_STORAGE_BLANK_BASE_URL=http://127.0.0.1:3003 \
-	  USER_STORAGE_AUTH_DISABLED_URL=http://127.0.0.1:3004 \
+	  BACKEND_BASE_URL=http://127.0.0.1:3002 \
+	  BACKEND_BLANK_BASE_URL=http://127.0.0.1:3003 \
+	  BACKEND_AUTH_DISABLED_URL=http://127.0.0.1:3004 \
 	  WORKER_PRIMARY_URL=http://127.0.0.1:3005 \
 	  WORKER_SECONDARY_URL=http://127.0.0.1:3006 \
 	  KEYCLOAK_URL=http://127.0.0.1:9026 \

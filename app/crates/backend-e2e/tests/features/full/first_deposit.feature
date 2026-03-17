@@ -12,7 +12,7 @@ Feature: First Deposit Flow
   Scenario: Approved first deposit updates KYC level and metadata
     Given I complete phone OTP verification
     Then no error occurred
-    And I start a first deposit flow for 5000 XAF
+    Given I start a first deposit flow for 5000 XAF
     Then no error occurred
     Then the first deposit flow is waiting for admin review
     When I approve the pending first deposit admin step

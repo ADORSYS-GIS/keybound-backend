@@ -360,6 +360,29 @@ struct ProxyStep {
     inner: StepRef,
 }
 
+impl ProxyStep {
+    fn context_with_config(
+        &self,
+        ctx: &backend_flow_sdk::StepContext,
+    ) -> backend_flow_sdk::StepContext {
+        if let Some(config) = &self.config {
+            let mut services = ctx.services.clone();
+            services.config = Some(
+                config
+                    .as_object()
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default(),
+            );
+            backend_flow_sdk::StepContext {
+                services,
+                ..ctx.clone()
+            }
+        } else {
+            ctx.clone()
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl backend_flow_sdk::Step for ProxyStep {
     fn step_type(&self) -> &str {
@@ -382,26 +405,21 @@ impl backend_flow_sdk::Step for ProxyStep {
         &self,
         ctx: &backend_flow_sdk::StepContext,
     ) -> Result<backend_flow_sdk::StepOutcome, FlowError> {
-        let ctx_with_config = if let Some(config) = &self.config {
-            let mut services = ctx.services.clone();
-            services.config = Some(
-                config
-                    .as_object()
-                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                    .unwrap_or_default(),
-            );
-            backend_flow_sdk::StepContext {
-                services,
-                ..ctx.clone()
-            }
-        } else {
-            ctx.clone()
-        };
+        let ctx_with_config = self.context_with_config(ctx);
         self.inner.execute(&ctx_with_config).await
     }
 
     async fn validate_input(&self, input: &serde_json::Value) -> Result<(), FlowError> {
         self.inner.validate_input(input).await
+    }
+
+    async fn verify_input(
+        &self,
+        ctx: &backend_flow_sdk::StepContext,
+        input: &serde_json::Value,
+    ) -> Result<backend_flow_sdk::StepOutcome, FlowError> {
+        let ctx_with_config = self.context_with_config(ctx);
+        self.inner.verify_input(&ctx_with_config, input).await
     }
 }
 

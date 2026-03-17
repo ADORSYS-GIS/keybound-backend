@@ -46,6 +46,10 @@ fn require_step_id_from_value(step: &Value) -> Result<String> {
         .ok_or_else(|| anyhow!("step id missing"))
 }
 
+fn require_fixture() -> Result<BffTestFixture> {
+    BffTestFixture::get().ok_or_else(|| anyhow!("missing BFF fixture"))
+}
+
 async fn wait_for_step_status(
     client: &reqwest::Client,
     bff_base: &str,
@@ -137,22 +141,23 @@ async fn wait_for_flow_status(
 ) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
     let url = format!("{}/flow/flows/{}", bff_base, flow_id);
+    let mut last_status: Option<String> = None;
 
     while std::time::Instant::now() < deadline {
         let response =
             send_json_with_bff(client, Method::GET, &url, None, None, Some(fixture)).await?;
 
         if response.status == 200 {
-            let status = response
-                .body
-                .as_ref()
-                .and_then(|b| b.get("status"))
-                .and_then(Value::as_str);
+            let status = response.body.as_ref().and_then(|body| {
+                body.get("status")
+                    .or_else(|| body.get("flow").and_then(|flow| flow.get("status")))
+            });
 
-            if let Some(s) = status
-                && s == expected_status
-            {
-                return Ok(());
+            if let Some(s) = status.and_then(Value::as_str) {
+                last_status = Some(s.to_owned());
+                if s == expected_status {
+                    return Ok(());
+                }
             }
         }
 
@@ -160,10 +165,11 @@ async fn wait_for_flow_status(
     }
 
     Err(anyhow!(
-        "Flow {} did not reach status {} within {:?}",
+        "Flow {} did not reach status {} within {:?} (last_status={})",
         flow_id,
         expected_status,
-        timeout
+        timeout,
+        last_status.unwrap_or_else(|| "unknown".to_owned())
     ))
 }
 
@@ -280,7 +286,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let user_id = format!("usr_flow_sdk_e2e_{}", chrono::Utc::now().timestamp());
     ensure_bff_fixtures(&env.database_url, &user_id).await?;
 
-    let fixture = BffTestFixture::generate(&user_id).store_global();
+    let fixture = require_fixture()?;
     let (staff_token, _) = get_client_token_and_subject(&client, &env).await?;
 
     let bff_base = format!("{}/bff", env.user_storage_url);
@@ -300,7 +306,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
             "sessionType": "kyc_full",
             "context": {}
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -322,7 +328,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
             "flowType": "phone_otp",
             "context": {}
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -335,7 +341,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     println!("Created phone_otp flow: {}", phone_flow_id);
 
     println!("=== Step 3: Submit phone init step ===");
-    let phone_steps = get_flow_steps(&client, &bff_base, fixture, &phone_flow_id).await?;
+    let phone_steps = get_flow_steps(&client, &bff_base, &fixture, &phone_flow_id).await?;
     let init_phone_step_id = require_step_id_from_value(find_step(&phone_steps, "init_phone")?)?;
 
     let init_phone_response = send_json_with_bff(
@@ -348,7 +354,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
                 "phone_number": phone_number
             }
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(
@@ -361,12 +367,12 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let otp = wait_for_otp(&client, &env, phone_number, Duration::from_secs(15)).await?;
 
     println!("=== Step 5: Get verify step ===");
-    let phone_steps_after = get_flow_steps(&client, &bff_base, fixture, &phone_flow_id).await?;
+    let phone_steps_after = get_flow_steps(&client, &bff_base, &fixture, &phone_flow_id).await?;
     let verify_step_id = require_step_id_from_value(find_step(&phone_steps_after, "verify_otp")?)?;
     wait_for_step_status(
         &client,
         &bff_base,
-        fixture,
+        &fixture,
         &verify_step_id,
         "WAITING",
         Duration::from_secs(10),
@@ -384,7 +390,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
                 "code": otp
             }
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -399,7 +405,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     wait_for_flow_status(
         &client,
         &bff_base,
-        fixture,
+        &fixture,
         &phone_flow_id,
         "COMPLETED",
         Duration::from_secs(10),
@@ -414,7 +420,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         &format!("{}/flow/users/{}", bff_base, user_id),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -451,7 +457,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         Some(json!({
             "flowType": "first_deposit"
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -464,7 +470,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     println!("Created first_deposit flow: {}", deposit_flow_id);
 
     println!("=== Step 10: Submit first deposit init step ===");
-    let deposit_steps = get_flow_steps(&client, &bff_base, fixture, &deposit_flow_id).await?;
+    let deposit_steps = get_flow_steps(&client, &bff_base, &fixture, &deposit_flow_id).await?;
     let init_deposit_step_id =
         require_step_id_from_value(find_step(&deposit_steps, "init_first_deposit")?)?;
 
@@ -479,7 +485,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
                 "currency": "XAF"
             }
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(
@@ -537,7 +543,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     wait_for_flow_status(
         &client,
         &bff_base,
-        fixture,
+        &fixture,
         &deposit_flow_id,
         "COMPLETED",
         Duration::from_secs(15),
@@ -577,7 +583,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         &format!("{}/flow/users/{}", bff_base, user_id),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -616,7 +622,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         &format!("{}/flow/users/{}/kyc-level", bff_base, user_id),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -652,7 +658,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     let user_id = format!("usr_flow_sdk_reject_{}", chrono::Utc::now().timestamp());
     ensure_bff_fixtures(&env.database_url, &user_id).await?;
 
-    let fixture = BffTestFixture::generate(&user_id).store_global();
+    let fixture = require_fixture()?;
     let (staff_token, _) = get_client_token_and_subject(&client, &env).await?;
 
     let bff_base = format!("{}/bff", env.user_storage_url);
@@ -668,7 +674,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         Some(json!({
             "sessionType": "kyc_full"
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(session_response.status, 201, "{}", session_response.text);
@@ -682,13 +688,13 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         Some(json!({
             "flowType": "first_deposit"
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(flow_response.status, 201, "{}", flow_response.text);
     let flow_id = require_flow_id(&flow_response.body)?;
 
-    let flow_steps = get_flow_steps(&client, &bff_base, fixture, &flow_id).await?;
+    let flow_steps = get_flow_steps(&client, &bff_base, &fixture, &flow_id).await?;
     let init_step_id = require_step_id_from_value(find_step(&flow_steps, "init_first_deposit")?)?;
 
     let init_response = send_json_with_bff(
@@ -702,7 +708,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
                 "currency": "XAF"
             }
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(init_response.status, 200, "{}", init_response.text);
@@ -749,7 +755,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     wait_for_flow_status(
         &client,
         &bff_base,
-        fixture,
+        &fixture,
         &flow_id,
         "CLOSED",
         Duration::from_secs(10),
@@ -758,7 +764,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     wait_for_session_status(
         &client,
         &bff_base,
-        fixture,
+        &fixture,
         &session_id,
         "CLOSED",
         Duration::from_secs(10),
@@ -789,7 +795,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         &format!("{}/flow/sessions/{}", bff_base, session_id),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(session_detail.status, 200, "{}", session_detail.text);
@@ -807,7 +813,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         &format!("{}/flow/users/{}", bff_base, user_id),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
     assert_eq!(user_response.status, 200, "{}", user_response.text);
@@ -853,8 +859,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
     let user_id = format!("usr_flow_sdk_list_{}", chrono::Utc::now().timestamp());
     ensure_bff_fixtures(&env.database_url, &user_id).await?;
 
-    let fixture = BffTestFixture::generate(&user_id);
-    let fixture = fixture.store_global();
+    let fixture = require_fixture()?;
 
     let bff_base = format!("{}/bff", env.user_storage_url);
 
@@ -872,7 +877,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
                     "iteration": i
                 }
             })),
-            Some(fixture),
+            Some(&fixture),
         )
         .await?;
 
@@ -890,7 +895,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
         &format!("{}/flow/sessions", bff_base),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -925,8 +930,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
     let user_id = format!("usr_flow_sdk_retry_{}", chrono::Utc::now().timestamp());
     ensure_bff_fixtures(&env.database_url, &user_id).await?;
 
-    let fixture = BffTestFixture::generate(&user_id);
-    let fixture = fixture.store_global();
+    let fixture = require_fixture()?;
 
     let bff_base = format!("{}/bff", env.user_storage_url);
 
@@ -939,7 +943,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
         Some(json!({
             "sessionType": "kyc_full"
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -955,7 +959,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
         Some(json!({
             "flowType": "phone_otp"
         })),
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 
@@ -969,7 +973,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
         &format!("{}/flow/flows/{}", bff_base, flow_id),
         None,
         None,
-        Some(fixture),
+        Some(&fixture),
     )
     .await?;
 

@@ -8,7 +8,7 @@ use rand_core::OsRng;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tokio_postgres::NoTls;
@@ -16,7 +16,7 @@ use tokio_postgres::NoTls;
 const E2E_BFF_DEVICE_ID: &str = "dvc_e2e_bff_signature";
 const E2E_BFF_DEVICE_JKT: &str = "jkt_e2e_bff_signature";
 
-static BFF_FIXTURE: OnceLock<BffTestFixture> = OnceLock::new();
+static BFF_FIXTURE: LazyLock<Mutex<Option<BffTestFixture>>> = LazyLock::new(|| Mutex::new(None));
 
 #[derive(Clone)]
 pub struct BffTestFixture {
@@ -50,8 +50,8 @@ impl BffTestFixture {
         }
     }
 
-    pub fn get() -> Option<&'static Self> {
-        BFF_FIXTURE.get()
+    pub fn get() -> Option<Self> {
+        BFF_FIXTURE.lock().ok().and_then(|guard| guard.clone())
     }
 
     pub fn sign_bff_request(&self, canonical_payload: &str) -> String {
@@ -82,7 +82,10 @@ impl BffTestFixture {
     }
 
     pub fn store_global(self) -> &'static Self {
-        BFF_FIXTURE.get_or_init(|| self)
+        if let Ok(mut guard) = BFF_FIXTURE.lock() {
+            *guard = Some(self.clone());
+        }
+        Box::leak(Box::new(self))
     }
 }
 
@@ -104,9 +107,9 @@ pub struct Env {
 impl Env {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
-            user_storage_url: must_env("USER_STORAGE_URL")?,
-            user_storage_blank_base_url: maybe_env("USER_STORAGE_BLANK_BASE_URL"),
-            user_storage_auth_disabled_url: maybe_env("USER_STORAGE_AUTH_DISABLED_URL"),
+            user_storage_url: must_env("BACKEND_BASE_URL")?,
+            user_storage_blank_base_url: maybe_env("BACKEND_BLANK_BASE_URL"),
+            user_storage_auth_disabled_url: maybe_env("BACKEND_AUTH_DISABLED_URL"),
             worker_primary_url: maybe_env("WORKER_PRIMARY_URL"),
             worker_secondary_url: maybe_env("WORKER_SECONDARY_URL"),
             keycloak_url: must_env("KEYCLOAK_URL")?,
@@ -128,6 +131,10 @@ fn maybe_env(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+fn maybe_env_any(keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| maybe_env(key))
 }
 
 #[derive(Debug)]
@@ -204,8 +211,7 @@ pub async fn send_json_with_bff(
 
     let should_sign = should_sign_bff_request(&request_path);
     if should_sign {
-        #[allow(clippy::redundant_closure)]
-        let fixture = bff_fixture.or_else(|| BffTestFixture::get());
+        let fixture = bff_fixture.cloned().or_else(BffTestFixture::get);
 
         if let Some(fixture) = fixture {
             let timestamp = chrono::Utc::now().timestamp();
@@ -325,12 +331,13 @@ fn jwt_subject(token: &str) -> Result<String> {
     payload_json
         .get("sub")
         .and_then(Value::as_str)
-        .map(str::to_owned)
+        .map(normalize_user_id)
         .ok_or_else(|| anyhow!("jwt payload missing sub"))
 }
 
 pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()> {
-    let fixture = BffTestFixture::generate(user_id);
+    let normalized_user_id = normalize_user_id(user_id);
+    let fixture = BffTestFixture::generate(&normalized_user_id);
 
     let (client, connection) = tokio_postgres::connect(database_url, NoTls)
         .await
@@ -342,12 +349,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
         }
     });
 
-    client
-        .execute("DELETE FROM sm_instance WHERE user_id = $1", &[&user_id])
-        .await
-        .context("failed to cleanup sm_instance fixtures")?;
-
-    let username = format!("subject-{user_id}");
+    let username = format!("subject-{normalized_user_id}");
 
     client
         .execute(
@@ -359,9 +361,20 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 full_name,
                 phone_number,
                 disabled,
+                metadata,
                 created_at,
                 updated_at
-            ) VALUES ($1, 'e2e-testing', $2, 'E2E Subject', '+237690123456', false, NOW(), NOW())
+            ) VALUES (
+                $1,
+                'e2e-testing',
+                $2,
+                'E2E Subject',
+                '+237690123456',
+                false,
+                '{}'::jsonb,
+                NOW(),
+                NOW()
+            )
             ON CONFLICT (user_id) DO UPDATE
             SET
                 realm = EXCLUDED.realm,
@@ -369,9 +382,10 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
                 disabled = false,
+                metadata = '{}'::jsonb,
                 updated_at = NOW()
             "#,
-            &[&user_id, &username],
+            &[&normalized_user_id, &username],
         )
         .await
         .context("failed to upsert bff user fixture")?;
@@ -386,6 +400,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 full_name,
                 phone_number,
                 disabled,
+                metadata,
                 created_at,
                 updated_at
             ) VALUES (
@@ -395,6 +410,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 'E2E Staff',
                 '+237690000001',
                 false,
+                '{}'::jsonb,
                 NOW(),
                 NOW()
             )
@@ -405,6 +421,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
                 disabled = false,
+                metadata = '{}'::jsonb,
                 updated_at = NOW()
             "#,
             &[],
@@ -463,6 +480,18 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
 
     fixture.store_global();
     Ok(())
+}
+
+fn normalize_user_id(raw: &str) -> String {
+    if raw.starts_with("usr_") {
+        return raw.to_owned();
+    }
+
+    if let Some(segment) = raw.rsplit(':').find(|segment| segment.starts_with("usr_")) {
+        return segment.to_owned();
+    }
+
+    raw.rsplit(':').next().unwrap_or(raw).to_owned()
 }
 
 pub async fn reset_sms_sink(client: &reqwest::Client, env: &Env) -> Result<()> {
