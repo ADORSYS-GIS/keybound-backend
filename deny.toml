@@ -26,5 +26,4 @@ ignore = [
 skip = [
     { name = "gen_oas_client_cuss" },
     { name = "gen_oas_server_kc" },
-    { name = "gen_oas_server_staff" },
 ]

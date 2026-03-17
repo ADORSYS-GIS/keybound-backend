@@ -12,6 +12,5 @@ diesel.workspace = true
 serde_json.workspace = true
 o2o.workspace = true
 gen_oas_server_kc.workspace = true
-gen_oas_server_staff.workspace = true
 hex.workspace = true
 sha2.workspace = true

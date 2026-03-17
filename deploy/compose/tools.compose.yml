@@ -56,12 +56,6 @@ services:
     - source: oas_server_kc
       target: /tmp/oas_server_kc.json
       mode: 444
-    - source: oas_server_bff
-      target: /tmp/oas_server_bff.json
-      mode: 444
-    - source: oas_server_staff
-      target: /tmp/oas_server_staff.json
-      mode: 444
     - source: oas_client_cuss
       target: /tmp/oas_client_cuss.json
       mode: 444
@@ -77,7 +71,7 @@ services:
 
       JAR_FILE=/data/bin/openapi-generator-cli.jar
 
-      for item in oas_server_kc oas_client_cuss oas_server_staff oas_server_bff; do
+      for item in oas_server_kc oas_client_cuss; do
           echo "Generating $$item..."
           
           # Generate to a local container directory first to avoid bind mount issues
@@ -120,21 +114,5 @@ configs:
         "inputSpec": "/openapi/user-storage--cuss.yaml",
         "generatorName": "rust",
         "packageName": "gen_oas_client_cuss",
-        "packageVersion": "9.9.9"
-      }
-  oas_server_staff:
-    content: |
-      {
-        "inputSpec": "/openapi/user-storage--staff.yaml",
-        "generatorName": "rust-axum",
-        "packageName": "gen_oas_server_staff",
-        "packageVersion": "9.9.9"
-      }
-  oas_server_bff:
-    content: |
-      {
-        "inputSpec": "/openapi/user-storage-bff.yaml",
-        "generatorName": "rust-axum",
-        "packageName": "gen_oas_server_bff",
         "packageVersion": "9.9.9"
       }

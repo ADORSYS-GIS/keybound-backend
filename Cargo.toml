@@ -14,9 +14,7 @@ members = [
     "app/bins/sms-gateway",
 
     "app/gen/oas_client_cuss",
-    "app/gen/oas_server_bff",
     "app/gen/oas_server_kc",
-    "app/gen/oas_server_staff",
 ]
 resolver = "3"
 
@@ -33,7 +31,6 @@ backend-server = { path = "app/crates/backend-server" }
 
 gen_oas_client_cuss = { path = "app/gen/oas_client_cuss" }
 gen_oas_server_kc = { path = "app/gen/oas_server_kc" }
-gen_oas_server_staff = { path = "app/gen/oas_server_staff" }
 
 o2o = "0"
 
@@ -125,11 +122,11 @@ incremental = false
 strip = true
 
 [workspace.package]
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 license = "MIT"
 publish = false
 authors = [
-    "Stephane Segning <selastlambou@gmail.com>",
     "adorsys GIS <gis-udm@adorsys.com>",
+    "Stephane Segning <selastlambou@gmail.com>",
 ]

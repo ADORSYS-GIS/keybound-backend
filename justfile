@@ -46,9 +46,10 @@ up-sms: # Start SMS gateway service
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans --build sms-gateway {{c}}
 
 generate: # Generate code from OpenAPI specs
+	rm -rf app/gen
 	docker compose -p {{project}} -f {{compose_file}} run --rm generate-code
-	cargo fmt -p gen_oas_client_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
-	cargo fix --allow-dirty -p gen_oas_client_cuss -p gen_oas_server_bff -p gen_oas_server_kc -p gen_oas_server_staff
+	cargo fmt -p gen_oas_client_cuss -p gen_oas_server_kc
+	cargo fix --allow-dirty -p gen_oas_client_cuss -p gen_oas_server_kc
 
 up-no-build: # Start services without rebuilding
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans {{c}}

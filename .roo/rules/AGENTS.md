@@ -12,7 +12,7 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - Two KYC processes are implemented as state machines:
   - `KYC_PHONE_OTP`
   - `KYC_FIRST_DEPOSIT` (staff confirms payment then approves; worker calls CUSS `registerCustomer` then `approveAndDeposit`)
-- Staff OpenAPI (`openapi/user-storage--staff.yaml`) is rewritten to expose state-machine observability and controls.
+- Staff OpenAPI is exposing state-machine observability and controls.
 
 `app/bins/backend` starts the server; `app/crates/backend-server` is a library crate.
 
