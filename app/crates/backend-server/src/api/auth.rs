@@ -30,6 +30,9 @@ const HEADER_DEVICE_ID: &str = "x-auth-device-id";
 const HEADER_PUBLIC_KEY: &str = "x-auth-public-key";
 const HEADER_NONCE: &str = "x-auth-nonce";
 const HEADER_USER_ID: &str = "x-auth-user-id";
+const AUTH_ENROLL_SESSION_TYPE: &str = "auth_enrollment";
+const AUTH_ENROLL_FLOW_TYPE: &str = "auth_device_enroll";
+const AUTH_ENROLL_BIND_STEP_TYPE: &str = "bind";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -214,7 +217,7 @@ async fn enroll(
 
     let date = Utc::now().format("%Y-%m-%d").to_string();
     let session_human_id = format!("auth.{date}.{}", session_id);
-    let flow_human_id = format!("{}.device_enroll", session_human_id);
+    let flow_human_id = format!("{}.auth_device_enroll", session_human_id);
     let step_human_id = format!("{}.bind", flow_human_id);
 
     let context = json!({
@@ -235,8 +238,9 @@ async fn enroll(
         .create_session(FlowSessionCreateInput {
             id: session_id.clone(),
             human_id: session_human_id,
-            user_id: Some(body.user_id.clone()),
-            session_type: "ACCOUNT_MANAGEMENT".to_owned(),
+            // Keep auth enrollment isolated from user-scoped KYC listings.
+            user_id: None,
+            session_type: AUTH_ENROLL_SESSION_TYPE.to_owned(),
             status: "OPEN".to_owned(),
             context: context.clone(),
         })
@@ -248,9 +252,9 @@ async fn enroll(
             id: flow_id.clone(),
             human_id: flow_human_id,
             session_id: session_id.clone(),
-            flow_type: "DEVICE_ENROLL".to_owned(),
+            flow_type: AUTH_ENROLL_FLOW_TYPE.to_owned(),
             status: "RUNNING".to_owned(),
-            current_step: Some("BIND_DEVICE".to_owned()),
+            current_step: Some(AUTH_ENROLL_BIND_STEP_TYPE.to_owned()),
             step_ids: json!([step_id]),
             context,
         })
@@ -262,7 +266,7 @@ async fn enroll(
             id: step_id.clone(),
             human_id: step_human_id,
             flow_id: flow_id.clone(),
-            step_type: "BIND_DEVICE".to_owned(),
+            step_type: AUTH_ENROLL_BIND_STEP_TYPE.to_owned(),
             actor: "END_USER".to_owned(),
             status: "WAITING".to_owned(),
             attempt_no: 0,
@@ -314,6 +318,15 @@ async fn bind_enroll(
         .get_session(&id)
         .await?
         .ok_or_else(|| Error::not_found("ENROLLMENT_NOT_FOUND", "Enrollment not found"))?;
+    if !session
+        .session_type
+        .eq_ignore_ascii_case(AUTH_ENROLL_SESSION_TYPE)
+    {
+        return Err(Error::not_found(
+            "ENROLLMENT_NOT_FOUND",
+            "Enrollment not found",
+        ));
+    }
 
     let expected_jwk = session
         .context

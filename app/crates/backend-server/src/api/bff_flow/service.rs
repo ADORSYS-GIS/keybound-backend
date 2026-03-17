@@ -1010,13 +1010,13 @@ pub async fn get_kyc_level(
         for flow in flows {
             if flow.status == "COMPLETED" {
                 match flow.flow_type.as_str() {
-                    "PHONE_OTP" | "phone_otp" => {
+                    "phone_otp" => {
                         phone_otp_verified = true;
                         if !level.contains(&KycLevel::PhoneOtpVerified) {
                             level.push(KycLevel::PhoneOtpVerified);
                         }
                     }
-                    "FIRST_DEPOSIT" | "first_deposit" => {
+                    "first_deposit" => {
                         first_deposit_verified = true;
                         if !level.contains(&KycLevel::FirstDepositVerified) {
                             level.push(KycLevel::FirstDepositVerified);
