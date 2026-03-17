@@ -43,7 +43,7 @@ steps:
     action: WEBHOOK_HTTP
     actor: SYSTEM
     config:
-      url: ${CUSS_URL:-http://cuss:8080}/api/registration/register
+      url: ${CUSS_URL}/api/registration/register
       method: POST
       payload:
         fullName: "{{session.full_name}}"
@@ -65,7 +65,7 @@ steps:
     action: WEBHOOK_HTTP
     actor: SYSTEM
     config:
-      url: ${CUSS_URL:-http://cuss:8080}/api/registration/approve-and-deposit
+      url: ${CUSS_URL}/api/registration/approve-and-deposit
       method: POST
       payload:
         savingsAccountId: "{{flow.context.step_output.cuss_register_customer.savingsAccountId}}"

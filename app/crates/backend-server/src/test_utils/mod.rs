@@ -168,6 +168,10 @@ mock! {
             realm: &str,
             phone: &str,
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
+        async fn find_users_by_phone(
+            &self,
+            phone: &str,
+        ) -> RepoResult<Vec<backend_model::db::UserRow>>;
         async fn resolve_or_create_user_by_phone(
             &self,
             realm: &str,

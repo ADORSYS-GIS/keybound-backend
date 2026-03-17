@@ -35,6 +35,7 @@ pub struct FlowSessionCreateInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowSessionFilter {
     pub user_id: Option<String>,
+    pub user_ids: Option<Vec<String>>,
     pub session_type: Option<String>,
     pub status: Option<String>,
     pub page: i32,
@@ -49,6 +50,19 @@ impl FlowSessionFilter {
             .user_id
             .map(|v| v.trim().to_owned())
             .filter(|v| !v.is_empty());
+        let user_ids = self
+            .user_ids
+            .map(|values| {
+                let mut normalized: Vec<String> = values
+                    .into_iter()
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty())
+                    .collect();
+                normalized.sort();
+                normalized.dedup();
+                normalized
+            })
+            .filter(|values| !values.is_empty());
         let session_type = self
             .session_type
             .map(|v| v.trim().to_owned())
@@ -60,6 +74,7 @@ impl FlowSessionFilter {
 
         Self {
             user_id,
+            user_ids,
             session_type,
             status,
             page,
@@ -302,6 +317,9 @@ pub trait UserRepo: Send + Sync {
         realm: &str,
         phone: &str,
     ) -> RepoResult<Option<backend_model::db::UserRow>>;
+
+    async fn find_users_by_phone(&self, phone: &str)
+    -> RepoResult<Vec<backend_model::db::UserRow>>;
 
     async fn resolve_or_create_user_by_phone(
         &self,

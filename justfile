@@ -184,7 +184,7 @@ test-e2e-full:
 	  KEYCLOAK_CLIENT_ID=test-client \
 	  KEYCLOAK_CLIENT_SECRET=some-secret \
 	  cargo test -p backend-e2e --features e2e-tests --test flow_sdk -- --nocapture; \
-	  cargo test -p backend-e2e --features e2e-tests --test cucumber_full -- --nocapture'
+	  cargo test -p backend-e2e --features e2e-tests --test cucumber_full'
 
 e2e-smoke:
 	just test-e2e-smoke

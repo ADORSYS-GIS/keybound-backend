@@ -41,7 +41,7 @@ steps:
     action: WEBHOOK_HTTP
     actor: SYSTEM
     config:
-      url: ${SMS_SINK_URL:-http://sms-sink:8081}/otp
+      url: ${SMS_SINK_URL}/otp
       method: POST
       timeout_ms: 5000
       payload:

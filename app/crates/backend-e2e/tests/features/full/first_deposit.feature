@@ -11,10 +11,16 @@ Feature: First Deposit Flow
   @serial
   Scenario: Approved first deposit updates KYC level and metadata
     Given I complete phone OTP verification
+    Then no error occurred
     And I start a first deposit flow for 5000 XAF
+    Then no error occurred
+    Then the first deposit flow is waiting for admin review
     When I approve the pending first deposit admin step
     Then the response status is 200
+    And no error occurred
+    And the staff flow detail shows the completed deposit path
     And CUSS register and approve requests were recorded
+    And the CUSS payloads match the first deposit flow
     And the first deposit metadata is persisted
     When I get the KYC level
     Then the response status is 200
@@ -25,7 +31,15 @@ Feature: First Deposit Flow
   @serial
   Scenario: Rejected first deposit closes the session without CUSS activity
     Given I start a first deposit flow for 7000 XAF
+    Then no error occurred
+    Then the first deposit flow is waiting for admin review
     When I reject the pending first deposit admin step
     Then the response status is 200
+    And no error occurred
+    And the staff flow detail shows the rejected deposit path
     And the reject path closes the session with reason REJECTED_BY_ADMIN
     And no CUSS request was recorded
+    When I get the current user
+    Then the response status is 200
+    And firstDepositVerified is false
+    And the first deposit metadata is not persisted

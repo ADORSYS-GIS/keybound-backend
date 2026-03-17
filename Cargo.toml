@@ -3,6 +3,7 @@ members = [
     "app/bins/backend",
     "app/crates/backend-auth",
     "app/crates/backend-core",
+    "app/crates/backend-env",
     "app/crates/backend-e2e",
     "app/crates/backend-flow-sdk",
     "app/crates/backend-id",
@@ -22,6 +23,7 @@ resolver = "3"
 [workspace.dependencies]
 backend-auth = { path = "app/crates/backend-auth" }
 backend-core = { path = "app/crates/backend-core" }
+backend-env = { path = "app/crates/backend-env" }
 backend-flow-sdk = { path = "app/crates/backend-flow-sdk" }
 backend-id = { path = "app/crates/backend-id" }
 backend-migrate = { path = "app/crates/backend-migrate" }
@@ -78,7 +80,6 @@ utoipa-swagger-ui = { version = "9", features = ["axum", "debug-embed"] }
 
 bytes = "1"
 strum = { version = "0.27", features = ["derive"] }
-jsonpath_lib = "0.3"
 
 diesel = { version = "2.3", features = ["postgres", "chrono", "serde_json", "r2d2"] }
 openssl = { version = "0.10", features = ["vendored"] }

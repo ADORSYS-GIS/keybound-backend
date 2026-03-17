@@ -19,12 +19,11 @@ flow-email-magic = ["flow-sdk"]
 flow-first-deposit = ["flow-sdk"]
 flow-id-document = ["flow-sdk"]
 flow-address-proof = ["flow-sdk"]
-flow-external-kyc = ["flow-sdk", "step-webhook-http"]
+flow-external-kyc = ["flow-sdk"]
 flow-device-enroll = ["flow-sdk"]
 flow-account-update = ["flow-sdk"]
 flow-admin-user-management = ["flow-sdk"]
 
-step-webhook-http = ["dep:jsonpath_lib"]
 auth-token-exchange = []
 auth-jwks = []
 
@@ -82,7 +81,6 @@ serde_yaml = { workspace = true }
 regex = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
-jsonpath_lib = { workspace = true, optional = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 jsonwebtoken = { workspace = true }

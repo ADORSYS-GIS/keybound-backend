@@ -7,8 +7,8 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
+backend-env.workspace = true
 cuid.workspace = true
-regex.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 serde_json.workspace = true

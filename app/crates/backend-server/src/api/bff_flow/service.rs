@@ -94,6 +94,7 @@ pub async fn list_sessions(
         .flow
         .list_sessions(FlowSessionFilter {
             user_id: Some(user_id),
+            user_ids: None,
             session_type: None,
             status: None,
             page: 1,
@@ -991,6 +992,7 @@ pub async fn get_kyc_level(
 
     let filter = backend_repository::FlowSessionFilter {
         user_id: Some(user_id.clone()),
+        user_ids: None,
         session_type: None,
         status: None,
         page: 1,

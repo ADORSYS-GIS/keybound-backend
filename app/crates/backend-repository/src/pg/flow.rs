@@ -110,6 +110,11 @@ impl FlowRepo for FlowRepository {
             count_query = count_query.filter(flow_session::user_id.eq(user_id));
             rows_query = rows_query.filter(flow_session::user_id.eq(user_id));
         }
+        if let Some(user_ids) = filter.user_ids.as_ref() {
+            let nullable_ids: Vec<Option<String>> = user_ids.iter().cloned().map(Some).collect();
+            count_query = count_query.filter(flow_session::user_id.eq_any(nullable_ids.clone()));
+            rows_query = rows_query.filter(flow_session::user_id.eq_any(nullable_ids));
+        }
         if let Some(session_type) = filter.session_type.as_ref() {
             count_query = count_query.filter(flow_session::session_type.eq(session_type));
             rows_query = rows_query.filter(flow_session::session_type.eq(session_type));

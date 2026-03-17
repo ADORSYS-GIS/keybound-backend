@@ -5,8 +5,8 @@
 //! and covers all aspects of the application including server settings,
 //! authentication, storage, and external service integrations.
 
-use crate::error::{Error, Result};
-use regex::Regex;
+use crate::error::Result;
+use backend_env::envsubst;
 use serde::Deserialize;
 use serde_yaml::from_str;
 use std::fs::read_to_string;
@@ -333,49 +333,13 @@ fn default_auth_max_clock_skew_seconds() -> i64 {
 
 /// Load configuration from a YAML file with environment variable expansion.
 ///
-/// Supports `${VAR}` and `${VAR:-default}` syntax for environment variable substitution.
-/// Returns an error if required environment variables are missing.
+/// Uses `envsubst`-style substitution for `$VAR` and `${VAR}`.
+/// Missing variables expand to an empty string and shell default syntax is left untouched.
 pub fn load_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<Config> {
     let content = read_to_string(path)?;
-    let expanded = expand_env_vars(&content)?;
+    let expanded = envsubst(&content);
     let cfg: Config = from_str(&expanded)?;
     Ok(cfg)
-}
-
-fn expand_env_vars(content: &str) -> Result<String> {
-    let re = Regex::new(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)(:-([^}]*))?\}")
-        .map_err(|e| Error::Server(e.to_string()))?;
-    let mut missing_vars = Vec::new();
-
-    let result = re
-        .replace_all(content, |caps: &regex::Captures<'_>| {
-            let var_name = &caps[1];
-            let default_value = caps.get(3).map(|m| m.as_str());
-
-            match std::env::var(var_name) {
-                Ok(val) => val,
-                Err(_) => match default_value {
-                    Some(default) => default.to_owned(),
-                    None => {
-                        missing_vars.push(var_name.to_owned());
-                        caps[0].to_owned()
-                    }
-                },
-            }
-        })
-        .to_string();
-
-    missing_vars.sort_unstable();
-    missing_vars.dedup();
-
-    if !missing_vars.is_empty() {
-        return Err(Error::Server(format!(
-            "Missing environment variables: {}",
-            missing_vars.join(", ")
-        )));
-    }
-
-    Ok(result)
 }
 
 impl Config {
@@ -405,81 +369,33 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use backend_env::envsubst;
     use std::env;
     use std::sync::{LazyLock, Mutex};
 
     static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
-    fn test_expand_env_vars_success() {
+    fn test_envsubst_expands_variables() {
         let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-        unsafe {
-            env::set_var("TEST_VAR_1", "value1");
-            env::set_var("TEST_VAR_2", "value2");
-        }
-
-        let content = "var1: ${TEST_VAR_1}, var2: ${TEST_VAR_2}";
-        let expanded = expand_env_vars(content).unwrap();
-
-        assert_eq!(expanded, "var1: value1, var2: value2");
+        unsafe { env::set_var("TEST_VAR_1", "value1") };
+        let expanded = envsubst("var1: $TEST_VAR_1, var2: ${TEST_VAR_1}");
+        assert_eq!(expanded, "var1: value1, var2: value1");
     }
 
     #[test]
-    fn test_expand_env_vars_default_used_when_missing() {
+    fn test_envsubst_missing_is_empty() {
         let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-        unsafe {
-            env::remove_var("TEST_VAR_WITH_DEFAULT");
-        }
+        unsafe { env::remove_var("TEST_ENV_MISSING") };
+        let expanded = envsubst("endpoint: $TEST_ENV_MISSING");
+        assert_eq!(expanded, "endpoint: ");
+    }
 
+    #[test]
+    fn test_envsubst_leaves_default_syntax_unchanged() {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+        unsafe { env::set_var("TEST_VAR_WITH_DEFAULT", "http://override:9000") };
         let content = "endpoint: ${TEST_VAR_WITH_DEFAULT:-http://minio:9000}";
-        let expanded = expand_env_vars(content).unwrap();
-
-        assert_eq!(expanded, "endpoint: http://minio:9000");
-    }
-
-    #[test]
-    fn test_expand_env_vars_default_overridden_by_env() {
-        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-        unsafe {
-            env::set_var("TEST_VAR_WITH_DEFAULT", "http://override:9000");
-        }
-
-        let content = "endpoint: ${TEST_VAR_WITH_DEFAULT:-http://minio:9000}";
-        let expanded = expand_env_vars(content).unwrap();
-
-        assert_eq!(expanded, "endpoint: http://override:9000");
-    }
-
-    #[test]
-    fn test_expand_env_vars_missing() {
-        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-        unsafe {
-            env::remove_var("MISSING_VAR");
-        }
-
-        let content = "var: ${MISSING_VAR}";
-        let result = expand_env_vars(content);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("Missing environment variables: MISSING_VAR"));
-    }
-
-    #[test]
-    fn test_expand_env_vars_multiple_missing() {
-        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
-        unsafe {
-            env::remove_var("MISSING_VAR_1");
-            env::remove_var("MISSING_VAR_2");
-        }
-
-        let content = "var1: ${MISSING_VAR_1}, var2: ${MISSING_VAR_2}";
-        let result = expand_env_vars(content);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("MISSING_VAR_1"));
-        assert!(err.contains("MISSING_VAR_2"));
+        assert_eq!(envsubst(content), content);
     }
 }

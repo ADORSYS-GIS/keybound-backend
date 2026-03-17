@@ -28,6 +28,7 @@ pub use crate::dto::{
 
 // Re-export error handling types
 pub use crate::error::{AppResult, Error, ErrorMeta, ErrorPayload, Result};
+pub use backend_env::envsubst;
 
 // Re-export configuration types
 pub use config::*;

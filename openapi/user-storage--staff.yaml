@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: KYC Staff Flow API
-  version: 1.0.1
-  description: Staff-only v2 flow operations for admin-managed steps.
+  version: 1.1.0
+  description: Staff-only v2 flow operations for reviewing sessions, inspecting flows, and submitting admin-managed steps.
 
 servers:
   - url: "https://api.example.com"
@@ -12,9 +12,88 @@ security:
 
 tags:
   - name: staff-flow
-    description: Observe and operate on admin-managed flow steps.
+    description: Observe and operate on admin-managed flow sessions, flows, and steps.
 
 paths:
+  /flow/sessions:
+    get:
+      operationId: staffFlowListSessions
+      tags: [ staff-flow ]
+      summary: List KYC sessions for staff review
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: phoneNumber
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sessionType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Matching sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSessionListResponse"
+
+  /flow/sessions/{sessionId}:
+    get:
+      operationId: staffFlowGetSession
+      tags: [ staff-flow ]
+      summary: Get a session with its flows
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSessionDetailResponse"
+
+  /flow/flows/{flowId}:
+    get:
+      operationId: staffFlowGetFlow
+      tags: [ staff-flow ]
+      summary: Get a flow with its steps
+      parameters:
+        - $ref: "#/components/parameters/FlowId"
+      responses:
+        "200":
+          description: Flow detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowDetailResponse"
+
   /flow/steps:
     get:
       operationId: staffFlowListSteps
@@ -31,6 +110,11 @@ paths:
           required: false
           schema:
             type: string
+        - name: phoneNumber
+          in: query
+          required: false
+          schema:
+            type: string
         - name: flowType
           in: query
           required: false
@@ -39,6 +123,12 @@ paths:
       responses:
         "200":
           description: Matching admin steps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StepResponse"
 
   /flow/steps/{stepId}:
     get:
@@ -50,6 +140,10 @@ paths:
       responses:
         "200":
           description: Step detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepResponse"
     post:
       operationId: staffFlowSubmitStep
       tags: [ staff-flow ]
@@ -61,10 +155,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
+              $ref: "#/components/schemas/SubmitStepRequest"
       responses:
         "200":
           description: Step updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepResponse"
 
 components:
   securitySchemes:
@@ -74,9 +172,175 @@ components:
       bearerFormat: JWT
 
   parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+    FlowId:
+      name: flowId
+      in: path
+      required: true
+      schema:
+        type: string
     StepId:
       name: stepId
       in: path
       required: true
       schema:
         type: string
+
+  schemas:
+    SubmitStepRequest:
+      type: object
+      properties:
+        input:
+          type: object
+          additionalProperties: true
+
+    StaffSessionResponse:
+      type: object
+      required: [ id, humanId, sessionType, status, context, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+        humanId:
+          type: string
+        sessionType:
+          type: string
+        status:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        phoneNumber:
+          type: string
+          nullable: true
+        fullName:
+          type: string
+          nullable: true
+        context:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    StaffSessionListResponse:
+      type: object
+      required: [ items, page, limit, total ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffSessionResponse"
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+
+    StaffSessionDetailResponse:
+      type: object
+      required: [ session, flows ]
+      properties:
+        session:
+          $ref: "#/components/schemas/StaffSessionResponse"
+        flows:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowResponse"
+
+    FlowResponse:
+      type: object
+      required:
+        [ id, humanId, sessionId, flowType, status, stepIds, context, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+        humanId:
+          type: string
+        sessionId:
+          type: string
+        flowType:
+          type: string
+        status:
+          type: string
+        currentStep:
+          type: string
+          nullable: true
+        stepIds:
+          type: object
+          additionalProperties: true
+        context:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    FlowDetailResponse:
+      type: object
+      required: [ flow, steps ]
+      properties:
+        flow:
+          $ref: "#/components/schemas/FlowResponse"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/StepResponse"
+
+    StepResponse:
+      type: object
+      required:
+        [ id, humanId, flowId, stepType, actor, status, attemptNo, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+        humanId:
+          type: string
+        flowId:
+          type: string
+        stepType:
+          type: string
+        actor:
+          type: string
+        status:
+          type: string
+        attemptNo:
+          type: integer
+        input:
+          type: object
+          additionalProperties: true
+          nullable: true
+        output:
+          type: object
+          additionalProperties: true
+          nullable: true
+        error:
+          type: object
+          additionalProperties: true
+          nullable: true
+        nextRetryAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true

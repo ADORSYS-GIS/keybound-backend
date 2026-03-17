@@ -8,6 +8,9 @@ use reqwest::Method;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+const FIXTURE_FULL_NAME: &str = "E2E Subject";
+const FIXTURE_PHONE_NUMBER: &str = "+237690123456";
+
 #[derive(Debug, Default)]
 pub struct FlowState {
     pub session_id: Option<String>,
@@ -15,6 +18,7 @@ pub struct FlowState {
     pub phone_verify_step_id: Option<String>,
     pub deposit_flow_id: Option<String>,
     pub admin_step_id: Option<String>,
+    pub deposit_amount: Option<i64>,
     pub phone_number: Option<String>,
     pub otp_code: Option<String>,
 }
@@ -279,6 +283,59 @@ async fn cuss_requests(world: &FullE2eWorld) -> Result<Vec<Value>> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default())
+}
+
+async fn get_staff_flow_detail(world: &FullE2eWorld, flow_id: &str) -> Result<Value> {
+    let response = send_json(
+        world.client()?,
+        Method::GET,
+        &format!("{}/flow/flows/{}", world.staff_base()?, flow_id),
+        Some(world.token()?),
+        None,
+    )
+    .await?;
+
+    if response.status != 200 {
+        return Err(anyhow!(
+            "get staff flow failed ({}): {}",
+            response.status,
+            response.text
+        ));
+    }
+
+    response
+        .body
+        .ok_or_else(|| anyhow!("staff flow response body missing"))
+}
+
+async fn get_staff_step_detail(world: &FullE2eWorld, step_id: &str) -> Result<Value> {
+    let response = send_json(
+        world.client()?,
+        Method::GET,
+        &format!("{}/flow/steps/{}", world.staff_base()?, step_id),
+        Some(world.token()?),
+        None,
+    )
+    .await?;
+
+    if response.status != 200 {
+        return Err(anyhow!(
+            "get staff step failed ({}): {}",
+            response.status,
+            response.text
+        ));
+    }
+
+    response
+        .body
+        .ok_or_else(|| anyhow!("staff step response body missing"))
+}
+
+fn find_step<'a>(steps: &'a [Value], step_type: &str) -> Result<&'a Value> {
+    steps
+        .iter()
+        .find(|step| step.get("stepType").and_then(Value::as_str) == Some(step_type))
+        .ok_or_else(|| anyhow!("step `{step_type}` not found"))
 }
 
 #[given("the e2e test environment is initialized")]
@@ -632,13 +689,25 @@ async fn start_first_deposit(world: &mut FullE2eWorld, amount: i64) {
         )
         .await
         {
-            Ok(response) => match require_id(&response.body, "id") {
-                Ok(id) => id,
-                Err(error) => {
-                    world.error = Some(error.to_string());
+            Ok(response) => {
+                if response.status != 201 {
+                    world.error = Some(format!(
+                        "create session failed ({}): {}",
+                        response.status, response.text
+                    ));
                     return;
                 }
-            },
+                match require_id(&response.body, "id") {
+                    Ok(id) => id,
+                    Err(error) => {
+                        world.error = Some(format!(
+                            "create session missing id: {} | body={}",
+                            error, response.text
+                        ));
+                        return;
+                    }
+                }
+            }
             Err(error) => {
                 world.error = Some(error.to_string());
                 return;
@@ -661,10 +730,21 @@ async fn start_first_deposit(world: &mut FullE2eWorld, amount: i64) {
             return;
         }
     };
+    if flow.status != 201 {
+        world.error = Some(format!(
+            "create first_deposit flow failed ({}): {}",
+            flow.status, flow.text
+        ));
+        return;
+    }
+
     let flow_id = match require_id(&flow.body, "id") {
         Ok(value) => value,
         Err(error) => {
-            world.error = Some(error.to_string());
+            world.error = Some(format!(
+                "create first_deposit flow missing id: {} | body={}",
+                error, flow.text
+            ));
             return;
         }
     };
@@ -707,6 +787,7 @@ async fn start_first_deposit(world: &mut FullE2eWorld, amount: i64) {
 
     world.flow.session_id = Some(session_id);
     world.flow.deposit_flow_id = Some(flow_id);
+    world.flow.deposit_amount = Some(amount);
 }
 
 #[when("I approve the pending first deposit admin step")]
@@ -947,6 +1028,231 @@ async fn first_deposit_metadata_persisted(world: &mut FullE2eWorld) {
         metadata.pointer("/firstDeposit/status"),
         Some(&json!("APPROVED"))
     );
+    assert_eq!(
+        metadata.pointer("/firstDeposit/transactionId"),
+        Some(&json!(20))
+    );
+}
+
+#[then("the first deposit metadata is not persisted")]
+async fn first_deposit_metadata_not_persisted(world: &mut FullE2eWorld) {
+    let response = send_json(
+        world.client().unwrap(),
+        Method::GET,
+        &format!(
+            "{}/flow/users/{}",
+            world.bff_base().unwrap(),
+            world.subject().unwrap()
+        ),
+        Some(world.token().unwrap()),
+        None,
+    )
+    .await
+    .expect("user request should succeed");
+
+    let metadata = response
+        .body
+        .as_ref()
+        .and_then(|body| body.get("metadata"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+
+    assert_eq!(metadata.pointer("/fineractId"), None);
+    assert_eq!(metadata.pointer("/savingsAccountId"), None);
+    assert_eq!(metadata.pointer("/firstDeposit/status"), None);
+    assert_eq!(metadata.pointer("/firstDeposit/transactionId"), None);
+}
+
+#[then("the first deposit flow is waiting for admin review")]
+async fn first_deposit_waiting_for_admin(world: &mut FullE2eWorld) {
+    let flow_id = world
+        .flow
+        .deposit_flow_id
+        .clone()
+        .expect("deposit flow id should be set");
+    let admin_step_id = world
+        .flow
+        .admin_step_id
+        .clone()
+        .expect("admin step id should be set");
+
+    let staff_step = get_staff_step_detail(world, &admin_step_id)
+        .await
+        .expect("staff step should load");
+    assert_eq!(
+        staff_step.get("stepType").and_then(Value::as_str),
+        Some("await_admin_decision")
+    );
+    assert_eq!(
+        staff_step.get("actor").and_then(Value::as_str),
+        Some("ADMIN")
+    );
+    assert_eq!(
+        staff_step.get("status").and_then(Value::as_str),
+        Some("WAITING")
+    );
+
+    let flow_detail = get_staff_flow_detail(world, &flow_id)
+        .await
+        .expect("staff flow should load");
+    let steps = flow_detail
+        .get("steps")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    assert_eq!(
+        find_step(&steps, "init_first_deposit")
+            .ok()
+            .and_then(|step| step.get("status"))
+            .and_then(Value::as_str),
+        Some("COMPLETED")
+    );
+    assert_eq!(
+        find_step(&steps, "get_user")
+            .ok()
+            .and_then(|step| step.get("status"))
+            .and_then(Value::as_str),
+        Some("COMPLETED")
+    );
+    assert_eq!(
+        find_step(&steps, "await_admin_decision")
+            .ok()
+            .and_then(|step| step.get("status"))
+            .and_then(Value::as_str),
+        Some("WAITING")
+    );
+}
+
+#[then("the staff flow detail shows the completed deposit path")]
+async fn completed_deposit_path_visible(world: &mut FullE2eWorld) {
+    let flow_id = world
+        .flow
+        .deposit_flow_id
+        .clone()
+        .expect("deposit flow id should be set");
+    let flow_detail = get_staff_flow_detail(world, &flow_id)
+        .await
+        .expect("staff flow should load");
+    let steps = flow_detail
+        .get("steps")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    for step_type in [
+        "await_admin_decision",
+        "decide_admin",
+        "cuss_register_customer",
+        "cuss_approve_and_deposit",
+        "update_deposit_metadata",
+    ] {
+        assert_eq!(
+            find_step(&steps, step_type)
+                .ok()
+                .and_then(|step| step.get("status"))
+                .and_then(Value::as_str),
+            Some("COMPLETED"),
+            "step `{step_type}` should be completed"
+        );
+    }
+    assert_ne!(
+        find_step(&steps, "close_session")
+            .ok()
+            .and_then(|step| step.get("status"))
+            .and_then(Value::as_str),
+        Some("COMPLETED"),
+        "close_session should not be completed on approve"
+    );
+}
+
+#[then("the staff flow detail shows the rejected deposit path")]
+async fn rejected_deposit_path_visible(world: &mut FullE2eWorld) {
+    let flow_id = world
+        .flow
+        .deposit_flow_id
+        .clone()
+        .expect("deposit flow id should be set");
+    let flow_detail = get_staff_flow_detail(world, &flow_id)
+        .await
+        .expect("staff flow should load");
+    let steps = flow_detail
+        .get("steps")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    for step_type in ["await_admin_decision", "decide_admin", "close_session"] {
+        assert_eq!(
+            find_step(&steps, step_type)
+                .ok()
+                .and_then(|step| step.get("status"))
+                .and_then(Value::as_str),
+            Some("COMPLETED"),
+            "step `{step_type}` should be completed"
+        );
+    }
+
+    for step_type in [
+        "cuss_register_customer",
+        "cuss_approve_and_deposit",
+        "update_deposit_metadata",
+    ] {
+        assert_ne!(
+            find_step(&steps, step_type)
+                .ok()
+                .and_then(|step| step.get("status"))
+                .and_then(Value::as_str),
+            Some("COMPLETED"),
+            "step `{step_type}` should not be completed on reject"
+        );
+    }
+}
+
+#[then("the CUSS payloads match the first deposit flow")]
+async fn cuss_payloads_match_first_deposit(world: &mut FullE2eWorld) {
+    let requests = cuss_requests(world)
+        .await
+        .expect("cuss requests should load");
+    let session_id = world
+        .flow
+        .session_id
+        .clone()
+        .expect("session id should be set");
+    let deposit_amount = world
+        .flow
+        .deposit_amount
+        .expect("deposit amount should be set");
+
+    let register_request = requests
+        .iter()
+        .find(|item| item.get("endpoint").and_then(Value::as_str) == Some("register"))
+        .expect("register request missing");
+    let approve_request = requests
+        .iter()
+        .find(|item| item.get("endpoint").and_then(Value::as_str) == Some("approve"))
+        .expect("approve request missing");
+
+    assert_eq!(
+        register_request.pointer("/payload/externalId"),
+        Some(&json!(session_id))
+    );
+    assert_eq!(
+        register_request.pointer("/payload/fullName"),
+        Some(&json!(FIXTURE_FULL_NAME))
+    );
+    assert_eq!(
+        register_request.pointer("/payload/phone"),
+        Some(&json!(FIXTURE_PHONE_NUMBER))
+    );
+    assert_eq!(
+        approve_request.pointer("/payload/depositAmount"),
+        Some(&json!(deposit_amount))
+    );
+    assert_eq!(
+        approve_request.pointer("/payload/savingsAccountId"),
+        Some(&json!(2))
+    );
 }
 
 #[then("the reject path closes the session with reason REJECTED_BY_ADMIN")]
@@ -983,6 +1289,7 @@ async fn cuss_requests_recorded(world: &mut FullE2eWorld) {
     let requests = cuss_requests(world)
         .await
         .expect("cuss requests should load");
+    assert_eq!(requests.len(), 2, "unexpected CUSS requests: {requests:?}");
     assert!(
         requests
             .iter()

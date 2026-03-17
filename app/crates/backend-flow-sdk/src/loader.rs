@@ -2,6 +2,7 @@ use crate::{
     FlowDefinition, FlowError, FlowRegistry, ImportFormat, SessionDefinition,
     import_flow_definition, import_session_definition,
 };
+use backend_env::envsubst;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
@@ -195,15 +196,13 @@ impl FlowConfigLoader {
     }
 
     fn load_flow_file(&self, path: &std::path::Path) -> Result<FlowDefinition, FlowError> {
-        let content = expand_env_vars(&std::fs::read_to_string(path)?)
-            .map_err(|e| FlowError::InvalidDefinition(e.to_string()))?;
+        let content = envsubst(&std::fs::read_to_string(path)?);
         let format = ImportFormat::from_path(path);
         import_flow_definition(&content, format)
     }
 
     fn load_session_file(&self, path: &std::path::Path) -> Result<SessionDefinition, FlowError> {
-        let content = expand_env_vars(&std::fs::read_to_string(path)?)
-            .map_err(|e| FlowError::InvalidDefinition(e.to_string()))?;
+        let content = envsubst(&std::fs::read_to_string(path)?);
         let format = ImportFormat::from_path(path);
         import_session_definition(&content, format)
     }
@@ -308,42 +307,6 @@ impl FlowConfigLoader {
     }
 }
 
-fn expand_env_vars(content: &str) -> Result<String, String> {
-    let re = regex::Regex::new(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)(:-([^}]*))?\}")
-        .map_err(|e: regex::Error| e.to_string())?;
-    let mut missing_vars = Vec::new();
-
-    let result = re
-        .replace_all(content, |caps: &regex::Captures<'_>| {
-            let var_name = &caps[1];
-            let default_value = caps.get(3).map(|m: regex::Match<'_>| m.as_str());
-
-            match std::env::var(var_name) {
-                Ok(val) => val,
-                Err(_) => match default_value {
-                    Some(default) => default.to_owned(),
-                    None => {
-                        missing_vars.push(var_name.to_owned());
-                        caps[0].to_owned()
-                    }
-                },
-            }
-        })
-        .to_string();
-
-    missing_vars.sort_unstable();
-    missing_vars.dedup();
-
-    if missing_vars.is_empty() {
-        Ok(result)
-    } else {
-        Err(format!(
-            "Missing environment variables: {}",
-            missing_vars.join(", ")
-        ))
-    }
-}
-
 #[cfg(feature = "embedded-config")]
 #[macro_export]
 macro_rules! embed_configs {
@@ -357,8 +320,12 @@ macro_rules! embed_configs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
     use std::io::Write;
+    use std::sync::{LazyLock, Mutex};
     use tempfile::TempDir;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn create_test_flow_yaml() -> &'static str {
         r#"
@@ -431,6 +398,42 @@ allowed_flows:
 
         assert_eq!(configs.sessions.len(), 1);
         assert_eq!(configs.sessions[0].session_type, "TEST_SESSION");
+    }
+
+    #[test]
+    fn test_load_flow_from_file_uses_envsubst_semantics() {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+        unsafe {
+            env::set_var("FLOW_TYPE_ENV", "ENV_FLOW");
+            env::remove_var("FLOW_PREFIX_ENV");
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let flows_dir = temp_dir.path().join("flows");
+        std::fs::create_dir(&flows_dir).unwrap();
+
+        let flow_file = flows_dir.join("env_flow.yaml");
+        let mut file = std::fs::File::create(&flow_file).unwrap();
+        file.write_all(
+            br#"
+flow_type: $FLOW_TYPE_ENV
+human_id_prefix: ${FLOW_PREFIX_ENV}
+initial_step: test_step
+steps:
+  test_step:
+    action: test_action
+    actor: SYSTEM
+    ok: COMPLETE
+"#,
+        )
+        .unwrap();
+
+        let loader = FlowConfigLoader::new(&flows_dir, temp_dir.path().join("sessions"));
+        let configs = loader.load_from_fs().unwrap();
+
+        assert_eq!(configs.flows.len(), 1);
+        assert_eq!(configs.flows[0].flow_type, "ENV_FLOW");
+        assert_eq!(configs.flows[0].human_id_prefix, "");
     }
 
     #[test]

@@ -12,6 +12,7 @@ embedded-config = ["include_dir"]
 
 [dependencies]
 async-trait = { workspace = true }
+backend-env = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

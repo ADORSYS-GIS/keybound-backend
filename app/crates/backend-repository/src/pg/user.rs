@@ -328,6 +328,21 @@ impl UserRepo for UserRepository {
     }
 
     #[instrument(skip(self))]
+    async fn find_users_by_phone(&self, phone: &str) -> RepoResult<Vec<db::UserRow>> {
+        debug!("Finding users by phone: {}", phone);
+        use backend_model::schema::app_user::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        app_user
+            .filter(phone_number.eq(phone).or(username.eq(phone)))
+            .order(created_at.desc())
+            .load::<db::UserRow>(&mut conn)
+            .await
+            .map_err(Into::into)
+    }
+
+    #[instrument(skip(self))]
     async fn resolve_or_create_user_by_phone(
         &self,
         realm_val: &str,

@@ -44,7 +44,7 @@ steps:
     action: WEBHOOK_HTTP
     actor: SYSTEM
     config:
-      url: ${CUSS_URL:-http://cuss:8080}/api/registration/register
+      url: ${CUSS_URL}/api/registration/register
       method: POST
       timeout_ms: 10000
       payload:
@@ -68,7 +68,7 @@ steps:
     action: WEBHOOK_HTTP
     actor: SYSTEM
     config:
-      url: ${CUSS_URL:-http://cuss:8080}/api/registration/approve-and-deposit
+      url: ${CUSS_URL}/api/registration/approve-and-deposit
       method: POST
       timeout_ms: 10000
       payload:
