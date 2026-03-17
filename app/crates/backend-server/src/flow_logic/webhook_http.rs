@@ -184,9 +184,10 @@ impl Step for WebhookHttpStep {
                         let mut is_success = status.is_success();
 
                         if let Some(cond) = &config.success_condition
-                            && let Some(codes) = &cond.status_codes {
-                                is_success = codes.contains(&status.as_u16());
-                            }
+                            && let Some(codes) = &cond.status_codes
+                        {
+                            is_success = codes.contains(&status.as_u16());
+                        }
 
                         if is_success {
                             let mut updates = ContextUpdates::default();
@@ -194,92 +195,84 @@ impl Step for WebhookHttpStep {
 
                             if (!config.extraction_rules.is_empty()
                                 || config.success_condition.is_some())
-                                && let Ok(resp_json) = response.json::<Value>().await {
-                                    // check specific json pointer condition if needed
-                                    if let Some(cond) = &config.success_condition
-                                        && let (Some(ptr), Some(exp)) =
-                                            (&cond.json_pointer, &cond.expected_value)
-                                        {
-                                            if let Some(val) = resp_json.pointer(ptr) {
-                                                if val != exp {
-                                                    is_success = false;
-                                                }
-                                            } else {
-                                                is_success = false;
-                                            }
+                                && let Ok(resp_json) = response.json::<Value>().await
+                            {
+                                // check specific json pointer condition if needed
+                                if let Some(cond) = &config.success_condition
+                                    && let (Some(ptr), Some(exp)) =
+                                        (&cond.json_pointer, &cond.expected_value)
+                                {
+                                    if let Some(val) = resp_json.pointer(ptr) {
+                                        if val != exp {
+                                            is_success = false;
                                         }
+                                    } else {
+                                        is_success = false;
+                                    }
+                                }
 
-                                    if is_success {
-                                        for rule in &config.extraction_rules {
-                                            if let Some(extracted) =
-                                                resp_json.pointer(&rule.json_pointer)
-                                            {
-                                                match rule.target_context {
-                                                    ExtractionTarget::SessionContext => {
-                                                        let mut patch =
-                                                            updates
-                                                                .session_context_patch
-                                                                .unwrap_or_else(|| {
-                                                                    Value::Object(
-                                                                        serde_json::Map::new(),
-                                                                    )
-                                                                });
-                                                        apply_patch(
-                                                            &mut patch,
-                                                            &rule.target_path,
-                                                            extracted.clone(),
-                                                        );
-                                                        updates.session_context_patch = Some(patch);
-                                                    }
-                                                    ExtractionTarget::FlowContext => {
-                                                        let mut patch =
-                                                            updates
-                                                                .flow_context_patch
-                                                                .unwrap_or_else(|| {
-                                                                    Value::Object(
-                                                                        serde_json::Map::new(),
-                                                                    )
-                                                                });
-                                                        apply_patch(
-                                                            &mut patch,
-                                                            &rule.target_path,
-                                                            extracted.clone(),
-                                                        );
-                                                        updates.flow_context_patch = Some(patch);
-                                                    }
-                                                    ExtractionTarget::UserMetadata => {
-                                                        let mut patch =
-                                                            updates
-                                                                .user_metadata_patch
-                                                                .unwrap_or_else(|| {
-                                                                    Value::Object(
-                                                                        serde_json::Map::new(),
-                                                                    )
-                                                                });
-                                                        apply_patch(
-                                                            &mut patch,
-                                                            &rule.target_path,
-                                                            extracted.clone(),
-                                                        );
-                                                        updates.user_metadata_patch = Some(patch);
-                                                    }
-                                                    ExtractionTarget::StepOutput => {
-                                                        let mut patch =
-                                                            Value::Object(step_output.clone());
-                                                        apply_patch(
-                                                            &mut patch,
-                                                            &rule.target_path,
-                                                            extracted.clone(),
-                                                        );
-                                                        if let Value::Object(m) = patch {
-                                                            step_output = m;
-                                                        }
+                                if is_success {
+                                    for rule in &config.extraction_rules {
+                                        if let Some(extracted) =
+                                            resp_json.pointer(&rule.json_pointer)
+                                        {
+                                            match rule.target_context {
+                                                ExtractionTarget::SessionContext => {
+                                                    let mut patch = updates
+                                                        .session_context_patch
+                                                        .unwrap_or_else(|| {
+                                                            Value::Object(serde_json::Map::new())
+                                                        });
+                                                    apply_patch(
+                                                        &mut patch,
+                                                        &rule.target_path,
+                                                        extracted.clone(),
+                                                    );
+                                                    updates.session_context_patch = Some(patch);
+                                                }
+                                                ExtractionTarget::FlowContext => {
+                                                    let mut patch = updates
+                                                        .flow_context_patch
+                                                        .unwrap_or_else(|| {
+                                                            Value::Object(serde_json::Map::new())
+                                                        });
+                                                    apply_patch(
+                                                        &mut patch,
+                                                        &rule.target_path,
+                                                        extracted.clone(),
+                                                    );
+                                                    updates.flow_context_patch = Some(patch);
+                                                }
+                                                ExtractionTarget::UserMetadata => {
+                                                    let mut patch = updates
+                                                        .user_metadata_patch
+                                                        .unwrap_or_else(|| {
+                                                            Value::Object(serde_json::Map::new())
+                                                        });
+                                                    apply_patch(
+                                                        &mut patch,
+                                                        &rule.target_path,
+                                                        extracted.clone(),
+                                                    );
+                                                    updates.user_metadata_patch = Some(patch);
+                                                }
+                                                ExtractionTarget::StepOutput => {
+                                                    let mut patch =
+                                                        Value::Object(step_output.clone());
+                                                    apply_patch(
+                                                        &mut patch,
+                                                        &rule.target_path,
+                                                        extracted.clone(),
+                                                    );
+                                                    if let Value::Object(m) = patch {
+                                                        step_output = m;
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            }
 
                             if is_success {
                                 return Ok(StepOutcome::Done {
@@ -292,13 +285,12 @@ impl Step for WebhookHttpStep {
                         warn!("Webhook non-success status: {}", status);
                         let retryable = status.is_server_error()
                             || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
-                        if retryable
-                            && let Some(policy) = config.retry_policy {
-                                // Normally we would track attempts. For now, just retry
-                                return Ok(StepOutcome::Retry {
-                                    after: Duration::from_millis(policy.backoff_ms),
-                                });
-                            }
+                        if retryable && let Some(policy) = config.retry_policy {
+                            // Normally we would track attempts. For now, just retry
+                            return Ok(StepOutcome::Retry {
+                                after: Duration::from_millis(policy.backoff_ms),
+                            });
+                        }
                         Ok(StepOutcome::Failed {
                             error: format!("http_error_{}", status.as_u16()),
                             retryable: false,
@@ -330,33 +322,35 @@ pub(crate) fn render_template_str(template: &str, ctx: &StepContext) -> String {
 
     // session.*
     if result.contains("{{session.")
-        && let Value::Object(map) = &ctx.session_context {
-            for (k, v) in map {
-                let pattern = format!("{{{{session.{}}}}}", k);
-                if result.contains(&pattern) {
-                    let val_str = match v {
-                        Value::String(s) => s.clone(),
-                        _ => v.to_string(),
-                    };
-                    result = result.replace(&pattern, &val_str);
-                }
+        && let Value::Object(map) = &ctx.session_context
+    {
+        for (k, v) in map {
+            let pattern = format!("{{{{session.{}}}}}", k);
+            if result.contains(&pattern) {
+                let val_str = match v {
+                    Value::String(s) => s.clone(),
+                    _ => v.to_string(),
+                };
+                result = result.replace(&pattern, &val_str);
             }
         }
+    }
 
     // flow.context.*
     if result.contains("{{flow.context.")
-        && let Value::Object(map) = &ctx.flow_context {
-            for (k, v) in map {
-                let pattern = format!("{{{{flow.context.{}}}}}", k);
-                if result.contains(&pattern) {
-                    let val_str = match v {
-                        Value::String(s) => s.clone(),
-                        _ => v.to_string(),
-                    };
-                    result = result.replace(&pattern, &val_str);
-                }
+        && let Value::Object(map) = &ctx.flow_context
+    {
+        for (k, v) in map {
+            let pattern = format!("{{{{flow.context.{}}}}}", k);
+            if result.contains(&pattern) {
+                let val_str = match v {
+                    Value::String(s) => s.clone(),
+                    _ => v.to_string(),
+                };
+                result = result.replace(&pattern, &val_str);
             }
         }
+    }
 
     // Also support session_id, flow_id
     result = result.replace("{{session_id}}", &ctx.session_id);

@@ -125,16 +125,14 @@ fn load_imports(path: &Path) -> Result<backend_server::flow_registry::RegistryIm
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if ext.eq_ignore_ascii_case("json")
+            if path.is_file()
+                && let Some(ext) = path.extension().and_then(|s| s.to_str())
+                    && (ext.eq_ignore_ascii_case("json")
                         || ext.eq_ignore_ascii_case("yaml")
-                        || ext.eq_ignore_ascii_case("yml")
+                        || ext.eq_ignore_ascii_case("yml"))
                     {
                         parse_import_file(&path, &mut imports)?;
                     }
-                }
-            }
         }
     } else {
         parse_import_file(path, &mut imports)?;
@@ -199,7 +197,7 @@ fn run_export(target: Option<&str>, all: bool, output: Option<&Path>) -> Result<
 
                 steps.push(FlowStepDefinition {
                     step_type: step.step_type().to_owned(),
-                    actor: step.actor().clone(),
+                    actor: step.actor(),
                     human_id: step.human_id().to_owned(),
                     feature: step.feature().map(|f| f.to_owned()),
                     config: Some(serde_json::json!({})),

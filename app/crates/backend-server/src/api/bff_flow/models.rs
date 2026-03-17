@@ -51,6 +51,7 @@ pub struct UserResponse {
     pub email_verified: bool,
     pub phone_number: Option<String>,
     pub disabled: bool,
+    pub metadata: Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -189,6 +190,7 @@ impl From<backend_model::db::UserRow> for UserResponse {
             email_verified: row.email_verified,
             phone_number: row.phone_number,
             disabled: row.disabled,
+            metadata: row.metadata,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

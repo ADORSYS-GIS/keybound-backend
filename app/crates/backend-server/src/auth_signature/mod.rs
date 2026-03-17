@@ -42,11 +42,12 @@ pub fn validate_public_key_match(provided_jwk: &str, bound_jwk: &str) -> Result<
 /// Validates that the optional user ID hint matches the device owner.
 pub fn validate_user_id_hint(hint: Option<&str>, device_owner_id: &str) -> Result<()> {
     if let Some(hint_id) = hint
-        && hint_id != device_owner_id {
-            return Err(Error::unauthorized(
-                "x-auth-user-id does not match device owner",
-            ));
-        }
+        && hint_id != device_owner_id
+    {
+        return Err(Error::unauthorized(
+            "x-auth-user-id does not match device owner",
+        ));
+    }
 
     Ok(())
 }

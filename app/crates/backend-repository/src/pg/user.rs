@@ -424,24 +424,24 @@ impl UserRepo for UserRepository {
             .map_err(Into::<backend_core::Error>::into)?
             && let (Some(base_obj), Some(patch_obj)) =
                 (user.metadata.as_object_mut(), metadata_patch.as_object())
-            {
-                for (k, v) in patch_obj {
-                    if v.is_null() {
-                        base_obj.remove(k);
-                    } else {
-                        base_obj.insert(k.clone(), v.clone());
-                    }
+        {
+            for (k, v) in patch_obj {
+                if v.is_null() {
+                    base_obj.remove(k);
+                } else {
+                    base_obj.insert(k.clone(), v.clone());
                 }
-
-                diesel::update(app_user.filter(user_id.eq(user_id_val)))
-                    .set((
-                        metadata.eq(user.metadata),
-                        updated_at.eq(chrono::Utc::now()),
-                    ))
-                    .execute(&mut conn)
-                    .await
-                    .map_err(Into::<backend_core::Error>::into)?;
             }
+
+            diesel::update(app_user.filter(user_id.eq(user_id_val)))
+                .set((
+                    metadata.eq(user.metadata),
+                    updated_at.eq(chrono::Utc::now()),
+                ))
+                .execute(&mut conn)
+                .await
+                .map_err(Into::<backend_core::Error>::into)?;
+        }
 
         Ok(())
     }

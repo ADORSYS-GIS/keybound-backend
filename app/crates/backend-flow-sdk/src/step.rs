@@ -50,7 +50,11 @@ pub trait Step: Send + Sync + 'static {
         Ok(())
     }
 
-    async fn verify_input(&self, _ctx: &StepContext, _input: &Value) -> Result<StepOutcome, FlowError> {
+    async fn verify_input(
+        &self,
+        _ctx: &StepContext,
+        _input: &Value,
+    ) -> Result<StepOutcome, FlowError> {
         Ok(StepOutcome::Done {
             output: Some(json!({"verified": true})),
             updates: None,

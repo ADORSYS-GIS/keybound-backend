@@ -9,6 +9,7 @@ authors.workspace = true
 [features]
 test-utils = ["dep:mockall"]
 it-tests = []
+e2e-tests = ["dep:wiremock"]
 
 default = ["all-flows"]
 
@@ -26,6 +27,8 @@ flow-admin-user-management = ["flow-sdk"]
 step-webhook-http = ["dep:jsonpath_lib"]
 auth-token-exchange = []
 auth-jwks = []
+
+flow-cuss-integration = ["flow-first-deposit"]
 
 # Legacy aliases kept for backward compatibility.
 flow-deposit = ["flow-first-deposit"]
@@ -76,6 +79,7 @@ serde_json = { workspace = true }
 json-patch = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
+regex = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 jsonpath_lib = { workspace = true, optional = true }
@@ -88,6 +92,7 @@ apalis-redis = { workspace = true }
 bytes = { workspace = true }
 strum = { workspace = true }
 mockall = { workspace = true, optional = true }
+wiremock = { workspace = true, optional = true }
 
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -108,3 +113,11 @@ diesel = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+[[test]]
+name = "flow_cuss_e2e"
+path = "tests/flow_cuss_e2e.rs"
+required-features = ["e2e-tests", "flow-sdk"]

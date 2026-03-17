@@ -15,6 +15,8 @@ pub const SESSION_TYPE_ADMIN_OPERATIONS: &str = "ADMIN_OPERATIONS";
 pub struct RegistryImports {
     pub flows: Vec<backend_flow_sdk::flow::FlowDefinition>,
     pub sessions: Vec<backend_flow_sdk::SessionDefinition>,
+    #[cfg(feature = "flow-cuss-integration")]
+    pub cuss_url: Option<String>,
 }
 
 pub fn build_registry(imports: RegistryImports) -> Result<FlowRegistry, FlowError> {
@@ -60,22 +62,114 @@ pub fn build_registry(imports: RegistryImports) -> Result<FlowRegistry, FlowErro
 
     #[cfg(feature = "flow-first-deposit")]
     {
-        let flow = static_flow(
-            "FIRST_DEPOSIT",
-            "first_deposit",
-            Some("flow-first-deposit"),
-            "AWAIT_PAYMENT_CONFIRMATION",
-            flow_logic::first_deposit::steps(),
-            &[
-                (
-                    "AWAIT_PAYMENT_CONFIRMATION",
-                    "APPROVE_AND_DEPOSIT",
-                    Some("FAILED"),
-                ),
-                ("APPROVE_AND_DEPOSIT", "COMPLETE", Some("FAILED")),
-            ],
-        );
-        register_flow_bundle(&mut registry, flow);
+        #[cfg(feature = "flow-cuss-integration")]
+        {
+            if let Some(cuss_url) = imports.cuss_url.clone() {
+                let steps: Vec<StepRef> = vec![
+                    Arc::new(super::flow_logic::builtin_steps::CheckUserExistsStep),
+                    Arc::new(super::flow_logic::builtin_steps::ValidateDepositStep),
+                    Arc::new(super::flow_logic::first_deposit::AwaitPaymentConfirmationStep),
+                ];
+                let mut all_steps = steps;
+                all_steps.extend(super::flow_logic::cuss_integration::steps(cuss_url));
+
+                let mut transitions = HashMap::new();
+                transitions.insert(
+                    "check_user_exists".to_string(),
+                    StepTransition {
+                        on_success: "validate_deposit".to_string(),
+                        on_failure: Some("FAILED".to_string()),
+                    },
+                );
+                transitions.insert(
+                    "validate_deposit".to_string(),
+                    StepTransition {
+                        on_success: "AWAIT_PAYMENT_CONFIRMATION".to_string(),
+                        on_failure: Some("FAILED".to_string()),
+                    },
+                );
+                transitions.insert(
+                    "AWAIT_PAYMENT_CONFIRMATION".to_string(),
+                    StepTransition {
+                        on_success: "CUSS_REGISTER_CUSTOMER".to_string(),
+                        on_failure: Some("FAILED".to_string()),
+                    },
+                );
+                transitions.insert(
+                    "CUSS_REGISTER_CUSTOMER".to_string(),
+                    StepTransition {
+                        on_success: "CUSS_APPROVE_AND_DEPOSIT".to_string(),
+                        on_failure: Some("FAILED".to_string()),
+                    },
+                );
+                transitions.insert(
+                    "CUSS_APPROVE_AND_DEPOSIT".to_string(),
+                    StepTransition {
+                        on_success: "COMPLETE".to_string(),
+                        on_failure: Some("FAILED".to_string()),
+                    },
+                );
+
+                let flow = Arc::new(StaticFlow {
+                    flow_type: "FIRST_DEPOSIT",
+                    human_id: "first_deposit",
+                    feature: Some("flow-first-deposit"),
+                    steps: all_steps,
+                    initial_step: "check_user_exists",
+                    transitions,
+                });
+                register_flow_bundle(&mut registry, flow);
+            } else {
+                let flow = static_flow(
+                    "FIRST_DEPOSIT",
+                    "first_deposit",
+                    Some("flow-first-deposit"),
+                    "check_user_exists",
+                    flow_logic::first_deposit::steps(),
+                    &[
+                        ("check_user_exists", "validate_deposit", Some("FAILED")),
+                        (
+                            "validate_deposit",
+                            "AWAIT_PAYMENT_CONFIRMATION",
+                            Some("FAILED"),
+                        ),
+                        (
+                            "AWAIT_PAYMENT_CONFIRMATION",
+                            "APPROVE_AND_DEPOSIT",
+                            Some("FAILED"),
+                        ),
+                        ("APPROVE_AND_DEPOSIT", "COMPLETE", Some("FAILED")),
+                    ],
+                );
+                register_flow_bundle(&mut registry, flow);
+            }
+        }
+
+        #[cfg(not(feature = "flow-cuss-integration"))]
+        {
+            let flow = static_flow(
+                "FIRST_DEPOSIT",
+                "first_deposit",
+                Some("flow-first-deposit"),
+                "check_user_exists",
+                flow_logic::first_deposit::steps(),
+                &[
+                    ("check_user_exists", "validate_deposit", Some("FAILED")),
+                    (
+                        "validate_deposit",
+                        "AWAIT_PAYMENT_CONFIRMATION",
+                        Some("FAILED"),
+                    ),
+                    (
+                        "AWAIT_PAYMENT_CONFIRMATION",
+                        "APPROVE_AND_DEPOSIT",
+                        Some("FAILED"),
+                    ),
+                    ("APPROVE_AND_DEPOSIT", "COMPLETE", Some("FAILED")),
+                ],
+            );
+            register_flow_bundle(&mut registry, flow);
+        }
         kyc_allowed_flows.push("FIRST_DEPOSIT".to_owned());
     }
 

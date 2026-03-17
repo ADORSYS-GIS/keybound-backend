@@ -23,9 +23,11 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-postgres = { workspace = true }
+futures.workspace = true
 
 [dev-dependencies]
 serial_test = { workspace = true, features = ["file_locks"] }
+cucumber.workspace = true
 
 [[test]]
 name = "smoke"
@@ -35,4 +37,16 @@ required-features = ["e2e-tests"]
 [[test]]
 name = "full"
 path = "tests/full.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "cucumber_smoke"
+path = "tests/cucumber_smoke.rs"
+harness = false
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "cucumber_full"
+path = "tests/cucumber_full.rs"
+harness = false
 required-features = ["e2e-tests"]

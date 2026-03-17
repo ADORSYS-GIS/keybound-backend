@@ -120,7 +120,7 @@ curl /auth/userinfo -H "Authorization: Bearer {user_jwt}"
 
 ## 🔧 Builtin Step Types
 
-**File:** `builtin_steps.rs`
+**File:** `app/crates/backend-server/src/flow_logic/builtin_steps.rs`
 
 **Internal Steps (No Webhooks):**
 - `validate_user_exists` - Database lookup
@@ -317,7 +317,7 @@ Available OpenAPI specs:
 **Flow Definitions:**
 - [x] PHONE_OTP flow YAML (examples/flows/01_phone_otp.yaml)
 - [x] FIRST_DEPOSIT flow YAML (examples/flows/02_first_deposit.yaml)
-- [x] Builtin step implementations (examples/flows/builtin_steps.rs)
+- [x] Builtin step implementations (app/crates/backend-server/src/flow_logic/builtin_steps.rs)
 
 ---
 

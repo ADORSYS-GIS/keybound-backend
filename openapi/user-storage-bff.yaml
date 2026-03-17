@@ -673,6 +673,9 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
       required:
@@ -681,6 +684,7 @@ components:
       - username
       - emailVerified
       - disabled
+      - metadata
       - createdAt
       - updatedAt
 

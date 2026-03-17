@@ -111,6 +111,8 @@ wiremock = "0.6.5"
 testcontainers = { version = "0.27.1", default-features = false, features = ["ring"] }
 testcontainers-modules = { version = "0.15.0", default-features = false }
 tokio-postgres = "0.7.16"
+cucumber = "0.22"
+futures = "0.3"
 
 [profile.release]
 lto = true

@@ -312,17 +312,24 @@ pub async fn submit_step(
         .map_err(flow_error_to_http)?;
 
     let (output_value, context_updates) = match verify_outcome {
-        StepOutcome::Done { output, updates } => (output.unwrap_or_else(|| json!({"verified": true})), updates),
-        StepOutcome::Failed { error, retryable: _ } => {
+        StepOutcome::Done { output, updates } => {
+            (output.unwrap_or_else(|| json!({"verified": true})), updates)
+        }
+        StepOutcome::Failed {
+            error,
+            retryable: _,
+        } => {
             return Err(Error::bad_request("VERIFICATION_FAILED", error));
         }
         _ => (json!({"verified": true}), None),
     };
 
     let mut updated_flow_context = flow.context.clone();
-    if let Some(updates) = context_updates {
-        if let Some(patch) = updates.flow_context_patch {
-            if let (Some(base_obj), Some(patch_obj)) = (updated_flow_context.as_object_mut(), patch.as_object()) {
+    if let Some(updates) = context_updates
+        && let Some(patch) = updates.flow_context_patch
+            && let (Some(base_obj), Some(patch_obj)) =
+                (updated_flow_context.as_object_mut(), patch.as_object())
+            {
                 for (k, v) in patch_obj {
                     if v.is_null() {
                         base_obj.remove(k);
@@ -331,8 +338,6 @@ pub async fn submit_step(
                     }
                 }
             }
-        }
-    }
 
     let updated_step = api
         .state
@@ -591,17 +596,21 @@ async fn create_step_chain(
                             .await?;
                     }
                     if let Some(metadata_patch) = updates.user_metadata_patch
-                        && let Some(user_id) = session.user_id.as_deref() {
-                            api.state
-                                .user
-                                .update_metadata(user_id, metadata_patch)
-                                .await?;
-                        }
+                        && let Some(user_id) = session.user_id.as_deref()
+                    {
+                        api.state
+                            .user
+                            .update_metadata(user_id, metadata_patch)
+                            .await?;
+                    }
                     if let Some(notifications) = updates.notifications {
                         for notification in notifications {
-                            match serde_json::from_value::<backend_core::NotificationJob>(notification.clone()) {
+                            match serde_json::from_value::<backend_core::NotificationJob>(
+                                notification.clone(),
+                            ) {
                                 Ok(job) => {
-                                    if let Err(e) = api.state.notification_queue.enqueue(job).await {
+                                    if let Err(e) = api.state.notification_queue.enqueue(job).await
+                                    {
                                         tracing::warn!("Failed to enqueue notification: {}", e);
                                     }
                                 }

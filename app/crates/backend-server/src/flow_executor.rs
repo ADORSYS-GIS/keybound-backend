@@ -105,15 +105,15 @@ impl FlowExecutor {
                     if let Some(flow_patch) = updates.flow_context_patch
                         && let (Some(base_obj), Some(patch_obj)) =
                             (next_flow_context.as_object_mut(), flow_patch.as_object())
-                        {
-                            for (k, v) in patch_obj {
-                                if v.is_null() {
-                                    base_obj.remove(k);
-                                } else {
-                                    base_obj.insert(k.clone(), v.clone());
-                                }
+                    {
+                        for (k, v) in patch_obj {
+                            if v.is_null() {
+                                base_obj.remove(k);
+                            } else {
+                                base_obj.insert(k.clone(), v.clone());
                             }
                         }
+                    }
                     if let Some(session_patch) = updates.session_context_patch {
                         let mut new_session_context = session.context.clone();
                         if let (Some(base_obj), Some(patch_obj)) = (
@@ -134,17 +134,21 @@ impl FlowExecutor {
                             .await?;
                     }
                     if let Some(metadata_patch) = updates.user_metadata_patch
-                        && let Some(user_id) = session.user_id.as_deref() {
-                            self.state
-                                .user
-                                .update_metadata(user_id, metadata_patch)
-                                .await?;
-                        }
+                        && let Some(user_id) = session.user_id.as_deref()
+                    {
+                        self.state
+                            .user
+                            .update_metadata(user_id, metadata_patch)
+                            .await?;
+                    }
                     if let Some(notifications) = updates.notifications {
                         for notification in notifications {
-                            match serde_json::from_value::<backend_core::NotificationJob>(notification.clone()) {
+                            match serde_json::from_value::<backend_core::NotificationJob>(
+                                notification.clone(),
+                            ) {
                                 Ok(job) => {
-                                    if let Err(e) = self.state.notification_queue.enqueue(job).await {
+                                    if let Err(e) = self.state.notification_queue.enqueue(job).await
+                                    {
                                         tracing::warn!("Failed to enqueue notification: {}", e);
                                     }
                                 }

@@ -302,6 +302,32 @@ touch app/crates/backend-migrate/src/migrate.rs
 - OAS tests: `app/crates/backend-server/src/api/it_tests.rs`
 - E2E tests: `app/crates/backend-e2e/tests/`
 
+### Cucumber BDD Tests
+
+The project supports Cucumber BDD-style testing for e2e scenarios:
+
+```bash
+# Run cucumber smoke tests
+just test-cucumber-smoke
+
+# Run cucumber full tests  
+just test-cucumber-full
+
+# Run all cucumber tests
+just test-cucumber-all
+```
+
+**Structure:**
+- Feature files: `app/crates/backend-e2e/tests/features/*.feature`
+- Step definitions: `app/crates/backend-e2e/tests/cucumber_*.rs`
+- World state: `app/crates/backend-e2e/tests/world.rs`
+
+**Writing New Tests:**
+1. Create a `.feature` file in `tests/features/`
+2. Add step definitions in `cucumber_full.rs` using `#[given]`, `#[when]`, `#[then]` attributes
+3. Use `@serial` tag for scenarios that must run in isolation
+4. Run with `cargo test -p backend-e2e --features e2e-tests --test cucumber_full`
+
 ### Required Test Coverage
 
 - `backend_core::Error` mapping and response behavior

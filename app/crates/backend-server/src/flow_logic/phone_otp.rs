@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use backend_flow_sdk::flow::StepRef;
-use backend_flow_sdk::{Actor, FlowError, Step, StepContext, StepOutcome, ContextUpdates};
+use backend_flow_sdk::{Actor, ContextUpdates, FlowError, Step, StepContext, StepOutcome};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
@@ -42,7 +42,9 @@ impl Step for IssuePhoneOtpStep {
         let phone_number = ctx
             .flow_config("phoneNumber")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FlowError::InvalidDefinition("phoneNumber not found in flow context".to_owned()))?;
+            .ok_or_else(|| {
+                FlowError::InvalidDefinition("phoneNumber not found in flow context".to_owned())
+            })?;
 
         let otp = generate_otp();
         info!("Generated OTP for {}: {}", phone_number, otp);
@@ -99,12 +101,18 @@ impl Step for VerifyPhoneOtpStep {
     async fn validate_input(&self, input: &Value) -> Result<(), FlowError> {
         let otp = input.get("otpCode").and_then(|v| v.as_str());
         if otp.is_none() {
-            return Err(FlowError::InvalidDefinition("otpCode is required".to_owned()));
+            return Err(FlowError::InvalidDefinition(
+                "otpCode is required".to_owned(),
+            ));
         }
         Ok(())
     }
 
-    async fn verify_input(&self, ctx: &StepContext, input: &Value) -> Result<StepOutcome, FlowError> {
+    async fn verify_input(
+        &self,
+        ctx: &StepContext,
+        input: &Value,
+    ) -> Result<StepOutcome, FlowError> {
         let submitted_otp = input
             .get("otpCode")
             .and_then(|v| v.as_str())
@@ -125,7 +133,10 @@ impl Step for VerifyPhoneOtpStep {
                 }
 
                 if stored != submitted_otp {
-                    warn!("Invalid OTP for step {}: submitted={}, stored={}", ctx.step_id, submitted_otp, stored);
+                    warn!(
+                        "Invalid OTP for step {}: submitted={}, stored={}",
+                        ctx.step_id, submitted_otp, stored
+                    );
                     return Ok(StepOutcome::Failed {
                         error: "INVALID_OTP".to_owned(),
                         retryable: true,

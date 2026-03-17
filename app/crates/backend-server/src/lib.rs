@@ -285,13 +285,15 @@ fn build_router(
                         "received request"
                     )
                 })
-                .on_response(|res: &Response, latency: std::time::Duration, _span: &tracing::Span| {
-                    tracing::info!(
-                        status = %res.status(),
-                        latency = ?latency,
-                        "sending response"
-                    )
-                }),
+                .on_response(
+                    |res: &Response, latency: std::time::Duration, _span: &tracing::Span| {
+                        tracing::info!(
+                            status = %res.status(),
+                            latency = ?latency,
+                            "sending response"
+                        )
+                    },
+                ),
         )
     } else {
         router

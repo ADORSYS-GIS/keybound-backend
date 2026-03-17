@@ -1,0 +1,561 @@
+#![allow(dead_code)]
+
+use anyhow::{Context, Result, anyhow};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use cucumber::World;
+use p256::ecdsa::{Signature, SigningKey, signature::Signer};
+use rand_core::OsRng;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
+use tokio_postgres::NoTls;
+
+const E2E_BFF_DEVICE_ID: &str = "dvc_e2e_bff_signature";
+const E2E_BFF_DEVICE_JKT: &str = "jkt_e2e_bff_signature";
+
+static BFF_FIXTURE: OnceLock<BffTestFixture> = OnceLock::new();
+
+#[derive(Clone)]
+pub struct BffTestFixture {
+    pub device_id: String,
+    pub user_id: String,
+    pub jkt: String,
+    pub public_jwk: String,
+    pub signing_key: SigningKey,
+}
+
+impl BffTestFixture {
+    pub fn generate(user_id: &str) -> Self {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let point = verifying_key.to_encoded_point(false);
+
+        let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
+        let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
+
+        let public_jwk = format!(
+            r#"{{"kty":"EC","crv":"P-256","alg":"ES256","x":"{}","y":"{}"}}"#,
+            x, y
+        );
+
+        Self {
+            device_id: E2E_BFF_DEVICE_ID.to_owned(),
+            user_id: user_id.to_owned(),
+            jkt: E2E_BFF_DEVICE_JKT.to_owned(),
+            public_jwk,
+            signing_key,
+        }
+    }
+
+    pub fn get() -> Option<&'static Self> {
+        BFF_FIXTURE.get()
+    }
+
+    pub fn sign_bff_request(&self, canonical_payload: &str) -> String {
+        let signature: Signature = self.signing_key.sign(canonical_payload.as_bytes());
+        URL_SAFE_NO_PAD.encode(signature.to_bytes())
+    }
+
+    pub fn build_canonical_payload(
+        &self,
+        timestamp: i64,
+        nonce: &str,
+        method: &str,
+        path: &str,
+        body: &str,
+        user_id_hint: Option<&str>,
+    ) -> String {
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            timestamp,
+            nonce,
+            method.to_uppercase(),
+            path,
+            body,
+            self.public_jwk,
+            self.device_id,
+            user_id_hint.unwrap_or(""),
+        )
+    }
+
+    fn store_global(self) -> &'static Self {
+        BFF_FIXTURE.get_or_init(|| self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Env {
+    pub user_storage_url: String,
+    pub user_storage_blank_base_url: Option<String>,
+    pub user_storage_auth_disabled_url: Option<String>,
+    pub worker_primary_url: Option<String>,
+    pub worker_secondary_url: Option<String>,
+    pub keycloak_url: String,
+    pub cuss_url: String,
+    pub sms_sink_url: String,
+    pub database_url: String,
+    pub keycloak_client_id: String,
+    pub keycloak_client_secret: String,
+}
+
+impl Env {
+    pub fn from_env() -> Result<Self> {
+        Ok(Self {
+            user_storage_url: must_env("USER_STORAGE_URL")?,
+            user_storage_blank_base_url: maybe_env("USER_STORAGE_BLANK_BASE_URL"),
+            user_storage_auth_disabled_url: maybe_env("USER_STORAGE_AUTH_DISABLED_URL"),
+            worker_primary_url: maybe_env("WORKER_PRIMARY_URL"),
+            worker_secondary_url: maybe_env("WORKER_SECONDARY_URL"),
+            keycloak_url: must_env("KEYCLOAK_URL")?,
+            cuss_url: must_env("CUSS_URL")?,
+            sms_sink_url: must_env("SMS_SINK_URL")?,
+            database_url: must_env("DATABASE_URL")?,
+            keycloak_client_id: must_env("KEYCLOAK_CLIENT_ID")?,
+            keycloak_client_secret: must_env("KEYCLOAK_CLIENT_SECRET")?,
+        })
+    }
+}
+
+fn must_env(key: &str) -> Result<String> {
+    std::env::var(key).with_context(|| format!("environment variable {key} is required"))
+}
+
+fn maybe_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+#[derive(Debug)]
+pub struct JsonResponse {
+    pub status: u16,
+    pub body: Option<Value>,
+    pub text: String,
+}
+
+pub fn http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("failed to build reqwest client")
+}
+
+pub async fn wait_for_status(
+    client: &reqwest::Client,
+    url: &str,
+    expected_status: u16,
+    attempts: usize,
+) -> Result<()> {
+    let mut last_error = String::new();
+    for _ in 0..attempts {
+        match client.get(url).send().await {
+            Ok(response) if response.status().as_u16() == expected_status => return Ok(()),
+            Ok(response) => {
+                last_error = format!("unexpected status {}", response.status());
+            }
+            Err(error) => {
+                last_error = error.to_string();
+            }
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    Err(anyhow!(
+        "service at {url} did not return {expected_status}: {last_error}"
+    ))
+}
+
+pub async fn send_json(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    bearer: Option<&str>,
+    body: Option<Value>,
+) -> Result<JsonResponse> {
+    send_json_with_bff(client, method, url, bearer, body, None).await
+}
+
+pub async fn send_json_with_bff(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    bearer: Option<&str>,
+    body: Option<Value>,
+    bff_fixture: Option<&BffTestFixture>,
+) -> Result<JsonResponse> {
+    let request_path = request_path(url)?;
+    let body_json = body
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .with_context(|| format!("failed to serialize request body for {url}"))?;
+
+    let mut request = client
+        .request(method.clone(), url)
+        .header(CONTENT_TYPE, "application/json");
+
+    if let Some(token) = bearer {
+        request = request.header(AUTHORIZATION, format!("Bearer {token}"));
+    }
+
+    let should_sign = should_sign_bff_request(&request_path);
+    if should_sign {
+        let fixture = bff_fixture.or_else(|| BffTestFixture::get());
+
+        if let Some(fixture) = fixture {
+            let timestamp = chrono::Utc::now().timestamp();
+            let nonce = format!(
+                "e2e-{}",
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            );
+            let payload = body_json.as_deref().unwrap_or("");
+            let canonical = fixture.build_canonical_payload(
+                timestamp,
+                &nonce,
+                method.as_str(),
+                &request_path,
+                payload,
+                None,
+            );
+            let signature = fixture.sign_bff_request(&canonical);
+
+            request = request
+                .header("x-auth-device-id", &fixture.device_id)
+                .header("x-auth-signature-timestamp", timestamp.to_string())
+                .header("x-auth-public-key", &fixture.public_jwk)
+                .header("x-auth-nonce", nonce)
+                .header("x-auth-signature", signature);
+        }
+    }
+
+    if let Some(payload) = body_json {
+        request = request.body(payload);
+    }
+
+    let response = request
+        .send()
+        .await
+        .with_context(|| format!("request failed for {url}"))?;
+
+    let status = response.status().as_u16();
+    let text = response
+        .text()
+        .await
+        .with_context(|| format!("failed to read response body for {url}"))?;
+
+    let parsed = if text.is_empty() {
+        None
+    } else {
+        serde_json::from_str::<Value>(&text).ok()
+    };
+
+    Ok(JsonResponse {
+        status,
+        body: parsed,
+        text,
+    })
+}
+
+fn request_path(url: &str) -> Result<String> {
+    reqwest::Url::parse(url)
+        .map(|parsed| parsed.path().to_owned())
+        .map_err(|error| anyhow!("invalid URL `{url}`: {error}"))
+}
+
+fn should_sign_bff_request(path: &str) -> bool {
+    path == "/bff" || path.starts_with("/bff/")
+}
+
+pub async fn get_client_token_and_subject(
+    client: &reqwest::Client,
+    env: &Env,
+) -> Result<(String, String)> {
+    let token_url = format!(
+        "{}/realms/e2e-testing/protocol/openid-connect/token",
+        env.keycloak_url
+    );
+
+    let params = [
+        ("grant_type", "client_credentials"),
+        ("client_id", env.keycloak_client_id.as_str()),
+        ("client_secret", env.keycloak_client_secret.as_str()),
+    ];
+
+    let response = client
+        .post(&token_url)
+        .form(&params)
+        .send()
+        .await
+        .context("keycloak token request failed")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(anyhow!("keycloak token request failed ({status}): {body}"));
+    }
+
+    let token_body: Value = response
+        .json()
+        .await
+        .context("invalid keycloak token response JSON")?;
+    let access_token = token_body
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("keycloak token response missing access_token"))?
+        .to_owned();
+
+    let subject = jwt_subject(&access_token)?;
+    Ok((access_token, subject))
+}
+
+fn jwt_subject(token: &str) -> Result<String> {
+    let payload_segment = token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| anyhow!("invalid jwt token format"))?;
+    let payload = URL_SAFE_NO_PAD
+        .decode(payload_segment)
+        .context("failed to decode jwt payload")?;
+    let payload_json: Value = serde_json::from_slice(&payload).context("invalid jwt payload")?;
+    payload_json
+        .get("sub")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow!("jwt payload missing sub"))
+}
+
+pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()> {
+    let fixture = BffTestFixture::generate(user_id);
+
+    let (client, connection) = tokio_postgres::connect(database_url, NoTls)
+        .await
+        .context("failed to connect to postgres")?;
+
+    tokio::spawn(async move {
+        if let Err(error) = connection.await {
+            eprintln!("postgres connection task failed: {error}");
+        }
+    });
+
+    client
+        .execute("DELETE FROM sm_instance WHERE user_id = $1", &[&user_id])
+        .await
+        .context("failed to cleanup sm_instance fixtures")?;
+
+    let username = format!("subject-{user_id}");
+
+    client
+        .execute(
+            r#"
+            INSERT INTO app_user (
+                user_id,
+                realm,
+                username,
+                full_name,
+                phone_number,
+                disabled,
+                created_at,
+                updated_at
+            ) VALUES ($1, 'e2e-testing', $2, 'E2E Subject', '+237690123456', false, NOW(), NOW())
+            ON CONFLICT (user_id) DO UPDATE
+            SET
+                realm = EXCLUDED.realm,
+                username = EXCLUDED.username,
+                full_name = EXCLUDED.full_name,
+                phone_number = EXCLUDED.phone_number,
+                disabled = false,
+                updated_at = NOW()
+            "#,
+            &[&user_id, &username],
+        )
+        .await
+        .context("failed to upsert bff user fixture")?;
+
+    client
+        .execute(
+            r#"
+            INSERT INTO app_user (
+                user_id,
+                realm,
+                username,
+                full_name,
+                phone_number,
+                disabled,
+                created_at,
+                updated_at
+            ) VALUES (
+                'usr_e2e_staff_001',
+                'staff',
+                'e2e-staff',
+                'E2E Staff',
+                '+237690000001',
+                false,
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (user_id) DO UPDATE
+            SET
+                realm = EXCLUDED.realm,
+                username = EXCLUDED.username,
+                full_name = EXCLUDED.full_name,
+                phone_number = EXCLUDED.phone_number,
+                disabled = false,
+                updated_at = NOW()
+            "#,
+            &[],
+        )
+        .await
+        .context("failed to upsert staff user fixture")?;
+
+    let device_record_id = {
+        let hash = Sha256::digest(fixture.public_jwk.as_bytes());
+        format!("{}:{:x}", fixture.device_id, hash)
+    };
+    client
+        .execute(
+            r#"
+            INSERT INTO device (
+                device_id,
+                user_id,
+                jkt,
+                public_jwk,
+                device_record_id,
+                status,
+                label,
+                created_at,
+                last_seen_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                'ACTIVE',
+                'e2e-signature-device',
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (device_id) DO UPDATE
+            SET
+                user_id = EXCLUDED.user_id,
+                jkt = EXCLUDED.jkt,
+                public_jwk = EXCLUDED.public_jwk,
+                device_record_id = EXCLUDED.device_record_id,
+                status = 'ACTIVE',
+                label = EXCLUDED.label,
+                last_seen_at = NOW()
+            "#,
+            &[
+                &fixture.device_id,
+                &fixture.user_id,
+                &fixture.jkt,
+                &fixture.public_jwk,
+                &device_record_id,
+            ],
+        )
+        .await
+        .context("failed to upsert bff signature device fixture")?;
+
+    fixture.store_global();
+    Ok(())
+}
+
+pub async fn reset_sms_sink(client: &reqwest::Client, env: &Env) -> Result<()> {
+    let url = format!("{}/__admin/reset", env.sms_sink_url);
+    let response = send_json(client, reqwest::Method::POST, &url, None, Some(json!({}))).await?;
+
+    if response.status != 200 {
+        return Err(anyhow!(
+            "sms sink reset failed ({}): {}",
+            response.status,
+            response.text
+        ));
+    }
+
+    Ok(())
+}
+
+pub async fn wait_for_otp(
+    client: &reqwest::Client,
+    env: &Env,
+    phone: &str,
+    timeout: Duration,
+) -> Result<String> {
+    let deadline = Instant::now() + timeout;
+    let url = format!("{}/__admin/messages", env.sms_sink_url);
+
+    while Instant::now() < deadline {
+        let response = send_json(client, reqwest::Method::GET, &url, None, None).await?;
+        if response.status == 200 {
+            let messages = response.body.unwrap_or_else(|| json!([]));
+            if let Some(items) = messages.as_array() {
+                for item in items {
+                    let item_phone = item
+                        .get("phone")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if item_phone == phone {
+                        let otp = item
+                            .get("otp")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| anyhow!("otp field missing in sms sink message"))?;
+                        return Ok(otp.to_owned());
+                    }
+                }
+            }
+        }
+
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    Err(anyhow!("otp for {phone} not received within timeout"))
+}
+
+pub fn require_json_field<'a>(body: &'a Option<Value>, field: &str) -> Result<&'a Value> {
+    body.as_ref()
+        .and_then(|json| json.get(field))
+        .ok_or_else(|| anyhow!("response body missing field `{field}`"))
+}
+
+#[derive(Debug, Default, World)]
+#[world(init = Self::new)]
+pub struct E2eWorld {
+    pub env: Option<Env>,
+    pub client: Option<reqwest::Client>,
+    pub token: Option<String>,
+    pub subject: Option<String>,
+    pub last_response: Option<JsonResponse>,
+    pub error: Option<String>,
+}
+
+impl E2eWorld {
+    pub async fn new() -> Result<Self, anyhow::Error> {
+        let env = Env::from_env()?;
+        let client = http_client()?;
+        Ok(Self {
+            env: Some(env),
+            client: Some(client),
+            ..Default::default()
+        })
+    }
+
+    pub fn env(&self) -> Result<&Env, anyhow::Error> {
+        self.env.as_ref().ok_or_else(|| anyhow!("env not initialized"))
+    }
+
+    pub fn client(&self) -> Result<&reqwest::Client, anyhow::Error> {
+        self.client.as_ref().ok_or_else(|| anyhow!("client not initialized"))
+    }
+
+    pub fn bff_base(&self) -> Result<String, anyhow::Error> {
+        Ok(format!("{}/bff", self.env()?.user_storage_url))
+    }
+
+    pub fn staff_base(&self) -> Result<String, anyhow::Error> {
+        Ok(format!("{}/staff", self.env()?.user_storage_url))
+    }
+}

@@ -105,6 +105,16 @@ test-it: # Run OAS integration tests (feature-gated)
 test-e2e-rust:
 	cargo test -p backend-auth --features e2e-tests --test oidc_wiremock_e2e
 
+test-cucumber-smoke:
+	cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
+
+test-cucumber-full:
+	cargo test -p backend-e2e --features e2e-tests --test cucumber_full
+
+test-cucumber-all:
+	cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
+	cargo test -p backend-e2e --features e2e-tests --test cucumber_full
+
 e2e-build:
 	docker compose -p {{project_e2e}} -f {{compose_e2e}} build
 

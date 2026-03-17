@@ -109,6 +109,14 @@ impl AppState {
         };
 
         let flow: Arc<dyn FlowRepo> = Arc::new(FlowRepository::new(pool.clone()));
+
+        #[cfg(feature = "flow-cuss-integration")]
+        let imports = {
+            let mut imports = imports;
+            imports.cuss_url = Some(cfg.cuss.api_url.clone());
+            imports
+        };
+
         let flow_registry = Arc::new(
             flow_registry::build_registry(imports)
                 .map_err(|e| backend_core::Error::Server(e.to_string()))?,

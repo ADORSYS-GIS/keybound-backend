@@ -506,10 +506,7 @@ impl FlowRepo for FlowRepository {
             "#,
         );
 
-        
-
-        sql
-            .get_result::<db::FlowStepRow>(&mut conn)
+        sql.get_result::<db::FlowStepRow>(&mut conn)
             .await
             .optional()
             .map_err(Into::into)

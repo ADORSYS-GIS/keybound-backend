@@ -46,8 +46,8 @@ spec:
         type: validate_deposit
         timeout_ms: 2000
         rules:
-          max_amount: 10000
-          allowed_currencies: ["USD", "EUR"]
+          max_amount: 20000
+          allowed_currencies: ["XAF"]
       onSuccess: await_approval
       onFailure: invalid_amount
 
