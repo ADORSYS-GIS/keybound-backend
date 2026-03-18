@@ -191,8 +191,8 @@ fn register_builtin_actions(registry: &mut FlowRegistry) {
     use backend_flow_sdk::{
         CloseSessionAction, ConditionalAction, DebugLogAction, ErrorAction, GenerateOtpAction,
         GetUserAction, NoopAction, RetryAction, ReviewDocumentAction, SetAction,
-        UpdateUserMetadataAction, UploadDocumentAction, ValidateDepositAction, VerifyOtpAction,
-        WaitAction, WebhookStep,
+        UpdatePhoneNumberAction, UpdateUserMetadataAction, UploadDocumentAction,
+        ValidateDepositAction, VerifyOtpAction, WaitAction, WebhookStep,
     };
 
     debug!("Registering built-in action steps...");
@@ -208,6 +208,7 @@ fn register_builtin_actions(registry: &mut FlowRegistry) {
     registry.register_step(Arc::new(DebugLogAction));
     registry.register_step(Arc::new(ConditionalAction));
     registry.register_step(Arc::new(UpdateUserMetadataAction));
+    registry.register_step(Arc::new(UpdatePhoneNumberAction));
     registry.register_step(Arc::new(CloseSessionAction));
     registry.register_step(Arc::new(UploadDocumentAction));
     registry.register_step(Arc::new(ReviewDocumentAction));

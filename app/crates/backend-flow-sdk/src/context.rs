@@ -18,6 +18,7 @@ pub struct StepContext {
 pub struct StepServices {
     pub storage: Option<Arc<dyn StorageService>>,
     pub user_lookup: Option<Arc<dyn UserLookupService>>,
+    pub user_contact: Option<Arc<dyn UserContactService>>,
     pub config: Option<HashMap<String, Value>>,
 }
 
@@ -51,6 +52,11 @@ pub struct UserRecord {
 #[async_trait::async_trait]
 pub trait UserLookupService: Send + Sync + std::fmt::Debug {
     async fn get_user(&self, user_id: &str) -> Result<Option<UserRecord>, String>;
+}
+
+#[async_trait::async_trait]
+pub trait UserContactService: Send + Sync + std::fmt::Debug {
+    async fn update_phone_number(&self, user_id: &str, phone_number: &str) -> Result<(), String>;
 }
 
 impl StepContext {

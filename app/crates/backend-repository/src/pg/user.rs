@@ -442,6 +442,48 @@ impl UserRepo for UserRepository {
     }
 
     #[instrument(skip(self))]
+    async fn update_phone_number(&self, user_id_val: &str, phone: &str) -> RepoResult<()> {
+        debug!(
+            "Updating user phone number: user_id={}, phone={}",
+            user_id_val, phone
+        );
+        use backend_model::schema::app_user::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        if let Some(user) = app_user
+            .filter(user_id.eq(user_id_val))
+            .first::<db::UserRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::<backend_core::Error>::into)?
+        {
+            let mut attrs = user.attributes.unwrap_or_else(|| serde_json::json!({}));
+            if !attrs.is_object() {
+                attrs = serde_json::json!({});
+            }
+            if let Some(map) = attrs.as_object_mut() {
+                map.insert(
+                    "phone_number".to_owned(),
+                    serde_json::Value::String(phone.to_owned()),
+                );
+            }
+
+            diesel::update(app_user.filter(user_id.eq(user_id_val)))
+                .set((
+                    phone_number.eq(Some(phone.to_owned())),
+                    attributes.eq(Some(attrs)),
+                    updated_at.eq(chrono::Utc::now()),
+                ))
+                .execute(&mut conn)
+                .await
+                .map_err(Into::<backend_core::Error>::into)?;
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
     async fn update_metadata(
         &self,
         user_id_val: &str,

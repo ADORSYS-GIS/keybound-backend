@@ -1,4 +1,4 @@
-use backend_flow_sdk::{Flow, StepServices, UserLookupService, UserRecord};
+use backend_flow_sdk::{Flow, StepServices, UserContactService, UserLookupService, UserRecord};
 use backend_repository::UserRepo;
 use serde_json::Value;
 use std::sync::Arc;
@@ -13,9 +13,27 @@ impl RepoUserLookup {
     }
 }
 
+pub struct RepoUserContact {
+    user_repo: Arc<dyn UserRepo>,
+}
+
+impl RepoUserContact {
+    pub fn new(user_repo: Arc<dyn UserRepo>) -> Self {
+        Self { user_repo }
+    }
+}
+
 impl std::fmt::Debug for RepoUserLookup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RepoUserLookup")
+            .field("user_repo", &"<UserRepo>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for RepoUserContact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepoUserContact")
             .field("user_repo", &"<UserRepo>")
             .finish()
     }
@@ -42,9 +60,20 @@ impl UserLookupService for RepoUserLookup {
     }
 }
 
+#[backend_core::async_trait]
+impl UserContactService for RepoUserContact {
+    async fn update_phone_number(&self, user_id: &str, phone_number: &str) -> Result<(), String> {
+        self.user_repo
+            .update_phone_number(user_id, phone_number)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
 pub fn step_services(user_repo: Arc<dyn UserRepo>) -> StepServices {
     StepServices {
-        user_lookup: Some(Arc::new(RepoUserLookup::new(user_repo))),
+        user_lookup: Some(Arc::new(RepoUserLookup::new(user_repo.clone()))),
+        user_contact: Some(Arc::new(RepoUserContact::new(user_repo))),
         ..Default::default()
     }
 }

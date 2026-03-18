@@ -338,6 +338,8 @@ pub trait UserRepo: Send + Sync {
         eager_fetch_only: bool,
     ) -> RepoResult<Vec<backend_model::db::UserDataRow>>;
 
+    async fn update_phone_number(&self, user_id: &str, phone_number: &str) -> RepoResult<()>;
+
     async fn update_metadata(&self, user_id: &str, metadata_patch: Value) -> RepoResult<()>;
 }
 

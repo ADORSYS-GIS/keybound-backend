@@ -16,6 +16,15 @@ steps:
     actor: SYSTEM
     config:
       save_to: session
+    next: sync_phone_to_flow
+
+  sync_phone_to_flow:
+    action: update-phone-number
+    actor: SYSTEM
+    config:
+      source: flow
+      source_path: /step_output/init_phone/phone_number
+      update_user: true
     next: generate_otp
 
   generate_otp:
@@ -82,6 +91,15 @@ steps:
       message: "Phone OTP verified"
       flow_pointers:
       - /step_output/verify_otp
+    next: set_user_phone_number
+
+  set_user_phone_number:
+    action: update-phone-number
+    actor: SYSTEM
+    config:
+      source: session
+      source_path: /phone_number
+      update_user: true
     next: mark_phone_verified
 
   mark_phone_verified:

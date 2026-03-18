@@ -14,13 +14,15 @@ pub mod step;
 pub use actions::{
     CloseSessionAction, ConditionalAction, DebugLogAction, DocumentType, ErrorAction,
     ExtractionTarget, GenerateOtpAction, GetUserAction, NoopAction, RetryAction,
-    ReviewDocumentAction, SetAction, UpdateUserMetadataAction, UploadDocumentAction,
-    ValidateDepositAction, VerifyOtpAction, WaitAction, WebhookBehavior, WebhookExtractionRule,
-    WebhookHttpConfig, WebhookRetryPolicy, WebhookStep, WebhookSuccessCondition,
+    ReviewDocumentAction, SetAction, UpdatePhoneNumberAction, UpdateUserMetadataAction,
+    UploadDocumentAction, ValidateDepositAction, VerifyOtpAction, WaitAction, WebhookBehavior,
+    WebhookExtractionRule, WebhookHttpConfig, WebhookRetryPolicy, WebhookStep,
+    WebhookSuccessCondition,
 };
 pub use actor::Actor;
 pub use context::{
-    StepContext, StepServices, StorageService, UploadUrlResult, UserLookupService, UserRecord,
+    StepContext, StepServices, StorageService, UploadUrlResult, UserContactService,
+    UserLookupService, UserRecord,
 };
 pub use error::FlowError;
 pub use export::{ExportFormat, export_registry};

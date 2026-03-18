@@ -8,6 +8,7 @@ mod noop;
 mod otp;
 mod retry;
 mod set;
+mod update_phone_number;
 mod update_user_metadata;
 mod wait;
 mod webhook;
@@ -22,6 +23,7 @@ pub use noop::NoopAction;
 pub use otp::{GenerateOtpAction, VerifyOtpAction};
 pub use retry::RetryAction;
 pub use set::SetAction;
+pub use update_phone_number::UpdatePhoneNumberAction;
 pub use update_user_metadata::UpdateUserMetadataAction;
 pub use wait::WaitAction;
 
