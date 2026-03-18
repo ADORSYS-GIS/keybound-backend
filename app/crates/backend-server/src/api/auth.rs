@@ -42,7 +42,6 @@ const AUTH_ENROLL_BIND_STEP_TYPE: &str = "bind";
         list_devices,
         revoke_device,
         exchange_token,
-        jwks,
         approve_step,
         userinfo
     ),
@@ -56,7 +55,6 @@ const AUTH_ENROLL_BIND_STEP_TYPE: &str = "bind";
             DevicesResponse,
             TokenRequest,
             TokenResponse,
-            JwksResponse,
             ApproveStepRequest,
             ApproveStepResponse,
             UserInfoResponse,

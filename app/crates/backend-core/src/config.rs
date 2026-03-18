@@ -47,12 +47,24 @@ impl Default for Runtime {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Redis {
     pub url: String,
+    #[serde(
+        default = "default_worker_lock_ttl_seconds",
+        alias = "worker-lock-ttl-seconds"
+    )]
+    pub worker_lock_ttl_seconds: i64,
+    #[serde(
+        default = "default_worker_lock_renew_seconds",
+        alias = "worker-lock-renew-seconds"
+    )]
+    pub worker_lock_renew_seconds: u64,
 }
 
 impl Default for Redis {
     fn default() -> Self {
         Self {
             url: "redis://127.0.0.1:6379".to_owned(),
+            worker_lock_ttl_seconds: default_worker_lock_ttl_seconds(),
+            worker_lock_renew_seconds: default_worker_lock_renew_seconds(),
         }
     }
 }
@@ -181,6 +193,14 @@ fn default_flows_dir() -> String {
 
 fn default_sessions_dir() -> String {
     "sessions".to_owned()
+}
+
+fn default_worker_lock_ttl_seconds() -> i64 {
+    30
+}
+
+fn default_worker_lock_renew_seconds() -> u64 {
+    10
 }
 
 impl Default for FlowConfig {

@@ -23,10 +23,6 @@ use tracing::{debug, info, instrument, warn};
 const NOTIFICATION_QUEUE_NAMESPACE: &str = "backend:notifications";
 /// Redis key for worker distributed lock
 const WORKER_CONSUMER_LOCK_KEY: &str = "backend:worker:consumer-lock";
-/// TTL for worker lock in seconds
-const WORKER_CONSUMER_LOCK_TTL_SECONDS: i64 = 30;
-/// Interval for renewing worker lock in seconds
-const WORKER_CONSUMER_LOCK_RENEW_SECONDS: u64 = 10;
 
 /// Verifies Redis connectivity before starting the worker.
 ///
@@ -120,6 +116,8 @@ impl WorkerConsumerLock {
 ///
 /// # Arguments
 /// * `redis_url` - Redis connection URL
+/// * `lock_ttl_seconds` - Lock TTL in seconds
+/// * `lock_renew_seconds` - Lock renewal interval in seconds
 ///
 /// # Returns
 /// `Result<WorkerConsumerLock>` containing the lock handle or error
@@ -128,7 +126,24 @@ impl WorkerConsumerLock {
 /// Returns error if Redis is unavailable or lock is already held by another instance
 pub async fn acquire_worker_consumer_lock(
     redis_url: &str,
+    lock_ttl_seconds: i64,
+    lock_renew_seconds: u64,
 ) -> backend_core::Result<WorkerConsumerLock> {
+    let lock_ttl_seconds = lock_ttl_seconds.max(1);
+    let lock_renew_seconds = if lock_renew_seconds == 0 {
+        1
+    } else {
+        lock_renew_seconds.min((lock_ttl_seconds as u64).saturating_sub(1).max(1))
+    };
+
+    if lock_renew_seconds >= lock_ttl_seconds as u64 {
+        warn!(
+            lock_ttl_seconds,
+            lock_renew_seconds,
+            "worker lock renew interval should be smaller than ttl; using normalized values",
+        );
+    }
+
     let client = redis::Client::open(redis_url)
         .map_err(|error| backend_core::Error::Server(error.to_string()))?;
     let mut connection = client
@@ -147,16 +162,36 @@ pub async fn acquire_worker_consumer_lock(
         .arg(&owner)
         .arg("NX")
         .arg("EX")
-        .arg(WORKER_CONSUMER_LOCK_TTL_SECONDS)
+        .arg(lock_ttl_seconds)
         .query_async(&mut connection)
         .await
         .map_err(|error| backend_core::Error::Server(error.to_string()))?;
 
     if acquired.is_none() {
-        return Err(backend_core::Error::Server(
-            "worker consumer lock already held by another instance".to_owned(),
-        ));
+        let current_owner: Option<String> = redis::cmd("GET")
+            .arg(WORKER_CONSUMER_LOCK_KEY)
+            .query_async(&mut connection)
+            .await
+            .ok();
+        let current_ttl_seconds: Option<i64> = redis::cmd("TTL")
+            .arg(WORKER_CONSUMER_LOCK_KEY)
+            .query_async(&mut connection)
+            .await
+            .ok();
+        return Err(backend_core::Error::Server(format!(
+            "worker consumer lock already held by another instance (key: {}, owner: {}, ttl_seconds: {})",
+            WORKER_CONSUMER_LOCK_KEY,
+            current_owner.unwrap_or_else(|| "unknown".to_owned()),
+            current_ttl_seconds
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_owned())
+        )));
     }
+
+    info!(
+        lock_key = WORKER_CONSUMER_LOCK_KEY,
+        lock_ttl_seconds, lock_renew_seconds, owner, "worker consumer lock acquired"
+    );
 
     let redis_url_owned = redis_url.to_owned();
     let owner_for_renew = owner.clone();
@@ -186,7 +221,7 @@ pub async fn acquire_worker_consumer_lock(
             "#,
         );
 
-        let mut tick = interval(Duration::from_secs(WORKER_CONSUMER_LOCK_RENEW_SECONDS));
+        let mut tick = interval(Duration::from_secs(lock_renew_seconds));
         loop {
             tokio::select! {
                 _ = &mut stop_rx => break,
@@ -194,7 +229,7 @@ pub async fn acquire_worker_consumer_lock(
                     let renewed: Result<i32, redis::RedisError> = renew_script
                         .key(&key_for_renew)
                         .arg(&owner_for_renew)
-                        .arg(WORKER_CONSUMER_LOCK_TTL_SECONDS)
+                        .arg(lock_ttl_seconds)
                         .invoke_async(&mut connection)
                         .await;
                     match renewed {

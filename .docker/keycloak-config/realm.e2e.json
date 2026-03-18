@@ -99,5 +99,22 @@
       "fullScopeAllowed": true,
       "authorizationServicesEnabled": true
     }
+  ],
+  "users": [
+    {
+      "email": "test@admin",
+      "username": "test",
+      "firstName": "DevOps",
+      "lastName": "SRE",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "temporary": false,
+          "type": "password",
+          "value": "test@admin"
+        }
+      ]
+    }
   ]
 }

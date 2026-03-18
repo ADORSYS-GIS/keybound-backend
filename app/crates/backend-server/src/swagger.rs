@@ -2,7 +2,8 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api::{
-    bff_flow::BffFlowOpenApi, bff_uploads::BffUploadsOpenApi, staff_flow::StaffFlowOpenApi,
+    auth::AuthOpenApi, bff_flow::BffFlowOpenApi, bff_uploads::BffUploadsOpenApi,
+    staff_flow::StaffFlowOpenApi,
 };
 
 #[derive(OpenApi)]
@@ -25,10 +26,12 @@ pub fn swagger_ui() -> SwaggerUi {
     let bff_spec = BffFlowOpenApi::openapi();
     let uploads_spec = BffUploadsOpenApi::openapi();
     let staff_spec = StaffFlowOpenApi::openapi();
+    let auth_spec = AuthOpenApi::openapi();
 
     SwaggerUi::new("/swagger-ui/")
         .url("/api-docs/bff/openapi.json", bff_spec)
         .url("/api-docs/uploads/openapi.json", uploads_spec)
         .url("/api-docs/staff/openapi.json", staff_spec)
+        .url("/api-docs/auth/openapi.json", auth_spec)
         .url("/api-docs/core/openapi.json", ApiDoc::openapi())
 }
