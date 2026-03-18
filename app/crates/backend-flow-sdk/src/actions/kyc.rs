@@ -51,6 +51,7 @@ impl Step for UploadDocumentAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: UploadDocumentConfig = super::parse_step_config(ctx)?;
 
         let doc_type_str = match config.document_type {
@@ -177,6 +178,7 @@ impl Step for ReviewDocumentAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: ReviewDocumentConfig = super::parse_step_config(ctx)?;
 
         tracing::info!(
@@ -307,6 +309,7 @@ impl Step for ValidateDepositAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: ValidateDepositConfig = super::parse_step_config(ctx)?;
 
         let amount = ctx

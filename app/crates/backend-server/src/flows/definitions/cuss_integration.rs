@@ -42,6 +42,7 @@ impl Step for CussRegisterStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let phone = ctx
             .session_context
             .get("phone_number")
@@ -144,6 +145,7 @@ impl Step for CussApproveStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let savings_account_id = ctx
             .flow_context
             .get("step_output")

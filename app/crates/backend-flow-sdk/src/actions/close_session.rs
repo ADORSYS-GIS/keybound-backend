@@ -27,6 +27,7 @@ impl Step for CloseSessionAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: CloseSessionConfig = super::parse_step_config(ctx)?;
         let reason = config.reason.unwrap_or_else(|| "CLOSED".to_owned());
 

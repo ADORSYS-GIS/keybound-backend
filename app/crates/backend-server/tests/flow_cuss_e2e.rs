@@ -29,6 +29,7 @@ impl Step for CussRegisterStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let phone = ctx
             .session_context
             .get("phone_number")
@@ -115,6 +116,7 @@ impl Step for CussApproveStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let savings_account_id = ctx
             .flow_context
             .get("step_output")
@@ -203,6 +205,7 @@ impl Step for AwaitApprovalStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Waiting {
             actor: Actor::Admin,
         })
@@ -226,6 +229,7 @@ impl Step for CheckUserStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let phone = ctx
             .session_context
             .get("phone_number")
@@ -267,6 +271,7 @@ impl Step for ValidateDepositStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let amount = ctx
             .session_context
             .get("deposit_amount")

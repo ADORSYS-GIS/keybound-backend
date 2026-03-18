@@ -45,6 +45,7 @@ pub trait Step: Send + Sync + 'static {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Done {
             output: None,
             updates: None,

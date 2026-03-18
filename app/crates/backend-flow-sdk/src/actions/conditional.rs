@@ -41,6 +41,7 @@ impl Step for ConditionalAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: ConditionalConfig = super::parse_step_config(ctx)?;
 
         let selected = match config.source {

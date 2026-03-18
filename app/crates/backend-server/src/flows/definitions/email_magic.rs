@@ -32,6 +32,7 @@ impl Step for IssueMagicEmailStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Done {
             output: None,
             updates: None,
@@ -60,6 +61,7 @@ impl Step for VerifyMagicEmailStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Waiting {
             actor: Actor::EndUser,
         })

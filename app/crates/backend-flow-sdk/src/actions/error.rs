@@ -39,6 +39,7 @@ impl Step for ErrorAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: ErrorConfig = super::parse_step_config(ctx)?;
 
         Ok(StepOutcome::Failed {

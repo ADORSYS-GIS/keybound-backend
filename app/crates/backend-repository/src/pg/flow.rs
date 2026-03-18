@@ -487,8 +487,9 @@ impl FlowRepo for FlowRepository {
 
         let mut conn = self.get_conn().await?;
 
-        // Find a step that is either RUNNING or WAITING+retry_due, and is a SYSTEM step.
+        // Find a step that is WAITING+retry_due, and is a SYSTEM step.
         // We update its status to RUNNING to claim it.
+        // Initial SYSTEM execution is handled synchronously in request-time step chains.
         // diesel_async doesn't natively support UPDATE ... RETURNING with a complex WHERE
         // easily without raw SQL or subqueries if we want to grab just 1 row atomically.
         // Let's use a subquery approach with raw SQL.
@@ -501,10 +502,8 @@ impl FlowRepo for FlowRepository {
                 SELECT id
                 FROM flow_step
                 WHERE actor = 'SYSTEM'
-                  AND (
-                      status = 'RUNNING' OR
-                      (status = 'WAITING' AND next_retry_at <= NOW())
-                  )
+                  AND status = 'WAITING'
+                  AND next_retry_at <= NOW()
                 ORDER BY updated_at ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1

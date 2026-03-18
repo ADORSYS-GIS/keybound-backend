@@ -32,6 +32,7 @@ impl Step for ReviewUserAccountStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Waiting {
             actor: Actor::Admin,
         })
@@ -77,6 +78,7 @@ impl Step for ApplyUserDecisionStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Done {
             output: None,
             updates: None,

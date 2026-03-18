@@ -46,6 +46,7 @@ impl Step for CheckUserExistsStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let phone = ctx
             .input
             .get("phone_number")
@@ -156,6 +157,7 @@ impl Step for ValidateDepositStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let amount = ctx
             .input
             .get("amount")
@@ -218,6 +220,7 @@ impl Step for PersistDepositResultStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let deposit_result = ctx
             .input
             .get("deposit_result")

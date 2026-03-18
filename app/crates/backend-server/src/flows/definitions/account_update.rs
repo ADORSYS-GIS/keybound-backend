@@ -32,6 +32,7 @@ impl Step for SubmitAccountUpdateStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Waiting {
             actor: Actor::EndUser,
         })
@@ -73,6 +74,7 @@ impl Step for ApplyAccountUpdateStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Done {
             output: None,
             updates: None,

@@ -7,7 +7,7 @@ x-env: &env
   MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
   MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-dev}"
   RUST_LOG: debug
-  SMS_SINK_URL: http://sms-gateway:3000
+  SMS_SINK_URL: "http://sms-gateway:3000"
 
 services:
   app:
@@ -39,6 +39,8 @@ services:
         condition: service_started
       minio-create-bucket:
         condition: service_completed_successfully
+      sms-gateway:
+        condition: service_healthy
 
   app-worker:
     image: user-storage-app
@@ -67,6 +69,8 @@ services:
         condition: service_started
       minio-create-bucket:
         condition: service_completed_successfully
+      sms-gateway:
+        condition: service_healthy
 
   sms-gateway:
     image: user-storage-app
@@ -85,5 +89,9 @@ services:
     environment:
       <<: *env
     depends_on:
-      redis:
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+      postgres:
         condition: service_healthy

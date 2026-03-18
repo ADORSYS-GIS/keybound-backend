@@ -38,6 +38,7 @@ impl Step for RetryAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: RetryActionConfig = super::parse_step_config(ctx)?;
 
         Ok(StepOutcome::Retry {

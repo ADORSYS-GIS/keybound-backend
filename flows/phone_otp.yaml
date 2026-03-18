@@ -1,15 +1,15 @@
 flow_type: phone_otp
 human_id_prefix: phone_otp
 feature: flow-phone-otp
-initial_step: get_user
+initial_step: init_phone
 
 steps:
-  #init_phone:
-  #  action: WAIT
-  #  actor: END_USER
-  #  config:
-  #    actor: USER
-  #  next: get_user
+  init_phone:
+    action: WAIT
+    actor: END_USER
+    config:
+      actor: USER
+    next: get_user
 
   get_user:
     action: GET_USER
@@ -45,7 +45,7 @@ steps:
       method: POST
       timeout_ms: 5000
       payload:
-        phone: "{{flow.context.step_output.init_phone.phone_number}}"
+        phone: "{{flow.context.phone_number}}"
         otp: "{{flow.context.otp}}"
       success_condition:
         status_codes:
@@ -90,8 +90,8 @@ steps:
     config:
       mappings:
       - target_path: /phone/number
-        source: flow
-        source_path: /step_output/init_phone/phone_number
+        source: session
+        source_path: /phone_number
       - target_path: /phone/verified
         value: true
       - target_path: /kyc/phoneOtpVerified

@@ -1,5 +1,4 @@
-use apalis::prelude::WorkerBuilder;
-use apalis_redis::{RedisConfig, RedisStorage};
+use axum::{extract::State, http::StatusCode, routing::get, routing::post, Json, Router};
 use backend_core::config::{self, SmsProviderType};
 use backend_core::NotificationJob;
 use clap::Parser;
@@ -8,6 +7,7 @@ use sms_provider::{
     is_permanent_error, process_notification_job, ApiSmsProvider, ConsoleSmsProvider,
     SnsSmsProvider,
 };
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -16,14 +16,47 @@ mod sms_provider;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-const NOTIFICATION_QUEUE_NAMESPACE: &str = "backend:notifications";
-
 #[derive(Parser, Debug)]
 #[command(author, version, about = "SMS Gateway Service", long_about = None)]
 struct Args {
     /// Path to configuration file
     #[arg(short, long, default_value = "config/local.yaml")]
     config: String,
+
+    /// Bind host for the HTTP server
+    #[arg(long, default_value = "0.0.0.0")]
+    host: String,
+
+    /// Bind port for the HTTP server (defaults to config server.port)
+    #[arg(long)]
+    port: Option<u16>,
+}
+
+#[derive(Clone)]
+struct GatewayState {
+    provider: Arc<dyn sms_provider::SmsProvider>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SendOtpRequest {
+    #[serde(default)]
+    phone: Option<String>,
+    #[serde(default)]
+    msisdn: Option<String>,
+    otp: String,
+    #[serde(default)]
+    step_id: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SendOtpResponse {
+    delivered: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ErrorResponse {
+    error_key: String,
+    message: String,
 }
 
 #[tokio::main]
@@ -44,50 +77,20 @@ async fn main() -> anyhow::Result<()> {
 
     // Create SMS provider based on configuration
     let provider = create_sms_provider(sms_config).await?;
+    let port = args.port.unwrap_or(config.server.port as u16);
+    let addr: SocketAddr = format!("{}:{}", args.host, port).parse()?;
 
-    // Connect to Redis
-    info!("Connecting to Redis at: {}", config.redis.url);
-    let redis_conn = apalis_redis::connect(config.redis.url.clone()).await?;
-    let storage =
-        RedisStorage::new_with_config(redis_conn, RedisConfig::new(NOTIFICATION_QUEUE_NAMESPACE));
-
-    // Verify Redis connectivity
-    verify_redis_connection(&config.redis.url).await?;
-
-    info!("Starting SMS gateway worker");
+    info!("Starting SMS gateway HTTP server");
     info!("Provider: {:?}", sms_config.provider);
-    info!("Queue namespace: {}", NOTIFICATION_QUEUE_NAMESPACE);
+    info!("Listening on {}", addr);
 
-    // Create and run the worker
-    let provider_for_worker = provider.clone();
-    let worker = WorkerBuilder::new("sms-gateway-worker")
-        .backend(storage)
-        .build(move |job: NotificationJob| {
-            let provider = provider_for_worker.clone();
-            async move {
-                match process_notification_job(provider, job).await {
-                    Ok(()) => Ok(()),
-                    Err(error) if is_permanent_error(&error) => {
-                        warn!("Dropping permanent SMS job error without retry: {}", error);
-                        Ok(())
-                    }
-                    Err(error) => {
-                        warn!("Failed to process notification job (retryable): {}", error);
-                        Err(apalis::prelude::BoxDynError::from(error))
-                    }
-                }
-            }
-        });
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/otp", post(send_otp))
+        .with_state(GatewayState { provider });
 
-    // Run until Ctrl+C
-    tokio::select! {
-        result = worker.run() => {
-            result?;
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received Ctrl+C, shutting down");
-        }
-    }
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
@@ -123,91 +126,60 @@ async fn create_sms_provider(
     }
 }
 
-/// Verify Redis connectivity before starting
-async fn verify_redis_connection(redis_url: &str) -> anyhow::Result<()> {
-    use redis::AsyncCommands;
-
-    let client = redis::Client::open(redis_url)?;
-    let mut conn = client.get_multiplexed_async_connection().await?;
-    let _: String = conn.ping().await?;
-    Ok(())
+async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use apalis::prelude::{TaskSink, WorkerBuilder};
-    use apalis_redis::RedisStorage;
+async fn send_otp(
+    State(state): State<GatewayState>,
+    Json(payload): Json<SendOtpRequest>,
+) -> Result<Json<SendOtpResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let msisdn = payload
+        .msisdn
+        .or(payload.phone)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
 
-    #[test]
-    fn permanent_error_detection_matches_error_key() {
-        let permanent = backend_core::Error::internal("SMS_SEND_PERMANENT", "bad request");
-        let transient = backend_core::Error::internal("SMS_SEND_TRANSIENT", "upstream unavailable");
-
-        assert!(is_permanent_error(&permanent));
-        assert!(!is_permanent_error(&transient));
+    let otp = payload.otp.trim().to_owned();
+    if msisdn.is_none() || otp.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error_key: "INVALID_REQUEST".to_owned(),
+                message: "phone/msisdn and otp are required".to_owned(),
+            }),
+        ));
     }
 
-    async fn setup_redis(redis_url: &str) -> redis::Client {
-        let client = redis::Client::open(redis_url).unwrap();
-        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
-        let _: () = redis::cmd("FLUSHDB").query_async(&mut conn).await.unwrap();
-        client
-    }
+    let step_id = payload.step_id.unwrap_or_else(|| "direct-http".to_owned());
+    let job = NotificationJob::Otp {
+        step_id,
+        msisdn: msisdn.unwrap_or_default(),
+        otp,
+    };
 
-    #[tokio::test]
-    async fn test_process_notification_job() {
-        let provider = Arc::new(ConsoleSmsProvider);
-        let job = NotificationJob::Otp {
-            step_id: "test_step".to_string(),
-            msisdn: "1234567890".to_string(),
-            otp: "123456".to_string(),
-        };
-        let result = process_notification_job(provider, job).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_worker_consumes_job() {
-        let redis_url = "redis://127.0.0.1:6379";
-        let client = setup_redis(redis_url).await;
-        let conn = client.get_multiplexed_async_connection().await.unwrap();
-
-        let mut storage = RedisStorage::new(conn);
-        let job = NotificationJob::Otp {
-            step_id: "test_step".to_string(),
-            msisdn: "1234567890".to_string(),
-            otp: "123456".to_string(),
-        };
-        storage.push(job).await.unwrap();
-
-        let provider = Arc::new(ConsoleSmsProvider);
-        let provider_for_worker = provider.clone();
-        let worker = WorkerBuilder::new("test-worker").backend(storage).build(
-            move |job: NotificationJob| {
-                let provider = provider_for_worker.clone();
-                async move { process_notification_job(provider, job).await }
-            },
-        );
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let _ = worker.run().await;
-            let _ = tx.send(());
-        });
-
-        // This is a bit of a hack to ensure the worker has time to process the job
-        // In a real-world scenario, you would use a more robust mechanism
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-        let mut conn_check = client.get_multiplexed_async_connection().await.unwrap();
-        let len: isize = redis::cmd("LLEN")
-            .arg(format!("apalis:{}", NOTIFICATION_QUEUE_NAMESPACE))
-            .query_async(&mut conn_check)
-            .await
-            .unwrap();
-        assert_eq!(len, 0);
-
-        let _ = rx.await;
+    match process_notification_job(state.provider.clone(), job).await {
+        Ok(()) => Ok(Json(SendOtpResponse { delivered: true })),
+        Err(error) => {
+            let meta = error.meta();
+            let status = if is_permanent_error(&error) {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            warn!(
+                status = status.as_u16(),
+                error_key = meta.error_key,
+                message = meta.message,
+                "Failed to send OTP"
+            );
+            Err((
+                status,
+                Json(ErrorResponse {
+                    error_key: meta.error_key.to_owned(),
+                    message: meta.message,
+                }),
+            ))
+        }
     }
 }

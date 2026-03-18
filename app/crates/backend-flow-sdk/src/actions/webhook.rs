@@ -124,6 +124,7 @@ impl Step for WebhookStep {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: WebhookHttpConfig = super::parse_step_config(ctx)?;
 
         let method = reqwest::Method::from_str(&config.method).map_err(|_| {

@@ -46,6 +46,7 @@ impl Step for UpdateUserMetadataAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: UpdateUserMetadataConfig = super::parse_step_config(ctx)?;
         let mut patch = Value::Object(Map::new());
 

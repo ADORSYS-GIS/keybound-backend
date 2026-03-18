@@ -96,6 +96,7 @@ impl Step for GenerateOtpAction {
     }
 
     async fn execute(&self, ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         let config: GenerateOtpConfig = super::parse_step_config(ctx)?;
 
         let otp = generate_otp(config.length, &config.otp_type);
@@ -198,6 +199,7 @@ impl Step for VerifyOtpAction {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::debug!(step = self.step_type(), "Executing step");
         Ok(StepOutcome::Waiting {
             actor: Actor::EndUser,
         })
