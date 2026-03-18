@@ -47,7 +47,11 @@ sns:
   initial_backoff_seconds: 5
 
 sms:
-  provider: console # options are 'console' (default) or 'sns'
+  provider: avlytext 
+  avlytext:
+    base_url: "https://api.avlytext.com"
+    api_key: "2FsBdN1W2b8B6KHMSfzhujl4PN2h0pui008h2mlNwO0Nk2IatVlX1qO2NWbOnZQ3m2k8"
+    sender_id: "Azamra"
 
 oauth2:
   issuer: "http://10.10.0.74:9026/realms/e2e-testing"
