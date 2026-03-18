@@ -444,7 +444,7 @@ mod tests {
             .and(wiremock::matchers::body_json(json!({
                 "sender": "AvlyText",
                 "recipient": "1234567890",
-                "text": "Your OTP verification code is: 123456",
+                "text": "Your verification code is: 123456",
             })))
             .respond_with(ResponseTemplate::new(200))
             .mount(&server)
