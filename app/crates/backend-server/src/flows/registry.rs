@@ -81,12 +81,17 @@ impl ProxyStep {
     ) -> backend_flow_sdk::StepContext {
         if let Some(config) = &self.config {
             let mut services = ctx.services.clone();
-            services.config = Some(
-                config
-                    .as_object()
-                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                    .unwrap_or_default(),
-            );
+            let mut merged = services.config.take().unwrap_or_default();
+            if let Some(obj) = config.as_object() {
+                for (key, value) in obj {
+                    merged.insert(key.clone(), value.clone());
+                }
+            }
+            services.config = if merged.is_empty() {
+                None
+            } else {
+                Some(merged)
+            };
             backend_flow_sdk::StepContext {
                 services,
                 ..ctx.clone()
@@ -214,7 +219,7 @@ fn register_builtin_actions(registry: &mut FlowRegistry) {
     registry.register_step(Arc::new(ReviewDocumentAction));
     registry.register_step(Arc::new(ValidateDepositAction));
     registry.register_step(Arc::new(
-        crate::flows::definitions::shared_steps::CheckUserExistsStep,
+        crate::flows::definitions::shared_steps::ResolveRecipientStep,
     ));
     registry.register_step(Arc::new(WebhookStep::new()));
 

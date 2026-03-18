@@ -19,8 +19,20 @@ steps:
     next: resolve_recipient
 
   resolve_recipient:
-    action: check_user_exists
+    action: RESOLVE_RECIPIENT
     actor: SYSTEM
+    config:
+      recipients:
+        - provider: MTN_CM
+          fullname: "Mbarga Benn"
+          phone-number: "+237672000111"
+          regex: "^\\+237(?:67[0-9]|65[0-4])[0-9]{6}$"
+          currency: XAF
+        - provider: ORANGE_CM
+          fullname: "Nkoumou Linda"
+          phone-number: "+237699000222"
+          regex: "^\\+237(?:69[0-9]|65[5-9])[0-9]{6}$"
+          currency: XAF
     next: await_admin_decision
 
   await_admin_decision:
