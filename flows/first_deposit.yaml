@@ -53,9 +53,17 @@ steps:
         REJECTED: rejected
       default_branch: rejected
     branches:
-      approved: cuss_register_customer
+      approved: upgrade_full_name
       rejected: close_session
     fail: FAILED
+
+  upgrade_full_name:
+    action: UPGRADE_FULL_NAME
+    actor: SYSTEM
+    config:
+      require_decision: true
+      source_step_output: await_admin_decision
+    next: cuss_register_customer
 
   cuss_register_customer:
     action: WEBHOOK_HTTP
@@ -67,7 +75,7 @@ steps:
       timeout_ms: 10000
       retryable: true
       payload:
-        fullName: "{{session.full_name}}"
+        fullName: "{{flow.context.full_name}}"
         phone: "{{session.phone_number}}"
         externalId: "{{session.user_id}}"
       success_condition:
@@ -123,6 +131,12 @@ steps:
           source_path: /step_output/cuss_approve_and_deposit/transactionId
         - target_path: /firstDeposit/status
           value: APPROVED
+        - target_path: /firstDeposit/validated_deposit_via_whatsapp
+          source: flow
+          source_path: /validated_deposit_via_whatsapp
+        - target_path: /firstDeposit/validated_identity_via_whatsapp
+          source: flow
+          source_path: /validated_identity_via_whatsapp
     next: COMPLETE
 
   close_session:

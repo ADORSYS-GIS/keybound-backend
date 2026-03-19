@@ -15,9 +15,9 @@ pub use actions::{
     CloseSessionAction, ConditionalAction, DebugLogAction, DocumentType, ErrorAction,
     ExtractionTarget, GenerateOtpAction, GetUserAction, NoopAction, RetryAction,
     ReviewDocumentAction, SetAction, UpdatePhoneNumberAction, UpdateUserMetadataAction,
-    UploadDocumentAction, ValidateDepositAction, VerifyOtpAction, WaitAction, WebhookBehavior,
-    WebhookExtractionRule, WebhookHttpConfig, WebhookRetryPolicy, WebhookStep,
-    WebhookSuccessCondition,
+    UpgradeFullNameAction, UploadDocumentAction, ValidateDepositAction, VerifyOtpAction,
+    WaitAction, WebhookBehavior, WebhookExtractionRule, WebhookHttpConfig, WebhookRetryPolicy,
+    WebhookStep, WebhookSuccessCondition,
 };
 pub use actor::Actor;
 pub use context::{

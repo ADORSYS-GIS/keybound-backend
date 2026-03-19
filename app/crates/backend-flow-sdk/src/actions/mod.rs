@@ -10,6 +10,7 @@ mod retry;
 mod set;
 mod update_phone_number;
 mod update_user_metadata;
+mod upgrade_full_name;
 mod wait;
 mod webhook;
 
@@ -25,6 +26,7 @@ pub use retry::RetryAction;
 pub use set::SetAction;
 pub use update_phone_number::UpdatePhoneNumberAction;
 pub use update_user_metadata::UpdateUserMetadataAction;
+pub use upgrade_full_name::UpgradeFullNameAction;
 pub use wait::WaitAction;
 
 pub use webhook::{
