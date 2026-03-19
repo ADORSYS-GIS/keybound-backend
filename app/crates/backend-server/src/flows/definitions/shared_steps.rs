@@ -51,9 +51,9 @@ impl Step for ResolveRecipientStep {
         let phone = resolve_user_phone(ctx)?;
 
         tracing::info!(
-        "[RESOLVE_RECIPIENT] Resolving recipient for deposit, phone: {}",
-        phone
-    );
+            "[RESOLVE_RECIPIENT] Resolving recipient for deposit, phone: {}",
+            phone
+        );
 
         let fullname = resolve_full_name(ctx);
 
@@ -62,29 +62,29 @@ impl Step for ResolveRecipientStep {
 
         let updates = ContextUpdates {
             session_context_patch: Some(json!({
-            "recipient_name": recipient_contact.as_ref().map(|r| r.full_name.clone()).unwrap_or_else(|| fullname.unwrap_or("Unknown").to_string()),
-            "recipient_phone": recipient_contact.as_ref().map(|r| r.phone_number.clone()).unwrap_or_else(|| phone.to_string()),
-            "recipient_staff_id": recipient_contact.as_ref().map(|r| r.staff_id.clone()).unwrap_or_default(),
-            "recipient_full_name": recipient_contact.as_ref().map(|r| r.full_name.clone()).unwrap_or_else(|| "Unknown".to_string()),
-            "deposit_amount": ctx.input.get("amount"),
-            "deposit_currency": ctx.input.get("currency"),
-            "provider": recipient_contact.as_ref().map(|r| r.staff_id.clone())
-        })),
+                "recipient_name": recipient_contact.as_ref().map(|r| r.full_name.clone()).unwrap_or_else(|| fullname.unwrap_or("Unknown").to_string()),
+                "recipient_phone": recipient_contact.as_ref().map(|r| r.phone_number.clone()).unwrap_or_else(|| phone.to_string()),
+                "recipient_staff_id": recipient_contact.as_ref().map(|r| r.staff_id.clone()).unwrap_or_default(),
+                "recipient_full_name": recipient_contact.as_ref().map(|r| r.full_name.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                "deposit_amount": ctx.input.get("amount"),
+                "deposit_currency": ctx.input.get("currency"),
+                "provider": recipient_contact.as_ref().map(|r| r.staff_id.clone())
+            })),
             flow_context_patch: Some(json!({
-            "provider_matched": recipient_contact.is_some()
-        })),
+                "provider_matched": recipient_contact.is_some()
+            })),
             user_metadata_patch: None,
             notifications: None,
         };
 
         Ok(StepOutcome::Done {
             output: Some(json!({
-            "recipientContact": recipient_contact.map(|r| json!({
-                "staffId": r.staff_id,
-                "fullName": r.full_name,
-                "phoneNumber": r.phone_number
-            })).unwrap_or(serde_json::Value::Null)
-        })),
+                "recipientContact": recipient_contact.map(|r| json!({
+                    "staffId": r.staff_id,
+                    "fullName": r.full_name,
+                    "phoneNumber": r.phone_number
+                })).unwrap_or(serde_json::Value::Null)
+            })),
             updates: Some(Box::new(updates)),
         })
     }

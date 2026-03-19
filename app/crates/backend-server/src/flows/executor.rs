@@ -1,7 +1,7 @@
 use super::runtime::{merge_json_value, resolve_transition, step_services};
 use crate::state::AppState;
 use backend_core::Error;
-use backend_flow_sdk::{Actor, RetryConfig, StepContext, StepOutcome};
+use backend_flow_sdk::{Actor, HumanReadableId, RetryConfig, StepContext, StepOutcome};
 use backend_repository::FlowStepPatch;
 use chrono::Utc;
 use serde_json::Value;
@@ -251,17 +251,28 @@ impl FlowExecutor {
                         )
                     })?;
 
-                let next_step_id = backend_id::flow_step_id()?;
-                let mut updated_step_ids = flow.step_ids.clone();
-                if let Some(arr) = updated_step_ids.as_array_mut() {
-                    arr.push(serde_json::json!({ "id": &next_step_id, "type": &next_step_type }));
-                }
+                let existing_steps = self.state.flow.list_steps_for_flow(&flow.id).await?;
+                let next_attempt = existing_steps
+                    .iter()
+                    .filter(|existing| existing.step_type == next_step_type)
+                    .count();
+                let next_human_suffix = if next_attempt == 0 {
+                    next_step_type.to_owned()
+                } else {
+                    format!("{}-{}", next_step_type, next_attempt)
+                };
+                let next_step_human_id = HumanReadableId::parse(flow.human_id.clone())
+                    .map_err(|error| Error::internal("INVALID_FLOW_HUMAN_ID", error.to_string()))?
+                    .with_suffix(&next_human_suffix)
+                    .map_err(|error| Error::internal("INVALID_STEP_HUMAN_ID", error.to_string()))?
+                    .to_string();
 
-                self.state
+                let created_step = self
+                    .state
                     .flow
                     .create_step(backend_repository::FlowStepCreateInput {
-                        id: next_step_id,
-                        human_id: step.human_id.clone(),
+                        id: backend_id::flow_step_id()?,
+                        human_id: next_step_human_id,
                         flow_id: flow.id.clone(),
                         step_type: next_step_type.to_string(),
                         actor: next_step_def.actor().to_string(),
@@ -278,6 +289,11 @@ impl FlowExecutor {
                         finished_at: None,
                     })
                     .await?;
+
+                let mut updated_step_ids = flow.step_ids.clone();
+                if let Some(arr) = updated_step_ids.as_array_mut() {
+                    arr.push(serde_json::json!(created_step.id));
+                }
 
                 self.state
                     .flow

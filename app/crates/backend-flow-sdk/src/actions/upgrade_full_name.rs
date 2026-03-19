@@ -354,7 +354,10 @@ mod tests {
     async fn execute_can_read_input_from_previous_step_output() {
         let action = UpgradeFullNameAction;
         let mut config = HashMap::new();
-        config.insert("source_step_output".to_owned(), json!("await_admin_decision"));
+        config.insert(
+            "source_step_output".to_owned(),
+            json!("await_admin_decision"),
+        );
 
         let ctx = StepContext {
             session_id: "sess-1".to_owned(),
