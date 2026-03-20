@@ -161,6 +161,7 @@ pub enum SmsProviderType {
     Console,
     Sns,
     Api,
+    Avlytext,
 }
 
 /// SMS configuration for OTP delivery.
@@ -169,6 +170,8 @@ pub struct SmsConfig {
     pub provider: SmsProviderType,
     #[serde(default)]
     pub api: Option<SmsApi>,
+    #[serde(default)]
+    pub avlytext: Option<AvlytextConfig>,
 }
 
 /// Third-party SMS API configuration.
@@ -176,6 +179,14 @@ pub struct SmsConfig {
 pub struct SmsApi {
     pub base_url: String,
     pub auth_token: Option<String>,
+}
+
+/// Avlytext SMS provider configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AvlytextConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub sender_id: String,
 }
 
 /// Flow configuration for YAML-based flow and session definitions.

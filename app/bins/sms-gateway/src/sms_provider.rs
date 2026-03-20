@@ -96,6 +96,76 @@ impl ApiSmsProvider {
     }
 }
 
+/// Avlytext SMS provider
+pub struct AvlytextSmsProvider {
+    client: reqwest::Client,
+    base_url: String,
+    api_key: String,
+    sender_id: String,
+}
+
+impl AvlytextSmsProvider {
+    pub fn new(
+        client: reqwest::Client,
+        base_url: String,
+        api_key: String,
+        sender_id: String,
+    ) -> Self {
+        Self {
+            client,
+            base_url,
+            api_key,
+            sender_id,
+        }
+    }
+}
+
+#[async_trait]
+impl SmsProvider for AvlytextSmsProvider {
+    async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        let url = format!(
+            "{}/v1/sms?api_key={}",
+            self.base_url.trim_end_matches('/'),
+            self.api_key
+        );
+        let message = format!("Your verification code is: {}", otp);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&json!({
+                "sender": self.sender_id,
+                "recipient": msisdn,
+                "text": message,
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    format!("Failed to contact Avlytext API: {:?}", e),
+                )
+            })?;
+
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else if status.is_server_error() {
+            let error_text = response.text().await.unwrap_or_default();
+            Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("Avlytext API server error ({}): {}", status, error_text),
+            ))
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            Err(Error::internal(
+                "SMS_SEND_PERMANENT",
+                format!("Avlytext API client error ({}): {}", status, error_text),
+            ))
+        }
+    }
+}
+
 #[async_trait]
 impl SmsProvider for ApiSmsProvider {
     async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
@@ -351,6 +421,36 @@ mod tests {
             token: "token123".to_string(),
         };
         let result = process_notification_job(provider, job).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn avlytext_sms_provider_sends_sms() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = AvlytextSmsProvider::new(
+            client,
+            server.uri(),
+            "test_api_key".to_string(),
+            "AvlyText".to_string(),
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/v1/sms"))
+            .and(wiremock::matchers::query_param(
+                "api_key",
+                "test_api_key",
+            ))
+            .and(wiremock::matchers::body_json(json!({
+                "sender": "AvlyText",
+                "recipient": "1234567890",
+                "text": "Your verification code is: 123456",
+            })))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
         assert!(result.is_ok());
     }
 }

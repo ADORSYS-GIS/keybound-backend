@@ -4,8 +4,8 @@ use backend_core::NotificationJob;
 use clap::Parser;
 use mimalloc::MiMalloc;
 use sms_provider::{
-    is_permanent_error, process_notification_job, ApiSmsProvider, ConsoleSmsProvider,
-    SnsSmsProvider,
+    is_permanent_error, process_notification_job, ApiSmsProvider, AvlytextSmsProvider,
+    ConsoleSmsProvider, SnsSmsProvider,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -123,6 +123,19 @@ async fn create_sms_provider(
                 api_config.auth_token.clone(),
             )))
         }
+        SmsProviderType::Avlytext => {
+            let avlytext_config = config.avlytext.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("Avlytext configuration is required when provider is 'avlytext'")
+            })?;
+            info!("Using Avlytext SMS provider: {}", avlytext_config.base_url);
+            let client = reqwest::Client::new();
+            Ok(Arc::new(AvlytextSmsProvider::new(
+                client,
+                avlytext_config.base_url.clone(),
+                avlytext_config.api_key.clone(),
+                avlytext_config.sender_id.clone(),
+            )))
+        }
     }
 }
 
@@ -183,3 +196,4 @@ async fn send_otp(
         }
     }
 }
+
