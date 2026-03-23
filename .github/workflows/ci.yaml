@@ -446,6 +446,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tags: ${{ steps.setup.outputs.tags }}
+      tags_sms: ${{ steps.setup_sms.outputs.tags }}
       version: ${{ needs.cargo-version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
@@ -454,6 +455,11 @@ jobs:
         with:
           app-version: ${{ needs.cargo-version.outputs.version }}
           image-name: ${{ github.repository }}
+      - uses: ./.github/actions/setup-docker
+        id: setup_sms
+        with:
+          app-version: ${{ needs.cargo-version.outputs.version }}
+          image-name: ${{ github.repository }}-sms-gateway
       - name: Tags report
         run: |
           {
@@ -461,10 +467,14 @@ jobs:
             echo "- Workspace version: ${{ needs.cargo-version.outputs.version }}"
             echo "- Latest release/tag detected: ${{ needs.cargo-version.outputs.latest_tag }}"
             echo "- New release required: **${{ needs.cargo-version.outputs.changed }}**"
-            echo "- Tags:"
+            echo "- Tags (user-storage):"
             while IFS= read -r tag; do
               [ -n "$tag" ] && echo "  - ${tag}"
             done <<< "${{ steps.setup.outputs.tags }}"
+            echo "- Tags (sms-gateway):"
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && echo "  - ${tag}"
+            done <<< "${{ steps.setup_sms.outputs.tags }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   container-build-prod-arch:
@@ -521,10 +531,10 @@ jobs:
             echo "arch_tags_sms<<EOF"
             while IFS= read -r tag; do
               [ -z "$tag" ] && continue
-              arch_tag_sms="$(echo "$tag" | sed 's|user-storage|sms-gateway|g')-${{ matrix.arch }}"
+              arch_tag_sms="${tag}-${{ matrix.arch }}"
               [ -z "$first_tag_sms" ] && first_tag_sms="$arch_tag_sms"
               echo "$arch_tag_sms"
-            done <<< "${{ needs.container-build-prod-prepare.outputs.tags }}"
+            done <<< "${{ needs.container-build-prod-prepare.outputs.tags_sms }}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           echo "first_tag=${first_tag}" >> "$GITHUB_OUTPUT"
@@ -609,8 +619,10 @@ jobs:
             if [ -z "$first_sizes" ]; then
               first_sizes="${sizes:-unknown}"
             fi
+          done <<< "${{ needs.container-build-prod-prepare.outputs.tags }}"
 
-            tag_sms="$(echo "$tag" | sed 's|user-storage|sms-gateway|g')"
+          while IFS= read -r tag_sms; do
+            [ -z "$tag_sms" ] && continue
             [ -z "$first_tag_sms" ] && first_tag_sms="$tag_sms"
             docker buildx imagetools create \
               -t "$tag_sms" \
@@ -622,7 +634,8 @@ jobs:
             if [ -z "$first_sizes_sms" ]; then
               first_sizes_sms="${sizes_sms:-unknown}"
             fi
-          done <<< "${{ needs.container-build-prod-prepare.outputs.tags }}"
+          done <<< "${{ needs.container-build-prod-prepare.outputs.tags_sms }}"
+          
           echo "first_tag=${first_tag}" >> "$GITHUB_OUTPUT"
           echo "first_sizes=${first_sizes}" >> "$GITHUB_OUTPUT"
           echo "first_tag_sms=${first_tag_sms}" >> "$GITHUB_OUTPUT"
