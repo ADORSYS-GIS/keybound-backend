@@ -331,21 +331,33 @@ jobs:
           cp -r flows image_ctx/
           cp -r sessions image_ctx/
           cp deploy/docker/user-storage/Dockerfile.runtime image_ctx/Dockerfile
-      - name: Set image tag
+      - name: Set image tags
         id: image
         run: |
           tag="ghcr.io/${{ github.repository_owner }}/user-storage:dev-${{ github.sha }}-${{ matrix.arch }}"
+          tag_sms="ghcr.io/${{ github.repository_owner }}/sms-gateway:dev-${{ github.sha }}-${{ matrix.arch }}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "tag_sms=${tag_sms}" >> "$GITHUB_OUTPUT"
       - name: Build and push dev image
         id: build_image
         uses: docker/build-push-action@v6
         with:
           context: image_ctx
-          file: image_ctx/Dockerfile
+          file: deploy/docker/user-storage/Dockerfile.runtime
           push: true
           no-cache: false
           platforms: ${{ matrix.platform }}
           tags: ${{ steps.image.outputs.tag }}
+      - name: Build and push dev image (sms-gateway)
+        id: build_image_sms
+        uses: docker/build-push-action@v6
+        with:
+          context: image_ctx
+          file: deploy/docker/sms-gateway/Dockerfile.runtime
+          push: true
+          no-cache: false
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.image.outputs.tag_sms }}
       - name: Collect image metadata
         id: image_meta
         run: |
@@ -394,6 +406,17 @@ jobs:
           total_sizes="$(printf '%s\n' "$inspect_output" | awk '/^  Size:/ { print $2 }' | paste -sd ', ' -)"
           echo "tag=${base_tag}" >> "$GITHUB_OUTPUT"
           echo "sizes=${total_sizes:-unknown}" >> "$GITHUB_OUTPUT"
+
+          base_tag_sms="ghcr.io/${{ github.repository_owner }}/sms-gateway:dev-${{ github.sha }}"
+          docker buildx imagetools create \
+            -t "${base_tag_sms}" \
+            "${base_tag_sms}-amd64" \
+            "${base_tag_sms}-arm64"
+          inspect_output_sms="$(docker buildx imagetools inspect "${base_tag_sms}")"
+          printf '%s\n' "$inspect_output_sms"
+          total_sizes_sms="$(printf '%s\n' "$inspect_output_sms" | awk '/^  Size:/ { print $2 }' | paste -sd ', ' -)"
+          echo "tag_sms=${base_tag_sms}" >> "$GITHUB_OUTPUT"
+          echo "sizes_sms=${total_sizes_sms:-unknown}" >> "$GITHUB_OUTPUT"
       - name: Manifest report
         if: always()
         run: |
@@ -403,6 +426,9 @@ jobs:
             echo "- Tag: ${{ steps.manifest.outputs.tag }}"
             echo "- Source slices: ${{ steps.manifest.outputs.tag }}-amd64, ${{ steps.manifest.outputs.tag }}-arm64"
             echo "- Per-arch manifest sizes: ${{ steps.manifest.outputs.sizes }}"
+            echo "- SMS Gateway Tag: ${{ steps.manifest.outputs.tag_sms }}"
+            echo "- SMS Gateway Source slices: ${{ steps.manifest.outputs.tag_sms }}-amd64, ${{ steps.manifest.outputs.tag_sms }}-arm64"
+            echo "- SMS Gateway Per-arch manifest sizes: ${{ steps.manifest.outputs.sizes_sms }}"
             echo "- Timestamp: ${timestamp} UTC"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -480,6 +506,7 @@ jobs:
         id: tags
         run: |
           first_tag=""
+          first_tag_sms=""
           {
             echo "arch_tags<<EOF"
             while IFS= read -r tag; do
@@ -490,17 +517,40 @@ jobs:
             done <<< "${{ needs.container-build-prod-prepare.outputs.tags }}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+          {
+            echo "arch_tags_sms<<EOF"
+            while IFS= read -r tag; do
+              [ -z "$tag" ] && continue
+              arch_tag_sms="$(echo "$tag" | sed 's|user-storage|sms-gateway|g')-${{ matrix.arch }}"
+              [ -z "$first_tag_sms" ] && first_tag_sms="$arch_tag_sms"
+              echo "$arch_tag_sms"
+            done <<< "${{ needs.container-build-prod-prepare.outputs.tags }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "first_tag=${first_tag}" >> "$GITHUB_OUTPUT"
+          echo "first_tag_sms=${first_tag_sms}" >> "$GITHUB_OUTPUT"
       - name: Build and push prod image
         id: build_image
         uses: docker/build-push-action@v6
         with:
           context: image_ctx
-          file: image_ctx/Dockerfile
+          file: deploy/docker/user-storage/Dockerfile.runtime
           push: true
           no-cache: true
           platforms: ${{ matrix.platform }}
           tags: ${{ steps.tags.outputs.arch_tags }}
+          provenance: true
+          sbom: true
+      - name: Build and push prod image (sms-gateway)
+        id: build_image_sms
+        uses: docker/build-push-action@v6
+        with:
+          context: image_ctx
+          file: deploy/docker/sms-gateway/Dockerfile.runtime
+          push: true
+          no-cache: true
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.tags.outputs.arch_tags_sms }}
           provenance: true
           sbom: true
       - name: Collect image metadata
@@ -544,6 +594,8 @@ jobs:
         run: |
           first_tag=""
           first_sizes=""
+          first_tag_sms=""
+          first_sizes_sms=""
           while IFS= read -r tag; do
             [ -z "$tag" ] && continue
             [ -z "$first_tag" ] && first_tag="$tag"
@@ -557,9 +609,24 @@ jobs:
             if [ -z "$first_sizes" ]; then
               first_sizes="${sizes:-unknown}"
             fi
+
+            tag_sms="$(echo "$tag" | sed 's|user-storage|sms-gateway|g')"
+            [ -z "$first_tag_sms" ] && first_tag_sms="$tag_sms"
+            docker buildx imagetools create \
+              -t "$tag_sms" \
+              "${tag_sms}-amd64" \
+              "${tag_sms}-arm64"
+            inspect_output_sms="$(docker buildx imagetools inspect "$tag_sms")"
+            printf '%s\n' "$inspect_output_sms"
+            sizes_sms="$(printf '%s\n' "$inspect_output_sms" | awk '/^  Size:/ { print $2 }' | paste -sd ', ' -)"
+            if [ -z "$first_sizes_sms" ]; then
+              first_sizes_sms="${sizes_sms:-unknown}"
+            fi
           done <<< "${{ needs.container-build-prod-prepare.outputs.tags }}"
           echo "first_tag=${first_tag}" >> "$GITHUB_OUTPUT"
           echo "first_sizes=${first_sizes}" >> "$GITHUB_OUTPUT"
+          echo "first_tag_sms=${first_tag_sms}" >> "$GITHUB_OUTPUT"
+          echo "first_sizes_sms=${first_sizes_sms}" >> "$GITHUB_OUTPUT"
       - name: Manifest report
         if: always()
         run: |
@@ -568,6 +635,8 @@ jobs:
             echo "### 🚀 Container Report: Prod Manifest"
             echo "- Example tag: ${{ steps.manifests.outputs.first_tag }}"
             echo "- Per-arch manifest sizes: ${{ steps.manifests.outputs.first_sizes }}"
+            echo "- Example tag (sms-gateway): ${{ steps.manifests.outputs.first_tag_sms }}"
+            echo "- Per-arch manifest sizes (sms-gateway): ${{ steps.manifests.outputs.first_sizes_sms }}"
             echo "- Source tags: ${{ needs.container-build-prod-prepare.outputs.tags }}"
             echo "- Timestamp: ${timestamp} UTC"
           } >> "$GITHUB_STEP_SUMMARY"
