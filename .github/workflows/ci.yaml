@@ -290,8 +290,13 @@ jobs:
             echo "- Duration: ${duration}s"
             echo "- Backend size: ${{ steps.sizes.outputs.backend_bytes }} bytes"
             echo "- Healthcheck size: ${{ steps.sizes.outputs.health_bytes }} bytes"
+            echo "- SMS Gateway size: ${{ steps.sizes.outputs.sms_bytes }} bytes"
+            echo "- Total MUSL payload: ${{ steps.sizes.outputs.total_bytes }} bytes"
+            echo "- Timestamp: ${timestamp} UTC"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   container-build-dev:
-    name: Container Build Dev 🐳
+    name: Container Build Dev (${{ matrix.component }}) 🐳
     permissions:
       contents: read
       packages: write
@@ -301,6 +306,10 @@ jobs:
       - test-oas
     if: github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [user-storage, sms-gateway]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-docker
@@ -317,13 +326,13 @@ jobs:
           mv image_ctx/musl-binaries-amd64 image_ctx/amd64
           mv image_ctx/musl-binaries-arm64 image_ctx/arm64
           chmod +x image_ctx/amd64/* image_ctx/arm64/*
-          cp -r flows image_ctx/
-          cp -r sessions image_ctx/
-          cp deploy/docker/user-storage/Dockerfile.runtime image_ctx/Dockerfile
+          cp -r flows image_ctx/ || true
+          cp -r sessions image_ctx/ || true
+          cp deploy/docker/${{ matrix.component }}/Dockerfile.runtime image_ctx/Dockerfile
       - name: Set image tag
         id: image
         run: |
-          tag="ghcr.io/${{ github.repository_owner }}/user-storage:dev-${{ github.sha }}"
+          tag="ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}:dev-${{ github.sha }}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
       - name: Build and push dev image
         id: build_image
@@ -339,14 +348,14 @@ jobs:
         if: always()
         run: |
           {
-            echo "### 🐳 Container Report: Dev"
+            echo "### 🐳 Container Report: Dev (${{ matrix.component }})"
             echo "- Platforms: linux/amd64,linux/arm64"
             echo "- Tag: ${{ steps.image.outputs.tag }}"
             echo "- Digest: ${{ steps.build_image.outputs.digest }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   container-build-prod:
-    name: Container Build Prod 🐧
+    name: Container Build Prod (${{ matrix.component }}) 🐧
     permissions:
       contents: read
       packages: write
@@ -357,6 +366,10 @@ jobs:
       - test-oas
     if: github.ref == 'refs/heads/master' && needs.cargo-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [user-storage, sms-gateway]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-docker
@@ -364,6 +377,11 @@ jobs:
         with:
           app-version: ${{ needs.cargo-version.outputs.version }}
           image-name: ${{ github.repository }}
+      - uses: ./.github/actions/setup-docker
+        id: setup_sms
+        with:
+          app-version: ${{ needs.cargo-version.outputs.version }}
+          image-name: ${{ github.repository }}-sms-gateway
       - uses: actions/download-artifact@v5
         with:
           pattern: musl-binaries-*
@@ -373,11 +391,13 @@ jobs:
           mv image_ctx/musl-binaries-amd64 image_ctx/amd64
           mv image_ctx/musl-binaries-arm64 image_ctx/arm64
           chmod +x image_ctx/amd64/* image_ctx/arm64/*
-          cp -r flows image_ctx/
-          cp -r sessions image_ctx/
-          cp deploy/docker/user-storage/Dockerfile.runtime image_ctx/Dockerfile
+          cp -r flows image_ctx/ || true
+          cp -r sessions image_ctx/ || true
+          cp deploy/docker/${{ matrix.component }}/Dockerfile.runtime image_ctx/Dockerfile
       - name: Derive tags
         id: tags
+        env:
+          COMPONENT_TAGS: ${{ matrix.component == 'sms-gateway' && steps.setup_sms.outputs.tags || steps.setup.outputs.tags }}
         run: |
           first_tag=""
           {
@@ -386,7 +406,7 @@ jobs:
               [ -z "$tag" ] && continue
               [ -z "$first_tag" ] && first_tag="$tag"
               echo "$tag"
-            done <<< "${{ steps.setup.outputs.tags }}"
+            done <<< "${COMPONENT_TAGS}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           echo "first_tag=${first_tag}" >> "$GITHUB_OUTPUT"
@@ -406,7 +426,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### 🐧 Container Report: Prod"
+            echo "### 🐧 Container Report: Prod (${{ matrix.component }})"
             echo "- Platforms: linux/amd64,linux/arm64"
             echo "- Example tag: ${{ steps.tags.outputs.first_tag }}"
             echo "- Digest: ${{ steps.build_image.outputs.digest }}"
