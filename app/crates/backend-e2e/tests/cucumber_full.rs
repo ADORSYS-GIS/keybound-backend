@@ -411,7 +411,6 @@ async fn setup_fixtures(world: &mut FullE2eWorld) {
 
     if let Err(error) = ensure_bff_fixtures(&world.env().unwrap().database_url, &subject).await {
         world.error = Some(error.to_string());
-        return;
     }
 }
 

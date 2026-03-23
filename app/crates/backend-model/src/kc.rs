@@ -6,7 +6,7 @@
 use crate::db;
 use chrono::{DateTime, Utc};
 use hex::encode;
-use log::{debug, info};
+use log::info;
 use o2o::o2o;
 use serde_json::Value;
 use serde_json::json;
@@ -220,7 +220,7 @@ impl UserRecordDto {
 
         let attributes = Self::parse_attributes(row.attributes.clone());
         info!("attributes >> {:?}", attributes.clone());
-        info!("user_data_rows >> {:?}", user_data_rows.clone());
+        info!("user_data_rows >> {:?}", user_data_rows);
 
         let custom = Self::build_custom(attributes.clone(), user_data_rows);
 

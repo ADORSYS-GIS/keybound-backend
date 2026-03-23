@@ -236,14 +236,15 @@ jobs:
           set -euo pipefail
           start_ts="$(date +%s)"
           set +e
-          cargo build --release --locked --target "${MUSL_TARGET}" -p backend
+          cargo build --release --locked --target "${MUSL_TARGET}" -p backend -p sms-gateway
           build_rc=$?
           set -e
           if [ "${build_rc}" -eq 0 ]; then
             mkdir -p dist
             cp "target/${MUSL_TARGET}/release/backend" dist/backend
             cp "target/${MUSL_TARGET}/release/health" dist/healthcheck
-            chmod +x dist/backend dist/healthcheck
+            cp "target/${MUSL_TARGET}/release/sms-gateway" dist/sms-gateway
+            chmod +x dist/backend dist/healthcheck dist/sms-gateway
           fi
           end_ts="$(date +%s)"
           echo "duration_seconds=$((end_ts - start_ts))" >> "$GITHUB_OUTPUT"
@@ -254,14 +255,17 @@ jobs:
         run: |
           backend_bytes="n/a"
           health_bytes="n/a"
+          sms_bytes="n/a"
           total_bytes="n/a"
-          if [ -f dist/backend ] && [ -f dist/healthcheck ]; then
+          if [ -f dist/backend ] && [ -f dist/healthcheck ] && [ -f dist/sms-gateway ]; then
             backend_bytes="$(stat -c%s dist/backend)"
             health_bytes="$(stat -c%s dist/healthcheck)"
-            total_bytes="$((backend_bytes + health_bytes))"
+            sms_bytes="$(stat -c%s dist/sms-gateway)"
+            total_bytes="$((backend_bytes + health_bytes + sms_bytes))"
           fi
           echo "backend_bytes=${backend_bytes}" >> "$GITHUB_OUTPUT"
           echo "health_bytes=${health_bytes}" >> "$GITHUB_OUTPUT"
+          echo "sms_bytes=${sms_bytes}" >> "$GITHUB_OUTPUT"
           echo "total_bytes=${total_bytes}" >> "$GITHUB_OUTPUT"
       - name: Upload MUSL binaries
         if: steps.build.outcome == 'success'
@@ -286,6 +290,7 @@ jobs:
             echo "- Duration: ${duration}s"
             echo "- Backend size: ${{ steps.sizes.outputs.backend_bytes }} bytes"
             echo "- Healthcheck size: ${{ steps.sizes.outputs.health_bytes }} bytes"
+            echo "- SMS Gateway size: ${{ steps.sizes.outputs.sms_bytes }} bytes"
             echo "- Total MUSL payload: ${{ steps.sizes.outputs.total_bytes }} bytes"
             echo "- Timestamp: ${timestamp} UTC"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -322,7 +327,9 @@ jobs:
           path: image_ctx
       - name: Prepare image context
         run: |
-          chmod +x image_ctx/backend image_ctx/healthcheck
+          chmod +x image_ctx/backend image_ctx/healthcheck image_ctx/sms-gateway
+          cp -r flows image_ctx/
+          cp -r sessions image_ctx/
           cp deploy/docker/user-storage/Dockerfile.runtime image_ctx/Dockerfile
       - name: Set image tag
         id: image
@@ -465,7 +472,9 @@ jobs:
           path: image_ctx
       - name: Prepare image context
         run: |
-          chmod +x image_ctx/backend image_ctx/healthcheck
+          chmod +x image_ctx/backend image_ctx/healthcheck image_ctx/sms-gateway
+          cp -r flows image_ctx/
+          cp -r sessions image_ctx/
           cp deploy/docker/user-storage/Dockerfile.runtime image_ctx/Dockerfile
       - name: Derive architecture tags
         id: tags
