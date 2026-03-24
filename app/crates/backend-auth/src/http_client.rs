@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use backend_core::AppResult;
 use reqwest::Client;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tracing::instrument;
+use serde::Serialize;
+use tracing::{error, instrument};
 
 /// HTTP client wrapper with connection pooling and timeouts.
 #[derive(Clone)]
@@ -38,25 +38,25 @@ impl HttpClient {
         &self.client
     }
 
-    #[instrument(level = "debug", skip(self))]
+    #[instrument(skip(self))]
     pub async fn fetch_json<R: DeserializeOwned>(&self, url: &str) -> AppResult<R> {
-        let resp = self.client.get(url).send().await?.error_for_status()?;
+        let resp = self.client.get(url).send().await.map_err(|e| {
+            error!(url = %url, error = %e, error_debug = ?e, "oidc http request failed");
+            e
+        })?;
         Ok(resp.json().await?)
     }
 
-    #[instrument(level = "debug", skip(self, body))]
+    #[instrument(skip(self, body))]
     pub async fn post_json<B: Serialize, R: DeserializeOwned>(
         &self,
         url: &str,
         body: &B,
     ) -> AppResult<R> {
-        let resp = self
-            .client
-            .post(url)
-            .json(body)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp = self.client.post(url).json(body).send().await.map_err(|e| {
+            error!(url = %url, error = %e, error_debug = ?e, "oidc http request failed");
+            e
+        })?;
         Ok(resp.json().await?)
     }
 
