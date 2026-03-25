@@ -33,6 +33,7 @@ async fn oidc_state_fetches_discovery_and_jwks_via_http() {
     let oidc_state = OidcState::new(
         mock_server.uri(),
         None,
+        None,
         Duration::from_secs(300),
         Duration::from_secs(300),
         HttpClient::new_with_defaults().expect("http client"),
@@ -42,5 +43,48 @@ async fn oidc_state_fetches_discovery_and_jwks_via_http() {
     assert!(first.keys.is_empty());
 
     let second = oidc_state.get_jwks().await.expect("cached jwks fetch");
+    assert!(second.keys.is_empty());
+}
+
+#[tokio::test]
+async fn oidc_state_uses_jwks_uri_override_when_set() {
+    let mock_server = MockServer::start().await;
+
+    let discovery_path = "/.well-known/openid-configuration";
+    let jwks_path = "/jwks";
+
+    Mock::given(method("GET"))
+        .and(path(discovery_path))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(jwks_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"keys": []})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let oidc_state = OidcState::new(
+        "http://some-other-issuer".to_owned(),
+        Some(format!("{}{}", mock_server.uri(), jwks_path)),
+        None,
+        Duration::from_secs(300),
+        Duration::from_secs(300),
+        HttpClient::new_with_defaults().expect("http client"),
+    );
+
+    let first = oidc_state
+        .get_jwks()
+        .await
+        .expect("first jwks fetch with override");
+    assert!(first.keys.is_empty());
+
+    let second = oidc_state
+        .get_jwks()
+        .await
+        .expect("cached jwks fetch with override");
     assert!(second.keys.is_empty());
 }

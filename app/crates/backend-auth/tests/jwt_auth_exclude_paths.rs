@@ -57,6 +57,7 @@ fn build_oidc_state() -> Arc<OidcState> {
     Arc::new(OidcState::new(
         "http://localhost".to_string(),
         None,
+        None,
         std::time::Duration::from_secs(3600),
         std::time::Duration::from_secs(3600),
         http_client,

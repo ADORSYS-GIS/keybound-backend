@@ -19,6 +19,8 @@ pub struct OidcState {
     pub(crate) audiences: Option<Vec<String>>,
     /// OIDC issuer URL
     issuer: String,
+    /// JWKS URI override
+    jwks_uri_override: Option<String>,
     /// Time-to-live for cached discovery document
     discovery_ttl: Duration,
     /// Time-to-live for cached JWKS
@@ -51,6 +53,7 @@ impl OidcState {
     /// Creates a new OidcState instance.
     pub fn new(
         issuer: String,
+        jwks_uri_override: Option<String>,
         audiences: Option<Vec<String>>,
         discovery_ttl: Duration,
         jwks_ttl: Duration,
@@ -59,6 +62,7 @@ impl OidcState {
         Self {
             audiences,
             issuer,
+            jwks_uri_override,
             discovery_ttl,
             jwks_ttl,
             http,
@@ -95,11 +99,17 @@ impl OidcState {
     pub async fn get_jwks(&self) -> AppResult<Arc<jsonwebtoken::jwk::JwkSet>> {
         let now = Instant::now();
         let mut inner = self.inner.write().await;
-        // Check again after acquiring write lock
         if let Some((jwks, fetched)) = &inner.jwks
             && now.duration_since(*fetched) < self.jwks_ttl
         {
             return Ok(jwks.clone());
+        }
+
+        if let Some(url) = &self.jwks_uri_override {
+            let jwks: jsonwebtoken::jwk::JwkSet = self.http.fetch_json(url).await?;
+            let jwks = Arc::new(jwks);
+            inner.jwks = Some((jwks.clone(), Instant::now()));
+            return Ok(jwks);
         }
 
         let doc = match &inner.discovery {
