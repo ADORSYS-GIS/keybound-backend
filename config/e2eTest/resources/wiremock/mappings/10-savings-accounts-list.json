@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/accounts/savings"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "accounts": [
+        {
+          "id": 101,
+          "accountNo": "SV-0001",
+          "clientId": 501,
+          "clientName": "Azamra User"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/sessions",
+    "bodyPatterns": [
+      { "contains": "\"userId\":\"azamra-user-unauthorized-id\"" }
+    ]
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "Unauthorized"
+    }
+  }
+}
