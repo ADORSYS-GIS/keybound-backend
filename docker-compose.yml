@@ -64,76 +64,16 @@ services:
       timeout: 3s
       retries: 20
 
-  download-core-tools:
-    image: alpine/curl
-    environment:
-      KEYCLOAK_PLUGIN_VERSION: "0.2.3"
-      OPENAPI_GENERATOR_VERSION: "7.19.0"
-    command:
-      - /bin/sh
-      - -c
-      - |
-        set -ex;
-        rm -rf /data/*
-        mkdir -p /data/bin
-        mkdir -p /data/kc-plugins
-
-        download() {
-          output="$$1"
-          url="$$2"
-          curl -fL \
-            --retry 8 \
-            --retry-delay 2 \
-            --retry-all-errors \
-            --connect-timeout 10 \
-            --max-time 300 \
-            -o "$$output" "$$url"
-        }
-
-        echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
-        download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
-
-        echo "Download OpenAPI for Keycloak...";
-        download /data/keycloak-interface.openapi.yaml "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
-        echo "Downloaded OpenAPI for Keycloak";
-
-        echo "Download keybound...";
-        download /data/kc-plugins/keycloak-keybound-all.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
-        download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        echo "Downloaded keybound";
-    volumes:
-      - downloaded_data:/data
-
-  keycloak-healthcheck-builder:
-    image: rust:1-alpine
-    depends_on:
-      download-core-tools:
-        condition: service_completed_successfully
-    command:
-      - /bin/sh
-      - -c
-      - |
-        set -eux
-        rm -rf /work
-        mkdir -p /work
-        cp -R /src/. /work/
-        cd /work
-        cargo build --release
-        cp target/release/keycloak-healthcheck /data/bin/keycloak-healthcheck
-        chmod +x /data/bin/keycloak-healthcheck
-    volumes:
-      - ./.docker/keycloak-healthcheck:/src:ro
-      - downloaded_data:/data
-
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.2
     ports:
-      - "0.0.0.0:9026:9026"
+      - "9026:9026"
     environment:
       KC_HTTP_PORT: 9026
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/user-storage
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
       # Dev-only credentials. Do not reuse in production.
       BACKEND_HTTP_BASE_PATH_e2e-testing: "http://user-storage:3000/kc"
       BACKEND_HTTP_SIGNATURE_SECRET_e2e-testing: "some-very-long-secret"
@@ -145,37 +85,25 @@ services:
       NONCE_CACHE_TTL_e2e-testing: "60"
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: password
-    entrypoint: /bin/sh
+    # Native entrypoint (kc.sh) will handle the command
     healthcheck:
-      test:
-        [
-          "CMD",
-          "/downloaded/bin/keycloak-healthcheck",
-          "--url",
-          "http://localhost:9026/realms/e2e-testing",
-          "--contains",
-          "e2e-testing",
-          "--timeout-seconds",
-          "3"
-        ]
-      start_period: 15s
-      interval: 5s
-      timeout: 4s
-      retries: 20
+      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/localhost/9026 && echo -e 'GET /realms/e2e-testing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     command:
-      - -c
-      - |
-        set -e
-        cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers
-        /opt/keycloak/bin/kc.sh start-dev --import-realm --log-level="WARN,com.ssegning.keycloak:debug"
+      - start-dev
+      - --import-realm
+      - --health-enabled=true
+      - --metrics-enabled=true
+      - --log-level=info
     volumes:
-      - ./.docker/keycloak-config/:/opt/keycloak/data/import/:ro
-      - downloaded_data:/downloaded
+      - ./.docker/keycloak-config/realm.e2e.json:/opt/keycloak/data/import/realm.json:ro
+      - ./.docker/downloaded/kc-plugins:/opt/keycloak/providers:ro
+      - ./.docker/downloaded/keycloak-interface.openapi.yaml:/opt/keycloak/keycloak-interface.openapi.yaml:ro
     depends_on:
-      download-core-tools:
-        condition: service_completed_successfully
-      keycloak-healthcheck-builder:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
 
   redis:
     image: redis:latest
@@ -189,7 +117,7 @@ services:
       retries: 5
 
   user-storage:
-    image: ghcr.io/adorsys-gis/user-storage:master76dac53a82ae9482fd4fadba2ef4fba660aae5c3@sha256:543b9120ed009c19ba75c072fdf44a1437f8a797fa040ca9350e4dabc618e4ea
+    image: ghcr.io/adorsys-gis/user-storage:masterd361bd9bf9c7370b47382b30110fdf88b0f4284f
     container_name: user-storage
     restart: unless-stopped
     command:
@@ -258,13 +186,15 @@ services:
         condition: service_healthy
 
   frontend-mobile:
-    image: ghcr.io/skyengpro/azamra-tokenization-frontend-mobile:sha-221e90e-amd
+    image: ghcr.io/skyengpro/azamra-tokenization-frontend-mobile:develop-amd
     container_name: azamra-frontend-mobile
     restart: unless-stopped
     ports:
       - "8083:8080"
     environment:
       EXPO_PUBLIC_FORCE_TRADING: "true"
+    extra_hosts:
+      - "localhost:host-gateway"
     volumes:
       - ./config/frontend-mobile-config.json:/usr/share/nginx/html/config.json:ro
     depends_on:
@@ -274,14 +204,14 @@ services:
         condition: service_healthy
 
   frontend-kyc-mgr:
-    image: ghcr.io/skyengpro/azamra-tokenization-frontend-kyc-mgr:develop-amd
+    image: ghcr.io/skyengpro/azamra-tokenization-frontend-kyc-mgr:sha-221e90e-amd
     container_name: azamra-frontend-kyc-mgr
     restart: unless-stopped
     ports:
       - "8085:3000"
     environment:
       OAUTH2_ISSUER: http://localhost:9026/realms/e2e-testing
-      OAUTH2_INTERNAL_ISSUER: http://localhost:9026/realms/e2e-testing
+      OAUTH2_INTERNAL_ISSUER: http://keycloak:9026/realms/e2e-testing
       OAUTH2_CLIENT_ID: kyc-client
       OAUTH2_CLIENT_SECRET: some-secret
       OAUTH2_SCOPES: openid profile email
@@ -290,11 +220,12 @@ services:
       REDIS_KEY_PREFIX: kyc-mgr
       AUTH_SESSION_TTL_SECONDS: 86400
       AUTH_REFRESH_SKEW_SECONDS: 60
-      API_URL: http://bff:8082/staff
+      API_URL: http://user-storage:3000/staff
       KYC_SESSION_TYPES: kyc_fineract
-      NODE_ENV: production
-      BYPASS_AUTH: "false"
-      NEXT_PUBLIC_BYPASS_AUTH: "false"
+      NODE_ENV: development
+      SKIP_ENV_VALIDATION: true
+    extra_hosts:
+      - "localhost:host-gateway"
     depends_on:
       bff:
         condition: service_started
@@ -310,24 +241,31 @@ services:
     ports:
       - "8082:8082"
     environment:
+      SPRING_PROFILES_ACTIVE: docker
       SPRING_CACHE_TYPE: redis
       SPRING_CACHE_REDIS_TIME_TO_LIVE: 10m
       SPRING_CACHE_REDIS_CACHE_NULL_VALUES: "false"
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:9026/realms/e2e-testing
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://localhost:9026/realms/e2e-testing
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/certs
+      APP_SECURITY_SIGNATURE_ENABLED: "false"
       APP_SECURITY_SIGNATURE_MAX_CLOCK_SKEW_SECONDS: "60"
       APP_OAUTH2_CLIENT_ID: web-mobile
-      APP_ASSET_SERVICE_BASE_URL: http://cuss-wiremock:8080
+      APP_SECURITY_VALIDATE_ISSUER: "false"
+      APP_OAUTH2_TOKEN_ENDPOINT_URL: http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token
+      APP_ASSET_SERVICE_BASE_URL: http://cuss-wiremock:8080/api
       APP_CUSS_BASE_URL: http://cuss-wiremock:8080
-      APP_USER_STORAGE_BASE_URL: http://user-storage:3000/bff/
+      APP_USER_STORAGE_BASE_URL: http://user-storage:3000/bff
       APP_PAYMENT_GATEWAY_BASE_URL: http://cuss-wiremock:8080
       APP_KYC_FIRST_DEPOSIT_AMOUNT: "15000"
       APP_KYC_FIRST_DEPOSIT_CURRENCY: XAF
-      APP_AZAMRA_FRONTEND_SERVER_API_BASE_PATH: /api/v1/api
+      APP_AZAMRA_FRONTEND_SERVER_API_BASE_PATH: "api/v1/api"
       MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "*"
       SERVER_PORT: "8082"
       LOGGING_LEVEL_ROOT: DEBUG
+    extra_hosts:
+      - "localhost:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -341,5 +279,8 @@ services:
 volumes:
   postgres_data:
   minio_data:
-  downloaded_data:
 
+networks:
+  default:
+    name: fineract-net
+    driver: bridge
