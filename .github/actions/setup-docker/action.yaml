@@ -1,6 +1,9 @@
 name: Setup Docker
 description: Composite action that logs into GitHub Container Registry using the default workflow token.
 inputs:
+  token:
+    description: GitHub token for GHCR authentication
+    required: true
   app-version:
     description: Version of the application
     required: true
@@ -8,7 +11,7 @@ inputs:
     description: Name of the image
     required: true
   registry:
-    description: Version of the application
+    description: Container registry
     required: false
     default: "ghcr.io"
 outputs:
@@ -29,7 +32,7 @@ runs:
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        password: ${{ inputs.token }}
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 

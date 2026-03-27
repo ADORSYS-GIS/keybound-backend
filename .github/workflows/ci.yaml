@@ -315,6 +315,7 @@ jobs:
       - uses: ./.github/actions/setup-docker
         id: setup
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           app-version: dev-${{ github.sha }}
           image-name: ${{ github.repository_owner }}/${{ matrix.component }}
       - uses: actions/download-artifact@v5
@@ -371,6 +372,7 @@ jobs:
       - uses: ./.github/actions/setup-docker
         id: setup
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           app-version: ${{ needs.cargo-version.outputs.version }}
           image-name: ${{ github.repository_owner }}/${{ matrix.component }}
       - uses: actions/download-artifact@v5
