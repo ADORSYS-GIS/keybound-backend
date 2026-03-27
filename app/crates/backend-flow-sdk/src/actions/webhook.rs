@@ -49,12 +49,32 @@ pub struct WebhookSuccessCondition {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum WebhookAuth {
+    Basic {
+        username: String,
+        password: Option<String>,
+    },
+    Bearer {
+        token: String,
+    },
+    Oauth2 {
+        token_url: String,
+        client_id: String,
+        client_secret: String,
+        scope: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WebhookHttpConfig {
     pub url: String,
     #[serde(default = "default_method")]
     pub method: String,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub auth: Option<WebhookAuth>,
     pub payload: Option<Value>,
     #[serde(default)]
     pub payload_mappings: Vec<WebhookPayloadMapping>,
@@ -115,6 +135,7 @@ impl Default for WebhookHttpConfig {
             url: String::new(),
             method: default_method(),
             headers: HashMap::new(),
+            auth: None,
             payload: None,
             payload_mappings: Vec::new(),
             form_body: None,
@@ -180,6 +201,108 @@ impl Step for WebhookStep {
                 headers.insert(name, val);
             }
         }
+
+        if let Some(auth) = &config.auth {
+            match auth {
+                WebhookAuth::Basic { username, password } => {
+                    let rendered_username = render_template_str(username, ctx);
+                    let rendered_password = password.as_ref().map(|p| render_template_str(p, ctx));
+
+                    let credentials = match rendered_password {
+                        Some(p) => format!("{}:{}", rendered_username, p),
+                        None => format!("{}:", rendered_username),
+                    };
+                    use base64::{Engine as _, engine::general_purpose};
+                    let encoded = general_purpose::STANDARD.encode(credentials.as_bytes());
+
+                    if let Ok(val) =
+                        reqwest::header::HeaderValue::from_str(&format!("Basic {}", encoded))
+                    {
+                        headers.insert(reqwest::header::AUTHORIZATION, val);
+                    }
+                }
+                WebhookAuth::Bearer { token } => {
+                    let rendered_token = render_template_str(token, ctx);
+                    if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!(
+                        "Bearer {}",
+                        rendered_token
+                    )) {
+                        headers.insert(reqwest::header::AUTHORIZATION, val);
+                    }
+                }
+                WebhookAuth::Oauth2 {
+                    token_url,
+                    client_id,
+                    client_secret,
+                    scope,
+                } => {
+                    let rendered_token_url = render_template_str(token_url, ctx);
+                    let rendered_client_id = render_template_str(client_id, ctx);
+                    let rendered_client_secret = render_template_str(client_secret, ctx);
+                    let rendered_scope = scope.as_ref().map(|s| render_template_str(s, ctx));
+
+                    let mut form_params = HashMap::new();
+                    form_params.insert("grant_type", "client_credentials");
+                    form_params.insert("client_id", &rendered_client_id);
+                    form_params.insert("client_secret", &rendered_client_secret);
+                    if let Some(s) = &rendered_scope {
+                        form_params.insert("scope", s);
+                    }
+
+                    // Perform the OAuth2 token request
+                    let token_req: Result<reqwest::Response, reqwest::Error> = self
+                        .client
+                        .post(&rendered_token_url)
+                        .form(&form_params)
+                        .timeout(Duration::from_millis(config.timeout_ms))
+                        .send()
+                        .await;
+
+                    match token_req {
+                        Ok(resp) if resp.status().is_success() => {
+                            if let Ok(token_resp) = resp.json::<Value>().await {
+                                if let Some(access_token) = token_resp
+                                    .get("access_token")
+                                    .and_then(|v: &Value| v.as_str())
+                                {
+                                    if let Ok(val) = reqwest::header::HeaderValue::from_str(
+                                        &format!("Bearer {}", access_token),
+                                    ) {
+                                        headers.insert(reqwest::header::AUTHORIZATION, val);
+                                    }
+                                } else {
+                                    return Ok(StepOutcome::Failed {
+                                        error: "oauth2_missing_access_token".to_string(),
+                                        retryable: false,
+                                    });
+                                }
+                            } else {
+                                return Ok(StepOutcome::Failed {
+                                    error: "oauth2_invalid_response".to_string(),
+                                    retryable: false,
+                                });
+                            }
+                        }
+                        Ok(resp) => {
+                            let status = resp.status();
+                            return Ok(StepOutcome::Failed {
+                                error: format!("oauth2_token_error_{}", status.as_u16()),
+                                retryable: status.is_server_error()
+                                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS,
+                            });
+                        }
+                        Err(e) => {
+                            return Ok(StepOutcome::Failed {
+                                error: format!("oauth2_network_error: {}", e),
+                                retryable: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let _payload = build_payload(&config, ctx)?;
 
         let mut req_builder = self
             .client
@@ -552,5 +675,133 @@ mod tests {
         let payload = build_payload(&config, &ctx).unwrap().unwrap();
         assert_eq!(payload["phone"], "+237690000001");
         assert_eq!(payload["client"], "Mbarga Benn");
+    }
+
+    #[tokio::test]
+    async fn execute_webhook_basic_auth() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/basic"))
+            .and(header("Authorization", "Basic dGVzdHVzZXI6dGVzdHBhc3M=")) // "testuser:testpass" base64
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})))
+            .mount(&mock_server)
+            .await;
+
+        let mut ctx = make_ctx();
+        ctx.services.config = Some(
+            serde_json::from_value(json!({
+                "url": format!("{}/basic", mock_server.uri()),
+                "method": "POST",
+                "auth": {
+                    "type": "basic",
+                    "username": "testuser",
+                    "password": "testpass"
+                }
+            }))
+            .unwrap(),
+        );
+
+        let step = WebhookStep::new();
+        let result = step.execute(&ctx).await.unwrap();
+
+        match result {
+            StepOutcome::Done { .. } => {}
+            _ => panic!("Expected StepOutcome::Done, got {:?}", result),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_webhook_bearer_auth() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/bearer"))
+            .and(header("Authorization", "Bearer my-secret-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})))
+            .mount(&mock_server)
+            .await;
+
+        let mut ctx = make_ctx();
+        ctx.services.config = Some(
+            serde_json::from_value(json!({
+                "url": format!("{}/bearer", mock_server.uri()),
+                "method": "POST",
+                "auth": {
+                    "type": "bearer",
+                    "token": "my-secret-token"
+                }
+            }))
+            .unwrap(),
+        );
+
+        let step = WebhookStep::new();
+        let result = step.execute(&ctx).await.unwrap();
+
+        match result {
+            StepOutcome::Done { .. } => {}
+            _ => panic!("Expected StepOutcome::Done, got {:?}", result),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_webhook_oauth2_auth() {
+        use wiremock::matchers::{body_string_contains, header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // Mock token endpoint
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("grant_type=client_credentials"))
+            .and(body_string_contains("client_id=my-client"))
+            .and(body_string_contains("client_secret=my-secret"))
+            .and(body_string_contains("scope=my-scope"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "oauth2-generated-token",
+                "expires_in": 3600,
+                "token_type": "Bearer"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        // Mock target endpoint
+        Mock::given(method("POST"))
+            .and(path("/target"))
+            .and(header("Authorization", "Bearer oauth2-generated-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})))
+            .mount(&mock_server)
+            .await;
+
+        let mut ctx = make_ctx();
+        ctx.services.config = Some(
+            serde_json::from_value(json!({
+                "url": format!("{}/target", mock_server.uri()),
+                "method": "POST",
+                "auth": {
+                    "type": "oauth2",
+                    "token_url": format!("{}/token", mock_server.uri()),
+                    "client_id": "my-client",
+                    "client_secret": "my-secret",
+                    "scope": "my-scope"
+                }
+            }))
+            .unwrap(),
+        );
+
+        let step = WebhookStep::new();
+        let result = step.execute(&ctx).await.unwrap();
+
+        match result {
+            StepOutcome::Done { .. } => {}
+            _ => panic!("Expected StepOutcome::Done, got {:?}", result),
+        }
     }
 }

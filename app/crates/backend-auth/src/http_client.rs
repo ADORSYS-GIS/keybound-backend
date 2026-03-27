@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use backend_core::AppResult;
 use reqwest::Client;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tracing::{error, instrument};
 
 /// HTTP client wrapper with connection pooling and timeouts.

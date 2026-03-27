@@ -1,6 +1,6 @@
 import Fastify, { FastifyInstance, type FastifyReply } from 'fastify';
 
-type Endpoint = 'register' | 'approve';
+type Endpoint = 'register' | 'approve' | 'webhook-auth-test';
 
 interface FaultConfig {
   status: number;
@@ -24,7 +24,8 @@ const state = {
   faults: {
     register: null as FaultConfig | null,
     approve: null as FaultConfig | null,
-  },
+    'webhook-auth-test': null as FaultConfig | null,
+  } as Record<Endpoint, FaultConfig | null>,
   counter: 1,
 };
 
@@ -63,7 +64,8 @@ app.post('/api/registration/register', async (req, reply) => {
   }
 
   const payload = req.body as Record<string, unknown>;
-  record('register', req.url, req.method, payload);
+  const authHeader = req.headers.authorization;
+  record('register', req.url, req.method, { ...payload, authHeader });
 
   const clientId = state.counter;
   state.counter += 1;
@@ -82,13 +84,24 @@ app.post('/api/registration/approve-and-deposit', async (req, reply) => {
   }
 
   const payload = req.body as Record<string, unknown>;
-  record('approve', req.url, req.method, payload);
+  const authHeader = req.headers.authorization;
+  record('approve', req.url, req.method, { ...payload, authHeader });
 
   reply.code(200).send({
     success: true,
     status: 'success',
     savingsAccountId: payload.savingsAccountId ?? null,
     transactionId: state.counter * 10,
+  });
+});
+
+app.post('/api/webhook-auth-test', async (req, reply) => {
+  const authHeader = req.headers.authorization;
+  record('webhook-auth-test', req.url, req.method, { authHeader });
+
+  reply.code(200).send({
+    success: true,
+    status: 'success',
   });
 });
 
@@ -101,6 +114,7 @@ app.post('/__admin/reset', async (_, reply) => {
   state.faults = {
     register: null,
     approve: null,
+    'webhook-auth-test': null,
   };
   state.counter = 1;
   reply.send({ reset: true });
@@ -114,8 +128,8 @@ app.post('/__admin/faults', async (req, reply) => {
     count?: number;
   };
 
-  if (!endpoint || !['register', 'approve'].includes(endpoint)) {
-    reply.code(400).send({ error: 'endpoint must be register or approve' });
+  if (!endpoint || !['register', 'approve', 'webhook-auth-test'].includes(endpoint)) {
+    reply.code(400).send({ error: 'endpoint must be register, approve, or webhook-auth-test' });
     return;
   }
 

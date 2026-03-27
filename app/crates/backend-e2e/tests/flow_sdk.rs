@@ -59,7 +59,7 @@ async fn wait_for_step_status(
     timeout: Duration,
 ) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
-    let url = format!("{}/flow/steps/{}", bff_base, step_id);
+    let url = format!("{}/steps/{}", bff_base, step_id);
 
     while std::time::Instant::now() < deadline {
         let response =
@@ -99,7 +99,7 @@ async fn wait_for_session_status(
     timeout: Duration,
 ) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
-    let url = format!("{}/flow/sessions/{}", bff_base, session_id);
+    let url = format!("{}/sessions/{}", bff_base, session_id);
 
     while std::time::Instant::now() < deadline {
         let response =
@@ -140,7 +140,7 @@ async fn wait_for_flow_status(
     timeout: Duration,
 ) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
-    let url = format!("{}/flow/flows/{}", bff_base, flow_id);
+    let url = format!("{}/flows/{}", bff_base, flow_id);
     let mut last_status: Option<String> = None;
 
     while std::time::Instant::now() < deadline {
@@ -182,7 +182,7 @@ async fn get_flow_steps(
     let response = send_json_with_bff(
         client,
         Method::GET,
-        &format!("{}/flow/flows/{}", bff_base, flow_id),
+        &format!("{}/flows/{}", bff_base, flow_id),
         None,
         None,
         Some(fixture),
@@ -300,7 +300,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let session_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions", bff_base),
+        &format!("{}/sessions", bff_base),
         None,
         Some(json!({
             "sessionType": "kyc_full",
@@ -322,7 +322,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let phone_flow_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions/{}/flows", bff_base, session_id),
+        &format!("{}/sessions/{}/flows", bff_base, session_id),
         None,
         Some(json!({
             "flowType": "phone_otp",
@@ -347,7 +347,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let init_phone_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/steps/{}", bff_base, init_phone_step_id),
+        &format!("{}/steps/{}", bff_base, init_phone_step_id),
         None,
         Some(json!({
             "input": {
@@ -383,7 +383,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let verify_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/steps/{}", bff_base, verify_step_id),
+        &format!("{}/steps/{}", bff_base, verify_step_id),
         None,
         Some(json!({
             "input": {
@@ -417,7 +417,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let phone_user_response = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/users/{}", bff_base, user_id),
+        &format!("{}/users/{}", bff_base, user_id),
         None,
         None,
         Some(&fixture),
@@ -452,7 +452,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let deposit_flow_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions/{}/flows", bff_base, session_id),
+        &format!("{}/sessions/{}/flows", bff_base, session_id),
         None,
         Some(json!({
             "flowType": "first_deposit"
@@ -477,7 +477,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let init_deposit_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/steps/{}", bff_base, init_deposit_step_id),
+        &format!("{}/steps/{}", bff_base, init_deposit_step_id),
         None,
         Some(json!({
             "input": {
@@ -580,7 +580,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let user_response = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/users/{}", bff_base, user_id),
+        &format!("{}/users/{}", bff_base, user_id),
         None,
         None,
         Some(&fixture),
@@ -619,7 +619,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let completed_kyc_response = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/users/{}/completed-kyc", bff_base, user_id),
+        &format!("{}/users/{}/completed-kyc", bff_base, user_id),
         None,
         None,
         Some(&fixture),
@@ -677,7 +677,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     let session_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions", bff_base),
+        &format!("{}/sessions", bff_base),
         None,
         Some(json!({
             "sessionType": "kyc_full"
@@ -691,7 +691,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     let flow_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions/{}/flows", bff_base, session_id),
+        &format!("{}/sessions/{}/flows", bff_base, session_id),
         None,
         Some(json!({
             "flowType": "first_deposit"
@@ -708,7 +708,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     let init_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/steps/{}", bff_base, init_step_id),
+        &format!("{}/steps/{}", bff_base, init_step_id),
         None,
         Some(json!({
             "input": {
@@ -800,7 +800,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     let session_detail = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/sessions/{}", bff_base, session_id),
+        &format!("{}/sessions/{}", bff_base, session_id),
         None,
         None,
         Some(&fixture),
@@ -818,7 +818,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     let user_response = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/users/{}", bff_base, user_id),
+        &format!("{}/users/{}", bff_base, user_id),
         None,
         None,
         Some(&fixture),
@@ -877,7 +877,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
         let session_response = send_json_with_bff(
             &client,
             Method::POST,
-            &format!("{}/flow/sessions", bff_base),
+            &format!("{}/sessions", bff_base),
             None,
             Some(json!({
                 "sessionType": "kyc_full",
@@ -900,7 +900,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
     let list_response = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/sessions", bff_base),
+        &format!("{}/sessions", bff_base),
         None,
         None,
         Some(&fixture),
@@ -946,7 +946,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
     let session_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions", bff_base),
+        &format!("{}/sessions", bff_base),
         None,
         Some(json!({
             "sessionType": "kyc_full"
@@ -962,7 +962,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
     let flow_response = send_json_with_bff(
         &client,
         Method::POST,
-        &format!("{}/flow/sessions/{}/flows", bff_base, session_id),
+        &format!("{}/sessions/{}/flows", bff_base, session_id),
         None,
         Some(json!({
             "flowType": "phone_otp"
@@ -978,7 +978,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
     let flow_detail = send_json_with_bff(
         &client,
         Method::GET,
-        &format!("{}/flow/flows/{}", bff_base, flow_id),
+        &format!("{}/flows/{}", bff_base, flow_id),
         None,
         None,
         Some(&fixture),
