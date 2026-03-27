@@ -31,6 +31,9 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
       SMS_SINK_URL: "http://sms-sink:8081"
       CUSS_URL: "http://cuss-stub:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
       MINIO_FORCE_PATH_STYLE: "true"
       RUST_LOG: info
     volumes:
@@ -76,6 +79,9 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
       SMS_SINK_URL: "http://sms-sink:8081"
       CUSS_URL: "http://cuss-stub:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
       MINIO_FORCE_PATH_STYLE: "true"
       RUST_LOG: info
     volumes:
@@ -121,6 +127,9 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
       SMS_SINK_URL: "http://sms-sink:8081"
       CUSS_URL: "http://cuss-stub:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
       MINIO_FORCE_PATH_STYLE: "true"
       RUST_LOG: info
     volumes:
@@ -166,6 +175,9 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
       SMS_SINK_URL: "http://sms-sink:8081"
       CUSS_URL: "http://cuss-stub:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
       MINIO_FORCE_PATH_STYLE: "true"
       RUST_LOG: info
     volumes:
@@ -211,6 +223,9 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
       SMS_SINK_URL: "http://sms-sink:8081"
       CUSS_URL: "http://cuss-stub:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
       MINIO_FORCE_PATH_STYLE: "true"
       RUST_LOG: info
     volumes:
@@ -236,10 +251,10 @@ services:
         condition: service_started
 
   sms-gateway:
-    image: user-storage-app
+    image: sms-gateway-app
     build:
       context: ../..
-      dockerfile: deploy/docker/user-storage/Dockerfile
+      dockerfile: deploy/docker/sms-gateway/Dockerfile
     entrypoint:
       - /app/sms-gateway
     command:
@@ -255,6 +270,9 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-e2e}"
       SMS_SINK_URL: "http://sms-sink:8081"
       CUSS_URL: "http://cuss-stub:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
       MINIO_FORCE_PATH_STYLE: "true"
       RUST_LOG: info
     volumes:

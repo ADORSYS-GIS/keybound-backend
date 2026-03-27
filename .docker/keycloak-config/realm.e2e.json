@@ -98,6 +98,18 @@
       "protocol": "openid-connect",
       "fullScopeAllowed": true,
       "authorizationServicesEnabled": true
+    },
+    {
+      "clientId": "cuss-client",
+      "name": "CUSS Integration Client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "cuss-client-secret-12345",
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": true
     }
   ],
   "users": [
