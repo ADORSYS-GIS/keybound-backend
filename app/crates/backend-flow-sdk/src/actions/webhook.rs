@@ -302,7 +302,7 @@ impl Step for WebhookStep {
             }
         }
 
-        let payload = build_payload(&config, ctx)?;
+        let _payload = build_payload(&config, ctx)?;
 
         let mut req_builder = self
             .client

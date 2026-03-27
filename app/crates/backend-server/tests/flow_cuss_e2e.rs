@@ -318,6 +318,7 @@ impl CussDepositFlow {
             StepTransition {
                 on_success: "VALIDATE_DEPOSIT".to_string(),
                 on_failure: Some("FAILED".to_string()),
+                branches: HashMap::new(),
             },
         );
         transitions.insert(
@@ -325,6 +326,7 @@ impl CussDepositFlow {
             StepTransition {
                 on_success: "AWAIT_ADMIN_APPROVAL".to_string(),
                 on_failure: Some("FAILED".to_string()),
+                branches: HashMap::new(),
             },
         );
         transitions.insert(
@@ -332,6 +334,7 @@ impl CussDepositFlow {
             StepTransition {
                 on_success: "CUSS_REGISTER_CUSTOMER".to_string(),
                 on_failure: Some("FAILED".to_string()),
+                branches: HashMap::new(),
             },
         );
         transitions.insert(
@@ -339,6 +342,7 @@ impl CussDepositFlow {
             StepTransition {
                 on_success: "CUSS_APPROVE_AND_DEPOSIT".to_string(),
                 on_failure: Some("FAILED".to_string()),
+                branches: HashMap::new(),
             },
         );
         transitions.insert(
@@ -346,6 +350,7 @@ impl CussDepositFlow {
             StepTransition {
                 on_success: "COMPLETED".to_string(),
                 on_failure: Some("FAILED".to_string()),
+                branches: HashMap::new(),
             },
         );
 
