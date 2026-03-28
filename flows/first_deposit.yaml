@@ -109,6 +109,8 @@ steps:
       method: POST
       timeout_ms: 10000
       retryable: true
+      headers:
+        X-Idempotency-Key: "{{flow_id}}"
       auth:
         type: oauth2
         token_url: ${KC_TOKEN_URL}
