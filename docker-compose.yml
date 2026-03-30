@@ -173,11 +173,9 @@ services:
     container_name: user-storage
     restart: unless-stopped
     command:
-      - serve
+      - server
       - --config-path
       - config/dev.yaml
-      - --mode
-      - server
     volumes:
       - ./config:/app/config/
       - ./flows:/app/flows/
@@ -195,6 +193,9 @@ services:
       RUST_LOG: debug
       SMS_SINK_URL: "http://sms-gateway:3000"
       CUSS_URL: "http://cuss-wiremock:8080"
+      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
     depends_on:
       postgres:
         condition: service_healthy
@@ -210,7 +211,7 @@ services:
         condition: service_healthy
 
   sms-gateway:
-    image: ghcr.io/adorsys-gis/sms-gateway:master76dac53a82ae9482fd4fadba2ef4fba660aae5c3
+    image: ghcr.io/adorsys-gis/sms-gateway:masterdd94de130f78273eafcc2e6250a5cee8851d54e2
     container_name: sms-gateway
     restart: unless-stopped
     command:
@@ -289,8 +290,7 @@ services:
       - sh
       - -c
       - |
-        /app/config/kyc-mgr-patch.sh
-        npm run start
+        npm run dev || npm run start
     volumes:
       - ./config:/app/config:ro
 
@@ -318,7 +318,7 @@ services:
       APP_OAUTH2_TOKEN_ENDPOINT_URL: http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token
       APP_ASSET_SERVICE_BASE_URL: http://cuss-wiremock:8080/api
       APP_CUSS_BASE_URL: http://cuss-wiremock:8080
-      APP_USER_STORAGE_BASE_URL: http://user-storage:3000/bff
+      APP_USER_STORAGE_BASE_URL: http://user-storage:3000
       APP_PAYMENT_GATEWAY_BASE_URL: http://cuss-wiremock:8080
       APP_KYC_FIRST_DEPOSIT_AMOUNT: "15000"
       APP_KYC_FIRST_DEPOSIT_CURRENCY: XAF

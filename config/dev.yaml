@@ -42,7 +42,7 @@ logging:
   level: "info"
   # Enable request/response logging for debugging HTTP traffic.
   # Set to true to log all incoming requests with headers and body.
-  log_requests_enabled: false
+  log_requests_enabled: true
 
 # PostgreSQL Database Configuration
 # Connection settings for the primary data store.
@@ -160,14 +160,13 @@ kc:
 bff:
   # Enable BFF API endpoints.
   enabled: true
-  # Base path for BFF API routes (e.g., /bff).
-  base-path: /bff
+  base-path: "/flow"
 
 # Staff/Admin API Configuration
 # Administrative interface for internal tools.
 staff:
-  enabled: false
-  base-path: /staff
+  enabled: true
+  base-path: "/staff"
 
 # CUSS (Customer User Service) Integration
 # External KYC/document verification service.
