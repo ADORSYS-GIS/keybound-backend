@@ -1,0 +1,25 @@
+{
+  "priority": 20,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/sessions"
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "session-1",
+      "humanId": "H-001",
+      "sessionType": "kyc_fineract",
+      "status": "OPEN",
+      "userId": "azamra-user-id",
+      "context": {
+        "userId": "azamra-user-id"
+      },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/payments/withdraw",
+    "headers": {
+      "X-Idempotency-Key": { "matches": ".+" }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "transactionId": "txn-withdraw-001",
+      "providerReference": "ref-orange-002",
+      "provider": "ORANGE_MONEY",
+      "type": "WITHDRAWAL",
+      "amount": 5000,
+      "currency": "XAF",
+      "status": "PENDING",
+      "message": "Withdrawal initiated",
+      "paymentUrl": null,
+      "ussdCode": null,
+      "createdAt": "2026-03-17T10:00:00Z",
+      "fineractTransactionId": null
+    }
+  }
+}

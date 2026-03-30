@@ -42,7 +42,7 @@ logging:
   level: "info"
   # Enable request/response logging for debugging HTTP traffic.
   # Set to true to log all incoming requests with headers and body.
-  log_requests_enabled: false
+  log_requests_enabled: true
 
 # PostgreSQL Database Configuration
 # Connection settings for the primary data store.
@@ -138,16 +138,7 @@ sms:
 # OAuth2 / OIDC Configuration
 # JWT token validation settings for API authentication.
 oauth2:
-  # OIDC issuer URL for token validation (usually your Keycloak/IdP realm).
-  issuer: "http://10.10.0.74:9026/realms/e2e-testing"
-  # Optional: Direct JWKS URI override to bypass OIDC discovery.
-  # When set, the server fetches JWKS directly from this URL instead of
-  # querying the OIDC discovery document first. Useful for air-gapped
-  # environments or when discovery endpoint is unavailable.
-  # jwks-uri: "https://auth.example.com/realms/myrealm/protocol/openid-connect/certs"
-  #
-  # Base API paths that require JWT authentication via JWKS validation.
-  # Empty list means all non-excluded paths are protected.
+  issuer: "http://keycloak:9026/realms/e2e-testing"
   base-paths: []
 
 # Keycloak (KC) Integration Configuration
@@ -169,16 +160,13 @@ kc:
 bff:
   # Enable BFF API endpoints.
   enabled: true
-  # Base path for BFF API routes (e.g., /bff).
-  base-path: /bff
+  base-path: "/flow"
 
 # Staff/Admin API Configuration
 # Administrative interface for internal tools.
 staff:
-  # Enable Staff API endpoints.
   enabled: true
-  # Base path for Staff API routes (e.g., /staff).
-  base-path: /staff
+  base-path: "/staff"
 
 # CUSS (Customer User Service) Integration
 # External KYC/document verification service.

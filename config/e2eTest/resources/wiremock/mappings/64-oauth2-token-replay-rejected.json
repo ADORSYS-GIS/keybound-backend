@@ -1,0 +1,20 @@
+{
+  "priority": 0,
+  "request": {
+    "method": "POST",
+    "urlPath": "/protocol/openid-connect/token",
+    "bodyPatterns": [
+      { "contains": "nonce=replay-nonce-test" }
+    ]
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "invalid_grant",
+      "error_description": "Nonce has already been used"
+    }
+  }
+}

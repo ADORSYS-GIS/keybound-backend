@@ -1,0 +1,28 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/flow/sessions/[a-z0-9-]+/flows",
+    "bodyPatterns": [
+      { "contains": "\"flowType\":\"phone_otp\"" }
+    ]
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "flow-phone-1",
+      "humanId": "H-F001",
+      "sessionId": "session-1",
+      "flowType": "phone_otp",
+      "status": "RUNNING",
+      "currentStep": "step-init-phone",
+      "stepIds": ["step-init-phone", "step-verify-otp"],
+      "context": { "phoneNumber": "+237690000000" },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "priority": 10,
+  "scenarioName": "kyc-level-phone-otp",
+  "requiredScenarioState": "Started",
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/steps/step-verify-otp",
+    "bodyPatterns": [
+      { "contains": "\"code\":\"1234\"" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "step-verify-otp",
+      "humanId": "H-S002",
+      "flowId": "flow-phone-verified",
+      "stepType": "verify_otp",
+      "actor": "USER",
+      "status": "COMPLETED",
+      "input": { "code": "1234" },
+      "output": null,
+      "error": null,
+      "attemptNo": 1,
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:01:00Z",
+      "finishedAt": "2026-03-07T00:01:00Z"
+    }
+  },
+  "newScenarioState": "PHONE_OTP_VERIFIED"
+}

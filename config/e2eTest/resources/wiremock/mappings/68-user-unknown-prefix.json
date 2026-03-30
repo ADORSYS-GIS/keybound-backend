@@ -1,0 +1,26 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/unknown-prefix-user-id"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "unknown-prefix-user-id",
+      "realm": "azamra-realm",
+      "username": "unknown-prefix-user",
+      "email": "unknown@azamra.test",
+      "emailVerified": true,
+      "disabled": false,
+      "fullName": "Unknown Prefix User",
+      "phoneNumber": "+237799999999",
+      "metadata": { "savingsAccountId": 101 },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}
