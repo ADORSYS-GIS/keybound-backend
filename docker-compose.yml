@@ -286,11 +286,6 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
-    command:
-      - sh
-      - -c
-      - |
-        npm run dev || npm run start
     volumes:
       - ./config:/app/config:ro
 
