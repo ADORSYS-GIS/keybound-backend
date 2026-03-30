@@ -121,6 +121,7 @@ impl AppState {
 
         let oidc_state = Arc::new(OidcState::new(
             cfg.oauth2.issuer.clone(),
+            cfg.oauth2.jwks_uri.clone(),
             None,
             Duration::from_secs(3600),
             Duration::from_secs(3600),
