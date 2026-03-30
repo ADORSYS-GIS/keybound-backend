@@ -175,7 +175,7 @@ services:
     command:
       - server
       - --config-path
-      - config/dev.yaml
+      - config/dev-compose.yml
     volumes:
       - ./config:/app/config/
       - ./flows:/app/flows/
@@ -216,7 +216,7 @@ services:
     restart: unless-stopped
     command:
       - --config
-      - config/dev.yaml
+      - config/dev-compose.yml
     volumes:
       - ./config:/app/config/
     ports:
