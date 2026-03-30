@@ -12,21 +12,21 @@ logging:
   log_requests_enabled: false
 
 database:
-  url: "postgres://postgres:postgres@postgres:5432/user-storage"
+  url: "postgres://postgres:postgres@localhost:5432/user-storage"
   pool_size: 10
 
 runtime:
   mode: shared
 
 redis:
-  url: "redis://redis:6379"
+  url: "redis://127.0.0.1:6379"
   worker_lock_ttl_seconds: 30
   worker_lock_renew_seconds: 10
 
 storage:
   type: minio
   minio:
-    endpoint: ${MINIO_ENDPOINT:-http://minio:9000}
+    endpoint: ${MINIO_ENDPOINT:-http://127.0.0.1:9000}
     region: ${MINIO_REGION:-us-east-1}
     access_key: ${MINIO_ACCESS_KEY:-minioadmin}
     secret_key: ${MINIO_SECRET_KEY:-minioadmin}
@@ -50,7 +50,7 @@ sms:
   provider: console # options are 'console' (default) or 'sns'
 
 oauth2:
-  issuer: "http://keycloak:9026/realms/e2e-testing"
+  issuer: "http://localhost:9026/realms/e2e-testing"
   base-paths: []
 
 kc:
