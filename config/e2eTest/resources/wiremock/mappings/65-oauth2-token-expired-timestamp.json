@@ -1,0 +1,20 @@
+{
+  "priority": 0,
+  "request": {
+    "method": "POST",
+    "urlPath": "/protocol/openid-connect/token",
+    "bodyPatterns": [
+      { "contains": "ts=expired-timestamp" }
+    ]
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "invalid_grant",
+      "error_description": "Timestamp is too old"
+    }
+  }
+}

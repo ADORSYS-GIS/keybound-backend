@@ -1,0 +1,29 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/sessions",
+    "bodyPatterns": [
+      { "contains": "\"userId\":\"timeout-user\"" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "fixedDelayMilliseconds": 35000,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "session-timeout",
+      "humanId": "H-TIMEOUT",
+      "sessionType": "kyc_fineract",
+      "status": "OPEN",
+      "userId": "timeout-user",
+      "context": {
+        "userId": "timeout-user"
+      },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}
