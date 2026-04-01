@@ -264,7 +264,7 @@ services:
       - "8085:3000"
     environment:
       OAUTH2_ISSUER: http://localhost:9026/realms/e2e-testing
-      OAUTH2_INTERNAL_ISSUER: http://keycloak:9026/realms/e2e-testing
+      OAUTH2_INTERNAL_ISSUER: http://localhost:9026/realms/e2e-testing
       OAUTH2_CLIENT_ID: kyc-client
       OAUTH2_CLIENT_SECRET: some-secret
       OAUTH2_SCOPES: openid profile email
