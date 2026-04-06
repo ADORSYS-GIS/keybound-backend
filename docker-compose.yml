@@ -48,7 +48,7 @@ services:
     image: pgvector/pgvector:pg18
     restart: unless-stopped
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '9001:5432'
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -70,8 +70,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     ports:
-      - '${MINIO_API_PORT:-9000}:9000'
-      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+      - '9003:9000'
+      - '9004:9001'
     volumes:
       - minio_data:/data
 
@@ -99,7 +99,7 @@ services:
     command:
       - --verbose
     ports:
-      - "8084:8080"
+      - "9005:8080"
     volumes:
       - ./config/e2eTest/resources/wiremock:/home/wiremock:ro
     healthcheck:
@@ -108,12 +108,12 @@ services:
       timeout: 3s
       retries: 20
 
-  keycloak:
+  keycloak-azamra:
     image: quay.io/keycloak/keycloak:26.5.2
     ports:
-      - "9026:9026"
+      - "9006:9006"
     environment:
-      KC_HTTP_PORT: 9026
+      KC_HTTP_PORT: 9006
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/user-storage
       KC_DB_USERNAME: postgres
@@ -131,7 +131,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: password
     # Native entrypoint (kc.sh) will handle the command
     healthcheck:
-      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/localhost/9026 && echo -e 'GET /realms/e2e-testing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q 200"]
+      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/localhost/9006 && echo -e 'GET /realms/e2e-testing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q 200"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -161,7 +161,7 @@ services:
     image: redis:latest
     restart: unless-stopped
     ports:
-      - '${REDIS_PORT:-6379}:6379'
+      - '9002:6379'
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -173,15 +173,20 @@ services:
     container_name: user-storage
     restart: unless-stopped
     command:
-      - server
+      - serve
       - --config-path
       - config/dev-compose.yml
+      - --mode
+      - shared
     volumes:
       - ./config:/app/config/
       - ./flows:/app/flows/
       - ./sessions:/app/sessions/
     ports:
-      - "3001:3000"
+      - "9011:3000"
+    networks:
+      - default
+      - fineract-dev-network
     environment:
       DATABASE_URL: "postgres://postgres:postgres@postgres:5432/user-storage"
       REDIS_URL: "redis://redis:6379"
@@ -192,8 +197,8 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-dev}"
       RUST_LOG: debug
       SMS_SINK_URL: "http://sms-gateway:3000"
-      CUSS_URL: "http://cuss-wiremock:8080"
-      KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
+      CUSS_URL: "http://customer-self-service:8080"
+      KC_TOKEN_URL: "http://keycloak-azamra:9006/realms/e2e-testing/protocol/openid-connect/token"
       CUSS_CLIENT_ID: "cuss-client"
       CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
     depends_on:
@@ -207,8 +212,8 @@ services:
         condition: service_completed_successfully
       sms-gateway:
         condition: service_healthy
-      cuss-wiremock:
-        condition: service_healthy
+      customer-self-service:
+        condition: service_started
 
   sms-gateway:
     image: ghcr.io/adorsys-gis/sms-gateway:masterdd94de130f78273eafcc2e6250a5cee8851d54e2
@@ -220,7 +225,7 @@ services:
     volumes:
       - ./config:/app/config/
     ports:
-      - "8081:3000"
+      - "9007:3000"
     environment:
       DATABASE_URL: "postgres://postgres:postgres@postgres:5432/user-storage"
       REDIS_URL: "redis://redis:6379"
@@ -239,11 +244,11 @@ services:
         condition: service_healthy
 
   frontend-mobile:
-    image: ghcr.io/skyengpro/azamra-tokenization-frontend-mobile:develop-amd
+    image: ghcr.io/skyengpro/azamra-tokenization-frontend-mobile:sha-a4df069-amd
     container_name: azamra-frontend-mobile
     restart: unless-stopped
     ports:
-      - "8083:8080"
+      - "9008:8080"
     environment:
       EXPO_PUBLIC_FORCE_TRADING: "true"
     extra_hosts:
@@ -253,7 +258,7 @@ services:
     depends_on:
       bff:
         condition: service_started
-      keycloak:
+      keycloak-azamra:
         condition: service_healthy
 
   frontend-kyc-mgr:
@@ -261,10 +266,10 @@ services:
     container_name: azamra-frontend-kyc-mgr
     restart: unless-stopped
     ports:
-      - "8085:3000"
+      - "9009:3000"
     environment:
-      OAUTH2_ISSUER: http://localhost:9026/realms/e2e-testing
-      OAUTH2_INTERNAL_ISSUER: http://localhost:9026/realms/e2e-testing
+      OAUTH2_ISSUER: http://localhost:9006/realms/e2e-testing
+      OAUTH2_INTERNAL_ISSUER: http://localhost:9006/realms/e2e-testing
       OAUTH2_CLIENT_ID: kyc-client
       OAUTH2_CLIENT_SECRET: some-secret
       OAUTH2_SCOPES: openid profile email
@@ -284,17 +289,20 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-      keycloak:
+      keycloak-azamra:
         condition: service_healthy
     volumes:
       - ./config:/app/config:ro
 
   bff:
-    image: ghcr.io/skyengpro/azamra-tokenization-bff:sha-dca828a9b9ff-amd
+    image: ghcr.io/skyengpro/azamra-tokenization-bff:sha-03af6e86a8c5-amd
     container_name: azamra-bff
     restart: unless-stopped
     ports:
-      - "8082:8082"
+      - "9010:8082"
+    networks:
+      - default
+      - fineract-dev-network
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_APPLICATION_NAME: azamra-tokenization-bff
@@ -306,15 +314,15 @@ services:
       LOGGING_LEVEL_ROOT: DEBUG
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:9026/realms/e2e-testing
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/certs
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak-azamra:9006/realms/e2e-testing
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak-azamra:9006/realms/e2e-testing/protocol/openid-connect/certs
       APP_SECURITY_SIGNATURE_MAX_CLOCK_SKEW_SECONDS: "60"
       APP_OAUTH2_CLIENT_ID: web-mobile
-      APP_OAUTH2_TOKEN_ENDPOINT_URL: http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token
+      APP_OAUTH2_TOKEN_ENDPOINT_URL: http://keycloak-azamra:9006/realms/e2e-testing/protocol/openid-connect/token
       APP_ASSET_SERVICE_BASE_URL: http://cuss-wiremock:8080/api
-      APP_CUSS_BASE_URL: http://cuss-wiremock:8080
+      APP_CUSS_BASE_URL: http://customer-self-service:8080
       APP_USER_STORAGE_BASE_URL: http://user-storage:3000
-      APP_PAYMENT_GATEWAY_BASE_URL: http://cuss-wiremock:8080
+      APP_PAYMENT_GATEWAY_BASE_URL: http://payment-gateway-service:8082
       APP_KYC_FIRST_DEPOSIT_AMOUNT: "15000"
       APP_KYC_FIRST_DEPOSIT_CURRENCY: XAF
       APP_AZAMRA_FRONTEND_SERVER_API_BASE_PATH: "/api/v1/api"
@@ -327,10 +335,34 @@ services:
         condition: service_healthy
       user-storage:
         condition: service_started
-      cuss-wiremock:
+      customer-self-service:
         condition: service_started
-      keycloak:
+      keycloak-azamra:
         condition: service_healthy
+
+  customer-self-service:
+    build:
+      context: ../fineract-apps/backend/customer-self-service
+      dockerfile: Dockerfile
+    container_name: customer-self-service
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    depends_on:
+      keycloak-azamra:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+      - fineract-dev-network
+    environment:
+      - KEYCLOAK_JWKS_URI=http://keycloak-azamra:9006/realms/e2e-testing/protocol/openid-connect/certs
+      - FINERACT_URL=https://fineract-fineract-1:8443
+      - FINERACT_AUTH_TYPE=basic
+      - FINERACT_USERNAME=mifos
+      - FINERACT_PASSWORD=password
+      - SPRING_REDIS_HOST=redis
 
 volumes:
   postgres_data:
@@ -339,4 +371,7 @@ volumes:
 networks:
   default:
     name: fineract-net
+    driver: bridge
+    
+  fineract-dev-network:
     driver: bridge

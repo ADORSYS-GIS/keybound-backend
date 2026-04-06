@@ -138,7 +138,7 @@ sms:
 # OAuth2 / OIDC Configuration
 # JWT token validation settings for API authentication.
 oauth2:
-  issuer: "http://keycloak:9026/realms/e2e-testing"
+  issuer: "http://keycloak-azamra:9006/realms/e2e-testing"
   base-paths: []
 
 # Keycloak (KC) Integration Configuration

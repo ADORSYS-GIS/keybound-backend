@@ -18,47 +18,48 @@ tags:
 paths:
   /v1/enrollments/bind:
     post:
-      tags: [enrollment]
+      tags: [ enrollment ]
       summary: Bind an enrolled device key to a user
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       description: |
         Called when Keycloak has identified/created the user and is ready to persist.
         Backend should atomically bind (device_id,jkt) to user_id and store public key material.
         If already bound to the same user, should be idempotent.
       operationId: enrollmentBind
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EnrollmentBindRequest"
+              $ref: '#/components/schemas/EnrollmentBindRequest'
       responses:
-        "200":
+        '200':
           description: Bound (idempotent)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EnrollmentBindResponse"
-        "409":
+                $ref: '#/components/schemas/EnrollmentBindResponse'
+        '409':
           description: Device already bound to a different user
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 
   /v1/users:
     post:
-      tags: [users]
+      tags: [ users ]
       summary: Create a user
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       description: |
         Creates a backend user record that is used by Keycloak user-storage SPI.
       operationId: createUser
@@ -67,32 +68,32 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserUpsertRequest"
+              $ref: '#/components/schemas/UserUpsertRequest'
       responses:
-        "201":
+        '201':
           description: Created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserRecord"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
+                $ref: '#/components/schemas/UserRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
           description: Conflict (e.g., duplicate username/email)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: '#/components/schemas/Error'
 
   /v1/users/{user_id}:
     get:
-      tags: [users]
+      tags: [ users ]
       summary: Get user by id
       operationId: getUser
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       parameters:
         - name: user_id
           in: path
@@ -100,23 +101,23 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: User
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserRecord"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/UserRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
     put:
-      tags: [users]
+      tags: [ users ]
       summary: Update user by id
       operationId: updateUser
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       parameters:
         - name: user_id
           in: path
@@ -128,27 +129,27 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserUpsertRequest"
+              $ref: '#/components/schemas/UserUpsertRequest'
       responses:
-        "200":
+        '200':
           description: Updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserRecord"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/UserRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
     delete:
-      tags: [users]
+      tags: [ users ]
       summary: Delete user by id
       operationId: deleteUser
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       parameters:
         - name: user_id
           in: path
@@ -156,19 +157,19 @@ paths:
           schema:
             type: string
       responses:
-        "204":
+        '204':
           description: Deleted
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /v1/users/search:
     post:
-      tags: [users]
+      tags: [ users ]
       summary: Search users by fields and attributes
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       description: |
         Supports exact/general search plus custom user attributes.
       operationId: searchUsers
@@ -177,25 +178,25 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserSearchRequest"
+              $ref: '#/components/schemas/UserSearchRequest'
       responses:
-        "200":
+        '200':
           description: Search results
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserSearchResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/UserSearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /v1/devices/lookup:
     post:
-      tags: [devices]
+      tags: [ devices ]
       summary: Lookup device binding by device_id and/or jkt
       security:
-        - KCSignature: []
+        - KCSignature: [ ]
       description: |
         Useful for custom grant: device_id/jkt -> user_id + public key material.
       operationId: lookupDevice
@@ -204,20 +205,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DeviceLookupRequest"
+              $ref: '#/components/schemas/DeviceLookupRequest'
       responses:
-        "200":
+        '200':
           description: Lookup result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeviceLookupResponse"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+                $ref: '#/components/schemas/DeviceLookupResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
 components:
   securitySchemes:
@@ -241,30 +242,30 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     Unauthorized:
       description: Unauthorized
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     NotFound:
       description: Not found
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     TooManyRequests:
       description: Rate limited
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
 
   schemas:
     EnrollmentBindRequest:
       type: object
-      required: [realm, client_id, user_id, device_id, jkt, public_jwk]
+      required: [ realm, client_id, user_id, device_id, jkt, public_jwk ]
       properties:
         realm:
           type: string
@@ -298,14 +299,14 @@ components:
 
     EnrollmentBindResponseStatus:
       type: string
-      enum: [BOUND, ALREADY_BOUND]
+      enum: [ BOUND, ALREADY_BOUND ]
 
     EnrollmentBindResponse:
       type: object
-      required: [status]
+      required: [ status ]
       properties:
         status:
-          $ref: "#/components/schemas/EnrollmentBindResponseStatus"
+          $ref: '#/components/schemas/EnrollmentBindResponseStatus'
         device_record_id:
           type: string
         bound_user_id:
@@ -313,7 +314,7 @@ components:
 
     DeviceDescriptor:
       type: object
-      required: [device_id, jkt, platform, model]
+      required: [ device_id, jkt, platform, model ]
       properties:
         device_id:
           type: string
@@ -333,7 +334,7 @@ components:
 
     UserRecord:
       type: object
-      required: [user_id, username, enabled, email_verified]
+      required: [ user_id, username, enabled, email_verified ]
       properties:
         user_id:
           type: string
@@ -361,11 +362,11 @@ components:
         custom:
           type: object
           additionalProperties:
-            type: [string, "null"]
+            type: [ string, "null" ]
 
     UserUpsertRequest:
       type: object
-      required: [realm, username]
+      required: [ realm, username ]
       properties:
         realm:
           type: string
@@ -388,11 +389,11 @@ components:
         custom:
           type: object
           additionalProperties:
-            type: [string, "null"]
+            type: [ string, "null" ]
 
     UserSearchRequest:
       type: object
-      required: [realm]
+      required: [ realm ]
       properties:
         realm:
           type: string
@@ -423,29 +424,30 @@ components:
 
     UserSearchResponse:
       type: object
-      required: [users]
+      required: [ users ]
       properties:
         users:
           type: array
           items:
-            $ref: "#/components/schemas/UserRecord"
+            $ref: '#/components/schemas/UserRecord'
         total_count:
           type: integer
 
+
     DeviceRecordStatus:
       type: string
-      enum: [ACTIVE, REVOKED, SUSPENDED]
+      enum: [ ACTIVE, REVOKED, SUSPENDED ]
 
     DeviceRecord:
       type: object
-      required: [device_id, jkt, status, created_at]
+      required: [ device_id, jkt, status, created_at ]
       properties:
         device_id:
           type: string
         jkt:
           type: string
         status:
-          $ref: "#/components/schemas/DeviceRecordStatus"
+          $ref: '#/components/schemas/DeviceRecordStatus'
         created_at:
           type: string
           format: date-time
@@ -472,21 +474,21 @@ components:
 
     DeviceLookupResponse:
       type: object
-      required: [found]
+      required: [ found ]
       properties:
         found:
           type: boolean
         user_id:
           type: string
         device:
-          $ref: "#/components/schemas/DeviceRecord"
+          $ref: '#/components/schemas/DeviceRecord'
         public_jwk:
           type: object
           additionalProperties: true
 
     Error:
       type: object
-      required: [code, message]
+      required: [ code, message ]
       properties:
         code:
           type: string
