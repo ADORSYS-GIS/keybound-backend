@@ -63,11 +63,20 @@ start: # Resume stopped services
 down: # Stop and remove containers
 	docker compose -p {{project}} -f {{compose_file}} down {{c}}
 
+down-single service: # Start a single service (pass service=...)
+	docker compose -p {{project}} -f {{compose_file}} down {{service}} {{c}}
+
 destroy: # Snapshot removal of containers + volumes
 	docker compose -p {{project}} -f {{compose_file}} down -v {{c}}
 
+destroy-single service: # Start a single service (pass service=...)
+	docker compose -p {{project}} -f {{compose_file}} destroy {{service}} {{c}}
+
 stop: # Stop running containers
 	docker compose -p {{project}} -f {{compose_file}} stop {{c}}
+
+stop-single service: # Start a single service (pass service=...)
+	docker compose -p {{project}} -f {{compose_file}} stop {{service}} {{c}}
 
 restart: # Restart services (stop + up)
 	docker compose -p {{project}} -f {{compose_file}} stop {{c}}
