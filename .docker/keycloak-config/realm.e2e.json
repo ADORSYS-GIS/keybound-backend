@@ -53,6 +53,34 @@
       ],
       "webOrigins": [
         "*"
+      ],
+      "protocolMappers": [
+        {
+          "name": "fineract_client_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "fineractClientId",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "fineract_client_id",
+            "jsonType.label": "long",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "fineract_external_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "fineractExternalId",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "fineract_external_id",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "true"
+          }
+        }
       ]
     },
     {

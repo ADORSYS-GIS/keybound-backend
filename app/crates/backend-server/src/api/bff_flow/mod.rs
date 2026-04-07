@@ -46,6 +46,8 @@ pub struct BffFlowOpenApi;
 
 pub fn router(api: BackendApi) -> Router {
     Router::new()
+        // NOTE: bff.base-path in config already provides the /flow prefix.
+        // Do NOT add /flow here or routes will be double-nested (/flow/flow/...).
         .route("/users/{user_id}", get(handlers::get_user))
         .route(
             "/users/{user_id}/completed-kyc",

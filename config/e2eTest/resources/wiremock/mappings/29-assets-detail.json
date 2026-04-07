@@ -17,7 +17,7 @@
       "imageUrl": "https://cdn.azamra.local/assets/solar-detail.png",
       "category": "STOCKS",
       "status": "ACTIVE",
-      "priceMode": "AUTO",
+      "priceMode": "MANUAL",
       "currentPrice": 102.5,
       "change24hPercent": 1.23,
       "dayOpen": 101.0,
