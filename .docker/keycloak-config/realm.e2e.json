@@ -1,6 +1,6 @@
 {
-  "id": "e2e-testing",
-  "realm": "e2e-testing",
+  "id": "fineract",
+  "realm": "fineract",
   "displayName": "Keybound E2E",
   "displayNameHtml": "<b>Keybound</b> E2E",
   "registrationAllowed": false,
