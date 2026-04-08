@@ -139,12 +139,12 @@ sms:
 # JWT token validation settings for API authentication.
 oauth2:
   # OIDC issuer URL for token validation (usually your Keycloak/IdP realm).
-  issuer: "http://10.10.0.74:9026/realms/e2e-testing"
+  issuer: "http://localhost:9026/realms/e2e-testing"
   # Optional: Direct JWKS URI override to bypass OIDC discovery.
   # When set, the server fetches JWKS directly from this URL instead of
   # querying the OIDC discovery document first. Useful for air-gapped
   # environments or when discovery endpoint is unavailable.
-  # jwks-uri: "https://auth.example.com/realms/myrealm/protocol/openid-connect/certs"
+  jwks-uri: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/certs"
   #
   # Base API paths that require JWT authentication via JWKS validation.
   # Empty list means all non-excluded paths are protected.
