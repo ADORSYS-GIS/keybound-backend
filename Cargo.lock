@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "backend-core",
  "backend-flow-sdk",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "backend-auth"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "async-trait",
  "axum",
@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "backend-core"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "backend-e2e"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1022,11 +1022,11 @@ dependencies = [
 
 [[package]]
 name = "backend-env"
-version = "0.2.6"
+version = "0.2.7"
 
 [[package]]
 name = "backend-flow-sdk"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "async-trait",
  "backend-env",
@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "backend-id"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "backend-core",
  "cuid",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "backend-migrate"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "async-trait",
  "backend-core",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "backend-model"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "diesel",
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [[package]]
 name = "backend-repository"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "backend-core",
@@ -1113,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "backend-server"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "apalis",
  "apalis-redis",
@@ -1957,8 +1957,19 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0be2b1d1d6ec8d846f05e137292d0b89133caf95ef33695424c09568bdd39b1b"
 dependencies = [
- "deadpool-runtime",
+ "deadpool-runtime 0.1.4",
  "lazy_static",
+ "num_cpus",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883466cb8db62725aee5f4a6011e8a5d42912b42632df32aad57fc91127c6e04"
+dependencies = [
+ "deadpool-runtime 0.3.1",
  "num_cpus",
  "tokio",
 ]
@@ -1969,7 +1980,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "590573e9e29c5190a5ff782136f871e6e652e35d598a349888e028693601adf1"
 dependencies = [
- "deadpool",
+ "deadpool 0.12.3",
  "deadpool-sync",
  "diesel",
 ]
@@ -1984,12 +1995,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadpool-runtime"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae"
+
+[[package]]
 name = "deadpool-sync"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524bc3df0d57e98ecd022e21ba31166c2625e7d3e5bcc4510efaeeab4abcab04"
 dependencies = [
- "deadpool-runtime",
+ "deadpool-runtime 0.1.4",
 ]
 
 [[package]]
@@ -2077,14 +2094,15 @@ dependencies = [
 
 [[package]]
 name = "diesel-async"
-version = "0.7.4"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13096fb8dae53f2d411c4b523bec85f45552ed3044a2ab4d85fb2092d9cb4f34"
+checksum = "b95864e58597509106f1fddfe0600de7e589e1fddddd87f54eee0a49fd111bbc"
 dependencies = [
- "deadpool",
+ "deadpool 0.13.0",
  "diesel",
  "futures-core",
  "futures-util",
+ "pin-project-lite",
  "scoped-futures",
  "tokio",
  "tokio-postgres",
@@ -4514,9 +4532,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
+checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pin-utils"
@@ -5310,7 +5328,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5959,18 +5977,18 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
 dependencies = [
  "strum_macros",
 ]
 
 [[package]]
 name = "strum_macros"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -7488,7 +7506,7 @@ checksum = "08db1edfb05d9b3c1542e521aea074442088292f00b5f28e435c714a98f85031"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
- "deadpool",
+ "deadpool 0.12.3",
  "futures",
  "http 1.4.0",
  "http-body-util",

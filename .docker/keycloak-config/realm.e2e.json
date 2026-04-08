@@ -23,7 +23,7 @@
     "org.keycloak.storage.UserStorageProvider": [
       {
         "id": "backend-user-storage",
-        "name": "backend-user-storage",
+        "name": "KYC Backend",
         "providerId": "backend-user-storage",
         "config": {
           "enabled": [
@@ -33,7 +33,7 @@
             "0"
           ],
           "cachePolicy": [
-            "DEFAULT"
+            "NO_CACHE"
           ]
         }
       }

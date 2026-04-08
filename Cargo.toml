@@ -76,12 +76,12 @@ utoipa = { version = "5", features = ["macros", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["axum", "debug-embed"] }
 
 bytes = "1"
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 
 diesel = { version = "2.3", features = ["postgres", "chrono", "serde_json", "r2d2"] }
 openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = { version = "0.9", features = ["vendored"] }
-diesel-async = { version = "0.7", features = ["postgres", "deadpool"] }
+diesel-async = { version = "0.8", features = ["postgres", "deadpool"] }
 deadpool-diesel = { version = "0.6", features = ["postgres"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }
 tower = { version = "0.5", features = ["util"] }
@@ -122,7 +122,7 @@ incremental = false
 strip = true
 
 [workspace.package]
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 license = "MIT"
 publish = false
