@@ -15,7 +15,7 @@ use super::service;
 
 #[utoipa::path(
     get,
-    path = "/flow/users/{userId}",
+    path = "/users/{userId}",
     tag = "users",
     params(("userId" = String, Path)),
     responses((status = 200, body = UserResponse))
@@ -33,7 +33,7 @@ pub async fn get_user(
 
 #[utoipa::path(
     get,
-    path = "/flow/users/{userId}/completed-kyc",
+    path = "/users/{userId}/completed-kyc",
     tag = "users",
     params(("userId" = String, Path)),
     responses((status = 200, body = CompletedKycResponse))
@@ -51,7 +51,7 @@ pub async fn get_completed_kyc(
 
 #[utoipa::path(
     get,
-    path = "/flow/sessions",
+    path = "/sessions",
     tag = "sessions",
     responses((status = 200, body = [SessionResponse]))
 )]
@@ -67,7 +67,7 @@ pub async fn list_sessions(
 
 #[utoipa::path(
     post,
-    path = "/flow/sessions",
+    path = "/sessions",
     tag = "sessions",
     request_body = CreateSessionRequest,
     responses((status = 201, body = SessionResponse))
@@ -85,7 +85,7 @@ pub async fn create_session(
 
 #[utoipa::path(
     get,
-    path = "/flow/sessions/{sessionId}",
+    path = "/sessions/{sessionId}",
     tag = "sessions",
     params(("sessionId" = String, Path)),
     responses((status = 200, body = SessionDetailResponse))
@@ -103,7 +103,7 @@ pub async fn get_session(
 
 #[utoipa::path(
     get,
-    path = "/flow/sessions/{sessionId}/flows",
+    path = "/sessions/{sessionId}/flows",
     tag = "sessions",
     params(("sessionId" = String, Path)),
     responses((status = 200, body = [FlowResponse]))
@@ -121,7 +121,7 @@ pub async fn list_session_flows(
 
 #[utoipa::path(
     post,
-    path = "/flow/sessions/{sessionId}/flows",
+    path = "/sessions/{sessionId}/flows",
     tag = "sessions",
     params(("sessionId" = String, Path)),
     request_body = AddFlowRequest,
@@ -141,7 +141,7 @@ pub async fn add_flow_to_session(
 
 #[utoipa::path(
     get,
-    path = "/flow/flows/{flowId}",
+    path = "/flows/{flowId}",
     tag = "flows",
     params(("flowId" = String, Path)),
     responses((status = 200, body = FlowDetailResponse))
@@ -159,7 +159,7 @@ pub async fn get_flow(
 
 #[utoipa::path(
     get,
-    path = "/flow/flows/{flowId}/steps",
+    path = "/flows/{flowId}/steps",
     tag = "flows",
     params(("flowId" = String, Path)),
     responses((status = 200, body = [StepResponse]))
@@ -177,7 +177,7 @@ pub async fn list_flow_steps(
 
 #[utoipa::path(
     get,
-    path = "/flow/steps/{stepId}",
+    path = "/steps/{stepId}",
     tag = "steps",
     params(("stepId" = String, Path)),
     responses((status = 200, body = StepResponse))
@@ -195,7 +195,7 @@ pub async fn get_step(
 
 #[utoipa::path(
     post,
-    path = "/flow/steps/{stepId}",
+    path = "/steps/{stepId}",
     tag = "steps",
     params(("stepId" = String, Path)),
     request_body = SubmitStepRequest,
