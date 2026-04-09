@@ -70,7 +70,7 @@ destroy: # Snapshot removal of containers + volumes
 	docker compose -p {{project}} -f {{compose_file}} down -v {{c}}
 
 destroy-single service: # Start a single service (pass service=...)
-	docker compose -p {{project}} -f {{compose_file}} destroy {{service}} {{c}}
+	docker compose -p {{project}} -f {{compose_file}} down -v {{service}} {{c}}
 
 stop: # Stop running containers
 	docker compose -p {{project}} -f {{compose_file}} stop {{c}}
