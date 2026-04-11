@@ -1,127 +1,213 @@
+config:
+  server:
+    address: "0.0.0.0"
+    port: 3000
+    tls:
+      cert_path: "./config/tls/api.crt"
+      key_path: "./config/tls/api.key"
+  logging:
+    level: "info"
+    log_requests_enabled: false
+  database:
+    url: "${DATABASE_URL}"
+    pool_size: 10
+    secretName: postgres-secret
+    secretKey: url
+  runtime:
+    mode: shared
+  redis:
+    url: "${REDIS_URL}"
+    worker_lock_ttl_seconds: 30
+    worker_lock_renew_seconds: 10
+    secretName: redis-secret
+    secretKey: url
+  storage:
+    type: minio
+    minio:
+      endpoint: "${MINIO_ENDPOINT:-http://minio.user-storage-deps.svc.cluster.local:9000}"
+      region: "${MINIO_REGION:-us-east-1}"
+      access_key: "${MINIO_ACCESS_KEY:-minioadmin}"
+      secret_key: "${MINIO_SECRET_KEY:-minioadmin}"
+      bucket: "${MINIO_BUCKET:-user-storage-dev}"
+      force_path_style: true
+      presign_ttl_seconds: 900
+  oauth2:
+    issuer: "http://keycloak.user-storage-deps.svc.cluster.local:8080/realms/master"
+    jwks_uri: "http://keycloak.user-storage-deps.svc.cluster.local:8080/realms/master/protocol/openid-connect/certs"
+  sms:
+    provider: console
+  kc:
+    enabled: true
+    signature_secret: "change-me"
+    base_path: "/kc"
+    max_clock_skew_seconds: 60
+    max_body_bytes: 262144
+  bff:
+    enabled: true
+    base_path: "/bff"
+  staff:
+    enabled: true
+    base_path: "/staff"
+  cuss:
+    api_url: "http://cuss-wiremock.user-storage-deps.svc.cluster.local:8080"
+
 controllers:
   user-storage:
     type: deployment
-    strategy: RollingUpdate
     replicas: 1
-    pod:
-      labels: {}
     initContainers:
-      install-extensions:
+      migrate:
         image:
-          repository: ghcr.io/adorsys-gis/fineract-keybound-user-storage
+          repository: ghcr.io/adorsys-gis/user-storage
           tag: "latest"
         args:
           - migrate
+          - --config-path
+          - /app/config/default.yaml
         env:
-          FLYWAY_URL:
+          DATABASE_URL:
             valueFrom:
               secretKeyRef:
                 name: postgres-secret
                 key: url
-          TZ: "Europe/Berlin"
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
+          TZ: "UTC"
     containers:
       user-storage:
         image:
-          repository: ghcr.io/adorsys-gis/fineract-keybound-user-storage
+          repository: ghcr.io/adorsys-gis/user-storage
           tag: "latest"
           pullPolicy: IfNotPresent
-
-        resources:
-          requests:
-            cpu: 400m
-            memory: 512Mi
-          limits:
-            cpu: 800m
-            memory: 1Gi
         args:
           - serve
-
-        envFrom:
-          - secretRef:
-              name: mcpo-api-key-env
-
+          - --config-path
+          - /app/config/default.yaml
         env:
-          DATASOURCE_URL:
+          DATABASE_URL:
             valueFrom:
               secretKeyRef:
                 name: postgres-secret
-                key: uri
-          TZ: "Europe/Berlin"
+                key: url
+          REDIS_URL:
+            valueFrom:
+              secretKeyRef:
+                name: redis-secret
+                key: url
+          TZ: "UTC"
         ports:
           - name: http
             containerPort: 3000
 
-        volumeMounts:
-          - name: flows-config
-            mountPath: /app/flows
-            readOnly: true
-          - name: sessions-config
-            mountPath: /app/sessions
-            readOnly: true
+  worker:
+    type: deployment
+    replicas: 1
+    containers:
+      worker:
+        image:
+          repository: ghcr.io/adorsys-gis/user-storage
+          tag: "latest"
+          pullPolicy: IfNotPresent
+        args:
+          - worker
+          - --config-path
+          - /app/config/default.yaml
+        env:
+          DATABASE_URL:
+            valueFrom:
+              secretKeyRef:
+                name: postgres-secret
+                key: url
+          REDIS_URL:
+            valueFrom:
+              secretKeyRef:
+                name: redis-secret
+                key: url
+          TZ: "UTC"
+        ports:
+          - name: http
+            containerPort: 3000
 
-    volumes:
-      - name: flows-config
-        configMap:
-          name: user-storage-flows
-          optional: true
-      - name: sessions-config
-        configMap:
-          name: user-storage-sessions
-          optional: true
+  sms-gateway:
+    type: deployment
+    replicas: 1
+    containers:
+      sms-gateway:
+        image:
+          repository: ghcr.io/adorsys-gis/sms-gateway
+          tag: "latest"
+          pullPolicy: IfNotPresent
+        args:
+          - --config
+          - /app/config/default.yaml
+        ports:
+          - name: http
+            containerPort: 3001
+        env:
+          DATABASE_URL:
+            valueFrom:
+              secretKeyRef:
+                name: postgres-secret
+                key: url
+          TZ: "UTC"
+
+persistence:
+  flows:
+    type: configMap
+    name: user-storage-flows
+    advancedMounts:
+      user-storage:
+        user-storage:
+          - path: /app/flows
+            readOnly: true
+        migrate:
+          - path: /app/flows
+            readOnly: true
+      worker:
+        worker:
+          - path: /app/flows
+            readOnly: true
+  config:
+    type: configMap
+    name: user-storage-config
+    advancedMounts:
+      user-storage:
+        user-storage:
+          - path: /app/config
+            readOnly: true
+        migrate:
+          - path: /app/config
+            readOnly: true
+      worker:
+        worker:
+          - path: /app/config
+            readOnly: true
+      sms-gateway:
+        sms-gateway:
+          - path: /app/config
+            readOnly: true
 
 service:
   user-storage:
-    enabled: true
-    annotations: { }
-    type: ClusterIP
     controller: user-storage
     ports:
       http:
-        enabled: true
-        port: 3000
+        port: 80
         targetPort: 3000
+  sms-gateway:
+    controller: sms-gateway
+    ports:
+      http:
+        port: 80
+        targetPort: 3001
 
 ingress:
   user-storage:
     enabled: true
-    annotations: {}
-    className: ~
+    className: nginx
     hosts:
-      - host: chart-example.local
+      - host: user-storage.local
         paths:
-          - path: /admins
+          - path: /
             pathType: Prefix
             service:
               identifier: user-storage
               port: http
-    tls:
-      - secretName: chart-example.local-tls
-        hosts:
-          - chart-example.local
-
-networkpolicies:
-  user-storage:
-    enabled: false
-    controller: user-storage
-    podSelector: {}
-    policyTypes:
-      - Ingress
-    rules:
-      ingress:
-        - {}
-
-serviceAccount:
-  user-storage:
-    enabled: true
-    annotations: {}
-    labels: {}
-
-rawResources:
-  {}

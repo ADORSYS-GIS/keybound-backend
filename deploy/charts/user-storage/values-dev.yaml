@@ -1,0 +1,20 @@
+config:
+  database:
+    # URL format: postgres://<user>:<password>@<host>:<port>/<database>
+    url: "postgres://postgres:postgres@postgres.user-storage-deps.svc.cluster.local:5432/user_storage"
+  redis:
+    # URL format: redis://<host>:<port>
+    url: "redis://redis.user-storage-deps.svc.cluster.local:6379"
+  storage:
+    type: minio
+    minio:
+      endpoint: "http://minio.user-storage-deps.svc.cluster.local:9000"
+      region: "us-east-1"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      bucket: "user-storage-dev"
+      force_path_style: true
+  oauth2:
+    issuer: "http://keycloak.user-storage-deps.svc.cluster.local:9026/realms/e2e-testing"
+    # jwks_uri is normally discovered from the issuer, but we can override it if needed
+    jwks_uri: "http://keycloak.user-storage-deps.svc.cluster.local:9026/realms/e2e-testing/protocol/openid-connect/certs"

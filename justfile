@@ -69,8 +69,8 @@ down-single service: # Start a single service (pass service=...)
 destroy: # Snapshot removal of containers + volumes
 	docker compose -p {{project}} -f {{compose_file}} down -v {{c}}
 
-destroy-single service: # Start a single service (pass service=...)
-	docker compose -p {{project}} -f {{compose_file}} down -v {{service}} {{c}}
+destroy-single service: # Snapshot removal of a single service + volumes (pass service=...)
+	docker compose -p {{project}} -f {{compose_file}} rm --stop --force --volumes {{service}}
 
 stop: # Stop running containers
 	docker compose -p {{project}} -f {{compose_file}} stop {{c}}
