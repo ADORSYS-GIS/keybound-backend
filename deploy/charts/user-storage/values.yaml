@@ -11,16 +11,12 @@ config:
   database:
     url: "${DATABASE_URL}"
     pool_size: 10
-    secretName: postgres-secret
-    secretKey: url
   runtime:
     mode: shared
   redis:
     url: "${REDIS_URL}"
     worker_lock_ttl_seconds: 30
     worker_lock_renew_seconds: 10
-    secretName: redis-secret
-    secretKey: url
   storage:
     type: minio
     minio:
@@ -38,8 +34,6 @@ config:
     provider: console
   kc:
     enabled: true
-    signatureSecretName: kc-signature-secret
-    signatureSecretKey: signature_secret
     base_path: "/kc"
     max_clock_skew_seconds: 60
     max_body_bytes: 262144
@@ -82,6 +76,8 @@ controllers:
           - serve
           - --config-path
           - /app/config/default.yaml
+          - --mode
+          - server
         env:
           DATABASE_URL:
             valueFrom:
@@ -111,6 +107,8 @@ controllers:
           - worker
           - --config-path
           - /app/config/default.yaml
+          - --mode
+          - worker
         env:
           DATABASE_URL:
             valueFrom:
