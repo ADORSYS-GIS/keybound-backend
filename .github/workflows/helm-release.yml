@@ -28,6 +28,11 @@ jobs:
             -u ${{ github.actor }} \
             --password-stdin
 
+      - name: Add Helm repositories
+        run: |
+          helm repo add bjw-s https://bjw-s-labs.github.io/helm-charts
+          helm repo update
+
       - name: Build dependencies
         run: helm dependency build deploy/charts/user-storage
 
@@ -40,4 +45,5 @@ jobs:
       - name: Push chart to GHCR
         run: |
           CHART_VERSION=$(grep '^version:' deploy/charts/user-storage/Chart.yaml | awk '{print $2}')
-          helm push user-storage-$CHART_VERSION.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push user-storage-$CHART_VERSION.tgz oci://ghcr.io/$OWNER_LOWER/charts
