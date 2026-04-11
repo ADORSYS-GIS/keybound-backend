@@ -142,13 +142,6 @@ controllers:
         ports:
           - name: http
             containerPort: 3001
-        env:
-          DATABASE_URL:
-            valueFrom:
-              secretKeyRef:
-                name: postgres-secret
-                key: url
-          TZ: "UTC"
 
 persistence:
   flows:
@@ -205,7 +198,7 @@ ingress:
     enabled: true
     className: nginx
     hosts:
-      - host: user-storage.local
+      - host: api.verif.fyi
         paths:
           - path: /
             pathType: Prefix

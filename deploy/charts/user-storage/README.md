@@ -118,8 +118,6 @@ Ensure you have Helm v3.8.0 or later installed, as OCI support is required.
 helm upgrade --install user-storage oci://ghcr.io/adorsys-gis/charts/user-storage --version $CHART_VERSION
 ```
 
-Replace `my-release` with your desired release name.
-
 ### Finding Chart Versions
 
 Available chart versions can be found in the "Packages" section of the GitHub repository. Navigate to the repository on GitHub, click on the "Packages" tab, and locate the `user-storage` package to view available versions.
