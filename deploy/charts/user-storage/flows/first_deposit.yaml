@@ -1,0 +1,176 @@
+flow_type: first_deposit
+human_id_prefix: first_deposit
+feature: flow-first-deposit
+initial_step: init_first_deposit
+
+steps:
+  init_first_deposit:
+    action: WAIT
+    actor: END_USER
+    config:
+      actor: USER
+    next: get_user
+
+  get_user:
+    action: GET_USER
+    actor: SYSTEM
+    config:
+      save_to: session
+    next: resolve_recipient
+
+  resolve_recipient:
+    action: RESOLVE_RECIPIENT
+    actor: SYSTEM
+    config:
+      recipients:
+        - provider: MTN_CM
+          fullname: "Mbarga Benn"
+          phone-number: "+237672000111"
+          regex: "^\\+237(?:67[0-9]|65[0-4])[0-9]{6}$"
+          currency: XAF
+        - provider: ORANGE_CM
+          fullname: "Nkoumou Linda"
+          phone-number: "+237699000222"
+          regex: "^\\+237(?:69[0-9]|65[5-9])[0-9]{6}$"
+          currency: XAF
+    next: await_admin_decision
+
+  await_admin_decision:
+    action: WAIT
+    actor: ADMIN
+    config:
+      actor: ADMIN
+    next: decide_admin
+
+  decide_admin:
+    action: CONDITIONAL
+    actor: SYSTEM
+    config:
+      source: flow
+      pointer: /step_output/await_admin_decision/decision
+      cases:
+        APPROVED: approved
+        REJECTED: rejected
+      default_branch: rejected
+    branches:
+      approved: upgrade_full_name
+      rejected: close_session
+    fail: FAILED
+
+  upgrade_full_name:
+    action: UPGRADE_FULL_NAME
+    actor: SYSTEM
+    config:
+      require_decision: true
+      source_step_output: await_admin_decision
+    next: cuss_register_customer
+
+  cuss_register_customer:
+    action: WEBHOOK_HTTP
+    actor: SYSTEM
+    config:
+      async: true
+      url: ${CUSS_URL}/api/registration/register
+      method: POST
+      timeout_ms: 10000
+      retryable: true
+      auth:
+        type: oauth2
+        token_url: ${KC_TOKEN_URL}
+        client_id: ${CUSS_CLIENT_ID}
+        client_secret: ${CUSS_CLIENT_SECRET}
+      payload_mappings:
+        - source: flow
+          source_path: /full_name
+          target_path: /fullName
+        - source: session
+          source_path: /phone_number
+          target_path: /phone
+        - source_path: /session_user_id
+          target_path: /externalId
+      success_condition:
+        status_codes:
+          - 201
+      extraction_rules:
+        - json_pointer: /fineractClientId
+          target_path: /fineractClientId
+          target_context: step_output
+        - json_pointer: /savingsAccountId
+          target_path: /savingsAccountId
+          target_context: step_output
+    next: cuss_approve_and_deposit
+    fail: FAILED
+
+  cuss_approve_and_deposit:
+    action: WEBHOOK_HTTP
+    actor: SYSTEM
+    config:
+      url: ${CUSS_URL}/api/registration/approve-and-deposit
+      method: POST
+      timeout_ms: 10000
+      retryable: true
+      headers:
+        X-Idempotency-Key: "{{flow_id}}"
+      auth:
+        type: oauth2
+        token_url: ${KC_TOKEN_URL}
+        client_id: ${CUSS_CLIENT_ID}
+        client_secret: ${CUSS_CLIENT_SECRET}
+      payload_mappings:
+        - source: flow
+          source_path: /step_output/cuss_register_customer/savingsAccountId
+          target_path: /savingsAccountId
+        - source: flow
+          source_path: /amount
+          target_path: /depositAmount
+        - value: "CASH"
+          target_path: /paymentType
+      success_condition:
+        status_codes:
+          - 200
+      extraction_rules:
+        - json_pointer: /transactionId
+          target_path: /transactionId
+          target_context: step_output
+        - json_pointer: /savingsAccountId
+          target_path: /savingsAccountId
+          target_context: step_output
+    next: update_deposit_metadata
+    fail: FAILED
+
+  update_deposit_metadata:
+    action: UPDATE_USER_METADATA
+    actor: SYSTEM
+    config:
+      mappings:
+        - target_path: /fineractId
+          source: flow
+          source_path: /step_output/cuss_register_customer/fineractClientId
+          eager: true
+        - target_path: /savingsAccountId
+          source: flow
+          source_path: /step_output/cuss_register_customer/savingsAccountId
+          eager: true
+        - target_path: /firstDeposit/transactionId
+          source: flow
+          source_path: /step_output/cuss_approve_and_deposit/transactionId
+        - target_path: /firstDeposit/status
+          value: APPROVED
+        - target_path: /firstDeposit/validated_deposit_via_whatsapp
+          source: flow
+          source_path: /validated_deposit_via_whatsapp
+        - target_path: /firstDeposit/validated_identity_via_whatsapp
+          source: flow
+          source_path: /validated_identity_via_whatsapp
+    next: COMPLETE
+
+  close_session:
+    action: CLOSE_SESSION
+    actor: SYSTEM
+    config:
+      reason: REJECTED_BY_ADMIN
+    next: CLOSED
+
+  COMPLETE:
+    action: NOOP
+    actor: SYSTEM

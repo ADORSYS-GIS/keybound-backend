@@ -3,11 +3,7 @@ kind: ConfigMap
 metadata:
   name: user-storage-config
   labels:
-    helm.sh/chart: user-storage-0.1.0
-    app.kubernetes.io/name: user-storage
-    app.kubernetes.io/instance: user-storage
-    app.kubernetes.io/version: "1.16.0"
-    app.kubernetes.io/managed-by: Helm
+    {{- include "user-storage.labels" . | nindent 4 }}
 data:
   default.yaml: |-
     server:
