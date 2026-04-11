@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-storage-config
+  labels:
+    {{- include "user-storage.labels" . | nindent 4 }}
+data:
+  default.yaml: |-
+    server:
+      address: {{ .Values.config.server.address | quote }}
+      port: {{ .Values.config.server.port }}
+      tls:
+        cert_path: {{ .Values.config.server.tls.cert_path | quote }}
+        key_path: {{ .Values.config.server.tls.key_path | quote }}
+    logging:
+      level: {{ .Values.config.logging.level | quote }}
+      log_requests_enabled: {{ .Values.config.logging.log_requests_enabled }}
+    database:
+      url: {{ .Values.config.database.url | quote }}
+      pool_size: {{ .Values.config.database.pool_size }}
+    runtime:
+      mode: {{ .Values.config.runtime.mode }}
+    redis:
+      url: {{ .Values.config.redis.url | quote }}
+      worker_lock_ttl_seconds: {{ .Values.config.redis.worker_lock_ttl_seconds }}
+      worker_lock_renew_seconds: {{ .Values.config.redis.worker_lock_renew_seconds }}
+    storage:
+      type: {{ .Values.config.storage.type | quote }}
+      minio:
+        endpoint: {{ .Values.config.storage.minio.endpoint | quote }}
+        region: {{ .Values.config.storage.minio.region | quote }}
+        access_key: {{ .Values.config.storage.minio.access_key | quote }}
+        secret_key: {{ .Values.config.storage.minio.secret_key | quote }}
+        bucket: {{ .Values.config.storage.minio.bucket | quote }}
+        force_path_style: {{ .Values.config.storage.minio.force_path_style }}
+        presign_ttl_seconds: {{ .Values.config.storage.minio.presign_ttl_seconds }}
+    sms:
+      provider: {{ .Values.config.sms.provider }}
+    oauth2:
+      issuer: {{ .Values.config.oauth2.issuer | quote }}
+      jwks-uri: {{ .Values.config.oauth2.jwks_uri | quote }}
+    kc:
+      enabled: {{ .Values.config.kc.enabled }}
+      base-path: {{ .Values.config.kc.base_path | quote }}
+      signature_secret: {{ .Values.config.kc.signature_secret | quote }}
+      max_clock_skew_seconds: {{ .Values.config.kc.max_clock_skew_seconds }}
+      max_body_bytes: {{ .Values.config.kc.max_body_bytes }}
+    bff:
+      enabled: {{ .Values.config.bff.enabled }}
+      base-path: {{ .Values.config.bff.base_path | quote }}
+    staff:
+      enabled: {{ .Values.config.staff.enabled }}
+      base-path: {{ .Values.config.staff.base_path | quote }}
+    cuss:
+      api_url: {{ .Values.config.cuss.api_url | quote }}
