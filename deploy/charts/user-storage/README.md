@@ -157,3 +157,4 @@ You may need to create the namespaces manually if they don't exist
 ```bash
 kubectl create namespace user-storage-deps
 kubectl create namespace user-storage
+```
