@@ -1,4 +1,4 @@
-name: Publish user-storage Helm chart
+name: Publish user-storage Helm chart (OCI)
 
 on:
   workflow_dispatch:
@@ -12,27 +12,38 @@ on:
 
 jobs:
   release:
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v6
 
-      - name: Configure Git
-        # This is needed for chart-releaser to push to gh-pages branch
+      - uses: azure/setup-helm@v4
+
+      - name: Login to GHCR
         run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            -u ${{ github.actor }} \
+            --password-stdin
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+      - name: Add Helm repositories
+        run: |
+          helm repo add bjw-s https://bjw-s-labs.github.io/helm-charts
+          helm repo update
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
-        with:
-          charts_dir: deploy/charts
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: Build dependencies
+        run: helm dependency build deploy/charts/user-storage
+
+      - name: Lint chart
+        run: helm lint deploy/charts/user-storage
+
+      - name: Package chart
+        run: helm package deploy/charts/user-storage
+
+      - name: Push chart to GHCR
+        run: |
+          CHART_VERSION=$(grep '^version:' deploy/charts/user-storage/Chart.yaml | awk '{print $2}')
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push user-storage-$CHART_VERSION.tgz oci://ghcr.io/$OWNER_LOWER/charts
