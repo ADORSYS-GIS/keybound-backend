@@ -104,6 +104,26 @@ cd deploy/charts/user-storage
 helm install user-storage . -f values-dev.yaml
 ```
 
+## Installation from GHCR
+
+### Installation
+
+1. Prerequisites
+
+Ensure you have Helm v3.8.0 or later installed, as OCI support is required.
+
+2. Install the chart from the OCI registry:
+
+```bash
+helm upgrade --install user-storage oci://ghcr.io/adorsys-gis/charts/user-storage --version $CHART_VERSION
+```
+
+Replace `my-release` with your desired release name.
+
+### Finding Chart Versions
+
+Available chart versions can be found in the "Packages" section of the GitHub repository. Navigate to the repository on GitHub, click on the "Packages" tab, and locate the `user-storage` package to view available versions.
+
 ## Configuration
 
 The chart values can be customized by editing the `values.yaml` file. For example:
@@ -137,4 +157,3 @@ You may need to create the namespaces manually if they don't exist
 ```bash
 kubectl create namespace user-storage-deps
 kubectl create namespace user-storage
-```
