@@ -30,6 +30,11 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
+      - name: Add dependency chart repos
+        run: |
+          helm repo add bjw-s-labs https://bjw-s-labs.github.io/helm-charts
+          helm repo update
+
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
         with:
