@@ -5847,6 +5847,7 @@ dependencies = [
  "aws-types",
  "axum",
  "backend-core",
+ "base64 0.22.1",
  "clap",
  "mimalloc",
  "reqwest 0.13.2",
@@ -5855,6 +5856,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "urlencoding",
  "wiremock",
 ]
 
