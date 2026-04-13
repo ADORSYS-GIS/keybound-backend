@@ -125,7 +125,7 @@ sns:
 # Controls how SMS messages are sent for OTP and notifications.
 sms:
   # SMS provider: "console" (logs only), "sns" (AWS SNS), "avlytext" (AvlyText API).
-  provider: orange
+  provider: console
   # AvlyText API configuration (used when provider=avlytext).
   avlytext:
     # Base URL for AvlyText API.
