@@ -262,6 +262,12 @@ fn normalize_input(
         ));
     }
 
+    if matches!(decision, AdminDecision::Approved) && parsed.validated_deposited_amount.is_none() {
+        return Err(FlowError::InvalidDefinition(
+            "validated_deposited_amount is required for APPROVED decision".to_owned(),
+        ));
+    }
+
     Ok(NormalizedInput {
         decision: Some(decision),
         full_name,
@@ -350,7 +356,8 @@ mod tests {
             "decision": "APPROVED",
             "full_name": "  New Name  ",
             "validated_deposit_via_whatsapp": true,
-            "validated_identity_via_whatsapp": false
+            "validated_identity_via_whatsapp": false,
+            "validated_deposited_amount": 500.0
         });
 
         let outcome = action.verify_input(&ctx, &input).await.unwrap();
@@ -361,6 +368,7 @@ mod tests {
                 assert_eq!(output["full_name"], "New Name");
                 assert_eq!(output["validated_deposit_via_whatsapp"], true);
                 assert_eq!(output["validated_identity_via_whatsapp"], false);
+                assert_eq!(output["validated_deposited_amount"], 500.0);
 
                 let updates = updates.expect("updates");
                 assert_eq!(
@@ -385,7 +393,8 @@ mod tests {
             None,
         );
         let input = json!({
-            "decision": "APPROVED"
+            "decision": "APPROVED",
+            "validated_deposited_amount": 500.0
         });
 
         let outcome = action.verify_input(&ctx, &input).await.unwrap();
@@ -395,6 +404,7 @@ mod tests {
                 assert_eq!(output["full_name"], "Existing Name");
                 assert_eq!(output["validated_deposit_via_whatsapp"], false);
                 assert_eq!(output["validated_identity_via_whatsapp"], false);
+                assert_eq!(output["validated_deposited_amount"], 500.0);
 
                 let updates = updates.expect("updates");
                 assert_eq!(
@@ -442,7 +452,8 @@ mod tests {
                         "decision": "APPROVED",
                         "full_name": "Updated Name",
                         "validated_deposit_via_whatsapp": true,
-                        "validated_identity_via_whatsapp": true
+                        "validated_identity_via_whatsapp": true,
+                        "validated_deposited_amount": 500.0
                     }
                 }
             }),
