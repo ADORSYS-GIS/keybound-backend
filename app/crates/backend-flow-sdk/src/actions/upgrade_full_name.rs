@@ -35,6 +35,8 @@ struct UpgradeFullNameInput {
     validated_deposit_via_whatsapp: Option<bool>,
     #[serde(default, alias = "validatedIdentityViaWhatsapp")]
     validated_identity_via_whatsapp: Option<bool>,
+    #[serde(default, alias = "validatedDepositedAmount")]
+    validated_deposited_amount: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +70,7 @@ struct NormalizedInput {
     full_name: Option<String>,
     validated_deposit_via_whatsapp: bool,
     validated_identity_via_whatsapp: bool,
+    validated_deposited_amount: Option<f64>,
 }
 
 pub struct UpgradeFullNameAction;
@@ -145,6 +148,14 @@ fn done_outcome(normalized: NormalizedInput) -> StepOutcome {
         flow_patch.insert("full_name".to_owned(), Value::String(full_name.clone()));
     }
 
+    if let Some(amount) = normalized.validated_deposited_amount {
+        // Save to flow context as "amount" so downstream steps/webhooks read the validated amount
+        flow_patch.insert("amount".to_owned(), json!(amount));
+        // Save to session context as "deposit_amount" for broader availability
+        session_patch.insert("deposit_amount".to_owned(), json!(amount));
+        session_patch.insert("amount".to_owned(), json!(amount));
+    }
+
     flow_patch.insert(
         "validated_deposit_via_whatsapp".to_owned(),
         Value::Bool(normalized.validated_deposit_via_whatsapp),
@@ -167,7 +178,8 @@ fn done_outcome(normalized: NormalizedInput) -> StepOutcome {
             "decision": normalized.decision.map(|decision| decision.as_str()),
             "full_name": normalized.full_name,
             "validated_deposit_via_whatsapp": normalized.validated_deposit_via_whatsapp,
-            "validated_identity_via_whatsapp": normalized.validated_identity_via_whatsapp
+            "validated_identity_via_whatsapp": normalized.validated_identity_via_whatsapp,
+            "validated_deposited_amount": normalized.validated_deposited_amount
         })),
         updates: Some(Box::new(ContextUpdates {
             session_context_patch: Some(Value::Object(session_patch)),
@@ -227,6 +239,7 @@ fn normalize_input(
                 validated_identity_via_whatsapp: parsed
                     .validated_identity_via_whatsapp
                     .unwrap_or(false),
+                validated_deposited_amount: parsed.validated_deposited_amount,
             });
         }
     };
@@ -254,6 +267,7 @@ fn normalize_input(
         full_name,
         validated_deposit_via_whatsapp: parsed.validated_deposit_via_whatsapp.unwrap_or(false),
         validated_identity_via_whatsapp: parsed.validated_identity_via_whatsapp.unwrap_or(false),
+        validated_deposited_amount: parsed.validated_deposited_amount,
     })
 }
 
