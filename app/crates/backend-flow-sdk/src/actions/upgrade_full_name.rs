@@ -430,6 +430,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_approved_decision_without_amount() {
+        let action = UpgradeFullNameAction;
+        let input = json!({
+            "decision": "APPROVED",
+            "full_name": "New Name"
+        });
+        let err = action.validate_input(&input).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("validated_deposited_amount is required for APPROVED decision")
+        );
+    }
+
+    #[tokio::test]
     async fn execute_can_read_input_from_previous_step_output() {
         let action = UpgradeFullNameAction;
         let tracker = Arc::new(TestContactService::default());
