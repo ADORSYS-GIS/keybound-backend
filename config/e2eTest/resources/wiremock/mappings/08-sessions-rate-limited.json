@@ -1,0 +1,19 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/sessions",
+    "bodyPatterns": [
+      { "contains": "\"userId\":\"azamra-user-rate-limited-id\"" }
+    ]
+  },
+  "response": {
+    "status": 429,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "Too Many Requests"
+    }
+  }
+}

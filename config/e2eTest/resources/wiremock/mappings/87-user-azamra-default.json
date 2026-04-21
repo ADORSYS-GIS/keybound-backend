@@ -1,0 +1,26 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/azamra-user-id"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "azamra-user-id",
+      "realm": "azamra-realm",
+      "username": "azamra-user",
+      "email": "azamra-user@example.com",
+      "emailVerified": true,
+      "disabled": false,
+      "fullName": "Azamra User",
+      "phoneNumber": "+237699000111",
+      "metadata": { "savingsAccountId": 101 },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}

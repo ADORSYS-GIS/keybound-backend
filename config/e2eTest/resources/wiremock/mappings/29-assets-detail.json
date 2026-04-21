@@ -1,0 +1,48 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "^/api/assets/[^/]+$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "asset-1",
+      "name": "Solar Yield ETF",
+      "symbol": "SYE",
+      "currencyCode": "XAF",
+      "description": "Diversified solar infrastructure ETF",
+      "imageUrl": "https://cdn.azamra.local/assets/solar-detail.png",
+      "category": "STOCKS",
+      "status": "ACTIVE",
+      "priceMode": "MANUAL",
+      "currentPrice": 102.5,
+      "change24hPercent": 1.23,
+      "dayOpen": 101.0,
+      "dayHigh": 103.5,
+      "dayLow": 100.25,
+      "dayClose": 102.5,
+      "totalSupply": 1000000,
+      "circulatingSupply": 500000,
+      "availableSupply": 250000,
+      "tradingFeePercent": 0.2,
+      "spreadPercent": 0.1,
+      "decimalPlaces": 2,
+      "subscriptionStartDate": "2025-05-01",
+      "subscriptionEndDate": "2026-05-01",
+      "capitalOpenedPercent": 75.5,
+      "createdAt": "2025-01-15T08:00:00Z",
+      "updatedAt": "2026-03-10T12:00:00Z",
+      "issuer": "Azamra Capital",
+      "isinCode": "XS1234567890",
+      "maturityDate": "2027-12-31",
+      "interestRate": 3.25,
+      "couponFrequencyMonths": 6,
+      "nextCouponDate": "2026-09-30",
+      "residualDays": 350,
+      "subscriptionClosed": false
+    }
+  }
+}

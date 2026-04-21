@@ -1,0 +1,21 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/protocol/openid-connect/token",
+    "bodyPatterns": [
+      { "contains": "grant_type=urn%3Assegning%3Aparams%3Aoauth%3Agrant-type%3Adevice_key" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "access_token": "e2e-device-key-access-token",
+      "token_type": "Bearer",
+      "expires_in": 300
+    }
+  }
+}

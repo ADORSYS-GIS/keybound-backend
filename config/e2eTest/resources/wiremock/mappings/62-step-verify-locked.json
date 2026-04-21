@@ -1,0 +1,31 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/steps/step-verify-otp",
+    "bodyPatterns": [
+      { "contains": "\"code\":\"8888\"" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "step-verify-otp",
+      "humanId": "H-S002",
+      "flowId": "flow-phone-locked",
+      "stepType": "verify_otp",
+      "actor": "USER",
+      "status": "FAILED",
+      "input": { "code": "8888" },
+      "output": null,
+      "error": { "code": "MAX_ATTEMPTS", "message": "Maximum verification attempts exceeded" },
+      "attemptNo": 5,
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:10:00Z",
+      "finishedAt": "2026-03-07T00:10:00Z"
+    }
+  }
+}

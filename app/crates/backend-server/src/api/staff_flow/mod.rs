@@ -15,7 +15,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::instrument;
+use tracing::{debug, instrument, warn};
 use utoipa::{OpenApi, ToSchema};
 
 #[derive(OpenApi)]
@@ -573,10 +573,34 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
         .unwrap_or_default();
 
     if !auth_header.to_ascii_lowercase().starts_with("bearer ") {
+        warn!(
+            reason = "missing_bearer",
+            has_authorization_header = !auth_header.is_empty(),
+            auth_header_prefix = %auth_header.chars().take(6).collect::<String>(),
+            "staff auth failed before JWT verification"
+        );
         return Err(Error::unauthorized("Missing bearer token"));
     }
 
-    JwtToken::verify(&auth_header[7..], &api.oidc_state).await
+    match JwtToken::verify(&auth_header[7..], &api.oidc_state).await {
+        Ok(token) => {
+            debug!(
+                subject = %token.claims.sub,
+                issuer = %token.claims.iss,
+                "staff auth success"
+            );
+            Ok(token)
+        }
+        Err(err) => {
+            warn!(
+                reason = "jwt_verify_failed",
+                error = %err,
+                token_len = auth_header.len().saturating_sub(7),
+                "staff auth failed during JWT verification"
+            );
+            Err(Error::unauthorized("Invalid bearer token"))
+        }
+    }
 }
 
 async fn resolve_user_ids_for_filters(
