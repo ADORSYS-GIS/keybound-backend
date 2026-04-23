@@ -4,6 +4,7 @@ pub use world::*;
 
 use anyhow::{Result, anyhow};
 use cucumber::{World, given, then, when};
+use tokio_postgres::NoTls;
 use reqwest::Method;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -18,6 +19,8 @@ pub struct FlowState {
     pub phone_verify_step_id: Option<String>,
     pub deposit_flow_id: Option<String>,
     pub admin_step_id: Option<String>,
+    pub id_document_flow_id: Option<String>,
+    pub id_document_step_id: Option<String>,
     pub deposit_amount: Option<i64>,
     pub phone_number: Option<String>,
     pub otp_code: Option<String>,
@@ -1660,6 +1663,751 @@ async fn cuss_requests_recorded(world: &mut FullE2eWorld) {
 #[then("no error occurred")]
 async fn no_error(world: &mut FullE2eWorld) {
     assert!(world.error.is_none(), "Unexpected error: {:?}", world.error);
+}
+
+#[given("a registered device with JWT token")]
+async fn registered_device_with_jwt(world: &mut FullE2eWorld) {
+    if world.token.is_none() {
+        world.error = Some("JWT token not available".to_string());
+    }
+}
+
+#[given("I have created an id_document session")]
+async fn create_id_document_session(world: &mut FullE2eWorld) {
+    let bff_base = match world.bff_base() {
+        Ok(base) => base,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let token = match world.token() {
+        Ok(t) => t,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let client = match world.client() {
+        Ok(c) => c,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let session = send_json(
+        client,
+        Method::POST,
+        &format!("{}/sessions", bff_base),
+        Some(token),
+        Some(json!({ "sessionType": "kyc_full" })),
+    )
+    .await;
+
+    let session = match session {
+        Ok(value) => value,
+        Err(error) => {
+            world.error = Some(error.to_string());
+            return;
+        }
+    };
+
+    if session.status != 201 {
+        world.error = Some(format!(
+            "create session failed ({}): {}",
+            session.status, session.text
+        ));
+        return;
+    }
+
+    let session_id = match require_id(&session.body, "id") {
+        Ok(value) => value,
+        Err(error) => {
+            world.error = Some(format!(
+                "session missing id: {} | body={}",
+                error, session.text
+            ));
+            return;
+        }
+    };
+
+    let flow = send_json(
+        client,
+        Method::POST,
+        &format!("{}/sessions/{}/flows", bff_base, session_id),
+        Some(token),
+        Some(json!({ "flowType": "id_document" })),
+    )
+    .await;
+
+    world.flow.session_id = Some(session_id);
+
+    let flow = match flow {
+        Ok(value) => value,
+        Err(error) => {
+            world.error = Some(error.to_string());
+            return;
+        }
+    };
+
+    if flow.status != 201 {
+        world.error = Some(format!(
+            "create id_document flow failed ({}): {}",
+            flow.status, flow.text
+        ));
+        return;
+    }
+
+    let flow_id = match require_id(&flow.body, "id") {
+        Ok(value) => value,
+        Err(error) => {
+            world.error = Some(format!(
+                "flow missing id: {} | body={}",
+                error, flow.text
+            ));
+            return;
+        }
+    };
+
+    world.flow.id_document_flow_id = Some(flow_id);
+}
+
+#[when(regex = r#"^I upload valid id_document documents for session "([^"]+)"$"#)]
+async fn upload_id_document(world: &mut FullE2eWorld, session_id: String, raw_docstring: String) {
+    // session_id is passed from the step, do not overwrite
+    let bff_base = match world.bff_base() {
+        Ok(base) => base,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let token = match world.token() {
+        Ok(t) => t,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let client = match world.client() {
+        Ok(c) => c,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let upload_payload: Value = match serde_json::from_str(raw_docstring.as_str()) {
+        Ok(v) => v,
+        Err(e) => {
+            world.error = Some(format!("failed to parse upload payload: {}", e));
+            return;
+        }
+    };
+
+    let upload_response = send_json(
+        client,
+        Method::POST,
+        &format!("{}/sessions/{}/flows/{}/steps", bff_base, session_id, world.flow.id_document_flow_id.as_ref().expect("flow_id not set")),
+        Some(token),
+        Some(json!({
+            "action": "uploadDocument",
+            "input": upload_payload
+        })),
+    )
+    .await;
+
+    world.last_response = Some(upload_response.unwrap_or(JsonResponse {
+        status: 0,
+        text: "".to_string(),
+        body: None,
+    }));
+}
+
+#[given("an id_document session AWAITING_REVIEW")]
+async fn id_document_awaiting_review(world: &mut FullE2eWorld) {
+    create_id_document_session(world).await;
+    
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => return,
+    };
+
+    let flow_id = match &world.flow.id_document_flow_id {
+        Some(id) => id.clone(),
+        None => return,
+    };
+
+    let bff_base = match world.bff_base() {
+        Ok(base) => base,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let client = match world.client() {
+        Ok(c) => c,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let steps_response = send_json(
+        client,
+        Method::GET,
+        &format!("{}/sessions/{}/flows/{}/steps", bff_base, session_id, flow_id),
+        world.token().ok().as_deref(),
+        None,
+    )
+    .await;
+
+    if let Ok(steps) = steps_response {
+        if let Some(body) = &steps.body {
+            if let Some(steps_arr) = body.as_array() {
+                for step in steps_arr {
+                    if let Some(step_id) = step.get("id").and_then(|v| v.as_str()) {
+                        if let Some(flags) = step.get("flags").and_then(|v| v.as_array()) {
+                            for flag in flags {
+                                if let Some(flag_str) = flag.as_str() {
+                                    if flag_str == "AWAITING_REVIEW" {
+                                        world.flow.id_document_step_id = Some(step_id.to_string());
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[when("I approve the id_document session via staff API")]
+async fn approve_id_document_session(world: &mut FullE2eWorld) {
+    let step_id = match &world.flow.id_document_step_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("step_id not set".to_string());
+            return;
+        }
+    };
+
+    let staff_base = match world.staff_base() {
+        Ok(base) => base,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let client = match world.client() {
+        Ok(c) => c,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let token = match world.token() {
+        Ok(t) => t,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let approve_response = send_json(
+        client,
+        Method::POST,
+        &format!("{}/flow/steps/{}/actions", staff_base, step_id),
+        Some(token),
+        Some(json!({
+            "action": "approve",
+            "payload": {}
+        })),
+    )
+    .await;
+
+    world.last_response = Some(approve_response.unwrap_or(JsonResponse {
+        status: 0,
+        text: "".to_string(),
+        body: None,
+    }));
+}
+
+#[when(regex = r#"^I reject the id_document session via staff API with reason "([^"]+)"$"#)]
+async fn reject_id_document_session(world: &mut FullE2eWorld, reason: String) {
+    let step_id = match &world.flow.id_document_step_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("step_id not set".to_string());
+            return;
+        }
+    };
+
+    let staff_base = match world.staff_base() {
+        Ok(base) => base,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let client = match world.client() {
+        Ok(c) => c,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let token = match world.token() {
+        Ok(t) => t,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let reject_response = send_json(
+        client,
+        Method::POST,
+        &format!("{}/flow/steps/{}/actions", staff_base, step_id),
+        Some(token),
+        Some(json!({
+            "action": "reject",
+            "payload": { "reason": reason }
+        })),
+    )
+    .await;
+
+    world.last_response = Some(reject_response.unwrap_or(JsonResponse {
+        status: 0,
+        text: "".to_string(),
+        body: None,
+    }));
+}
+
+#[given("an approved id_document session")]
+async fn approved_id_document_session(world: &mut FullE2eWorld) {
+    create_id_document_session(world).await;
+    
+    let step_id = match &world.flow.id_document_step_id {
+        Some(id) => id.clone(),
+        None => return,
+    };
+
+    let staff_base = match world.staff_base() {
+        Ok(base) => base,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let client = match world.client() {
+        Ok(c) => c,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    let token = match world.token() {
+        Ok(t) => t,
+        Err(e) => {
+            world.error = Some(e.to_string());
+            return;
+        }
+    };
+
+    send_json(
+        client,
+        Method::POST,
+        &format!("{}/flow/steps/{}/actions", staff_base, step_id),
+        Some(token),
+        Some(json!({
+            "action": "approve",
+            "payload": {}
+        })),
+    )
+    .await
+    .ok();
+}
+
+#[then("the response contains session ID")]
+async fn response_contains_session_id(world: &mut FullE2eWorld) {
+    if let Some(response) = &world.last_response {
+        if let Some(body) = &response.body {
+            if body.get("id").is_none() {
+                world.error = Some(format!("response missing session ID: {}", response.text));
+            } else {
+                world.flow.session_id = body.get("id").and_then(|v| v.as_str()).map(String::from);
+            }
+        }
+    }
+}
+
+#[then("sm_instance row persisted for KYC_ID_DOCUMENT with import_id = 1")]
+async fn sm_instance_persisted_kyc_id_document(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let row = conn
+        .query_one(
+            "SELECT id, flow_type, import_id FROM sm_instance WHERE session_id = $1 AND flow_type = 'KYC_ID_DOCUMENT' LIMIT 1",
+            &[&session_id],
+        )
+        .await;
+
+    match row {
+        Ok(record) => {
+            let import_id: i32 = record.get::<usize, i32>(2);
+            if import_id != 1 {
+                world.error = Some(format!("expected import_id = 1, got {}", import_id));
+            }
+        }
+        Err(e) => {
+            world.error = Some(format!("sm_instance row not found: {}", e));
+        }
+    }
+}
+
+#[then("sm_event entries exist for DocumentUploaded event")]
+async fn sm_event_document_uploaded(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let count: i64 = conn
+        .query_one(
+            "SELECT COUNT(*) FROM sm_event WHERE session_id = $1 AND event_type = 'DocumentUploaded'",
+            &[&session_id],
+        )
+        .await
+        .map(|row| row.get(0))
+        .unwrap_or(0);
+
+    if count == 0 {
+        world.error = Some("no DocumentUploaded event found".to_string());
+    }
+}
+
+#[then("session still exists in sm_instance")]
+async fn session_still_exists_in_sm_instance(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let exists: bool = conn
+        .query_one(
+            "SELECT EXISTS(SELECT 1 FROM sm_instance WHERE session_id = $1)",
+            &[&session_id],
+        )
+        .await
+        .map(|row| row.get(0))
+        .unwrap_or(false);
+
+    if !exists {
+        world.error = Some("session does not exist in sm_instance".to_string());
+    }
+}
+
+#[then("sm_event entries exist for DocumentApproved event")]
+async fn sm_event_document_approved(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let count: i64 = conn
+        .query_one(
+            "SELECT COUNT(*) FROM sm_event WHERE session_id = $1 AND event_type = 'DocumentApproved'",
+            &[&session_id],
+        )
+        .await
+        .map(|row| row.get(0))
+        .unwrap_or(0);
+
+    if count == 0 {
+        world.error = Some("no DocumentApproved event found".to_string());
+    }
+}
+
+#[then("session state transitions to DocumentApproved")]
+async fn session_state_document_approved(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let state: Result<String, _> = conn
+        .query_one(
+            "SELECT state FROM sm_instance WHERE session_id = $1 LIMIT 1",
+            &[&session_id],
+        )
+        .await
+        .map(|row| row.get(0));
+
+    match state {
+        Ok(s) => {
+            if !s.contains("DocumentApproved") {
+                world.error = Some(format!("expected state to contain DocumentApproved, got {}", s));
+            }
+        }
+        Err(e) => {
+            world.error = Some(format!("failed to get session state: {}", e));
+        }
+    }
+}
+
+#[then("sm_event entries exist for DocumentRejected event")]
+async fn sm_event_document_rejected(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let count: i64 = conn
+        .query_one(
+            "SELECT COUNT(*) FROM sm_event WHERE session_id = $1 AND event_type = 'DocumentRejected'",
+            &[&session_id],
+        )
+        .await
+        .map(|row| row.get(0))
+        .unwrap_or(0);
+
+    if count == 0 {
+        world.error = Some("no DocumentRejected event found".to_string());
+    }
+}
+
+#[then("session state transitions to DocumentRejected")]
+async fn session_state_document_rejected(world: &mut FullE2eWorld) {
+    let session_id = match &world.flow.session_id {
+        Some(id) => id.clone(),
+        None => {
+            world.error = Some("session_id not set".to_string());
+            return;
+        }
+    };
+
+    let env = match world.env() {
+        Ok(e) => e,
+        Err(err) => {
+            world.error = Some(err.to_string());
+            return;
+        }
+    };
+
+    let conn = match tokio_postgres::connect(&env.database_url, NoTls).await {
+        Ok((conn, _)) => conn,
+        Err(e) => {
+            world.error = Some(format!("failed to connect to database: {}", e));
+            return;
+        }
+    };
+
+    let state: Result<String, _> = conn
+        .query_one(
+            "SELECT state FROM sm_instance WHERE session_id = $1 LIMIT 1",
+            &[&session_id],
+        )
+        .await
+        .map(|row| row.get(0));
+
+    match state {
+        Ok(s) => {
+            if !s.contains("DocumentRejected") {
+                world.error = Some(format!("expected state to contain DocumentRejected, got {}", s));
+            }
+        }
+        Err(e) => {
+            world.error = Some(format!("failed to get session state: {}", e));
+        }
+    }
+}
+
+#[then("the user profile contains id_document verification status")]
+async fn user_profile_contains_id_document_status(world: &mut FullE2eWorld) {
+    if let Some(response) = &world.last_response {
+        if let Some(body) = &response.body {
+            if let Some(kyc) = body.get("kyc") {
+                if kyc.get("id_document").is_none() {
+                    world.error = Some("user profile missing id_document verification status".to_string());
+                }
+            }
+        }
+    }
+}
+
+#[then("completed KYC contains flow \"id_document\"")]
+async fn completed_kyc_contains_id_document(world: &mut FullE2eWorld) {
+    if let Some(response) = &world.last_response {
+        if let Some(body) = &response.body {
+            if let Some(completed) = body.get("completed") {
+                if let Some(arr) = completed.as_array() {
+                    if !arr.iter().any(|v| v.as_str() == Some("id_document")) {
+                        world.error = Some("completed KYC does not contain id_document".to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[then("KYC tier level is updated appropriately")]
+async fn kyc_tier_updated_appropritately(world: &mut FullE2eWorld) {
+    if let Some(response) = &world.last_response {
+        if let Some(body) = &response.body {
+            if let Some(tier) = body.get("tier") {
+                if tier.is_null() {
+                    world.error = Some("KYC tier level is null".to_string());
+                }
+            } else {
+                world.error = Some("user profile missing tier field".to_string());
+            }
+        }
+    }
+}
+
+#[then("the response contains flow ID")]
+async fn response_contains_flow_id(world: &mut FullE2eWorld) {
+    if let Some(response) = &world.last_response {
+        if let Some(body) = &response.body {
+            if body.get("id").is_none() {
+                world.error = Some(format!("response missing flow ID: {}", response.text));
+            } else {
+                world.flow.id_document_flow_id = body.get("id").and_then(|v| v.as_str()).map(String::from);
+            }
+        }
+    }
 }
 
 #[tokio::main]
