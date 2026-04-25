@@ -1,3 +1,7 @@
+use std::iter;
+
+use utoipa::openapi::security::SecurityRequirement;
+use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -6,6 +10,7 @@ use crate::api::{
     staff_flow::StaffFlowOpenApi,
 };
 
+/// Main API documentation
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -23,10 +28,49 @@ use crate::api::{
 pub struct ApiDoc;
 
 pub fn swagger_ui() -> SwaggerUi {
-    let bff_spec = BffFlowOpenApi::openapi();
-    let uploads_spec = BffUploadsOpenApi::openapi();
-    let staff_spec = StaffFlowOpenApi::openapi();
-    let auth_spec = AuthOpenApi::openapi();
+    // Create the specs
+    let mut bff_spec = BffFlowOpenApi::openapi();
+    let mut uploads_spec = BffUploadsOpenApi::openapi();
+    let mut staff_spec = StaffFlowOpenApi::openapi();
+    let mut auth_spec = AuthOpenApi::openapi();
+
+    // Create the Bearer HTTP security scheme
+    let bearer_scheme = SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer));
+
+    // Helper to create security requirement
+    let make_req = || SecurityRequirement::new("bearerAuth", iter::empty::<String>());
+
+    // Add security scheme and requirement to BFF spec
+    if let Some(components) = bff_spec.components.as_mut() {
+        components
+            .security_schemes
+            .insert("bearerAuth".to_string(), bearer_scheme.clone());
+    }
+    bff_spec.security = Some(vec![make_req()]);
+
+    // Add security scheme and requirement to uploads spec
+    if let Some(components) = uploads_spec.components.as_mut() {
+        components
+            .security_schemes
+            .insert("bearerAuth".to_string(), bearer_scheme.clone());
+    }
+    uploads_spec.security = Some(vec![make_req()]);
+
+    // Add security scheme and requirement to staff spec
+    if let Some(components) = staff_spec.components.as_mut() {
+        components
+            .security_schemes
+            .insert("bearerAuth".to_string(), bearer_scheme.clone());
+    }
+    staff_spec.security = Some(vec![make_req()]);
+
+    // Add security scheme and requirement to auth spec
+    if let Some(components) = auth_spec.components.as_mut() {
+        components
+            .security_schemes
+            .insert("bearerAuth".to_string(), bearer_scheme);
+    }
+    auth_spec.security = Some(vec![make_req()]);
 
     SwaggerUi::new("/swagger-ui/")
         .url("/api-docs/bff/openapi.json", bff_spec)
