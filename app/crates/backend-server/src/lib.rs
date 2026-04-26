@@ -230,8 +230,8 @@ fn build_router(
         router = router.nest(auth_base, auth_router);
     }
 
-    // Mount Swagger UI
-    router = router.merge(Into::<Router>::into(swagger::swagger_ui()));
+    // Mount Swagger UI - pass oauth2 config so token URL is dynamically configured
+    router = router.merge(Into::<Router>::into(swagger::swagger_ui(&config.oauth2)));
 
     // 404 fallback for unmatched routes
     router = router.fallback(|| async { (StatusCode::NOT_FOUND, "Not Found") });

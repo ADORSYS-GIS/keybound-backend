@@ -11,6 +11,7 @@ use crate::api::{
     auth::AuthOpenApi, bff_flow::BffFlowOpenApi, bff_uploads::BffUploadsOpenApi,
     staff_flow::StaffFlowOpenApi,
 };
+use backend_core::config::Oauth2;
 
 /// Main API documentation
 #[derive(OpenApi)]
@@ -29,7 +30,8 @@ use crate::api::{
 )]
 pub struct ApiDoc;
 
-pub fn swagger_ui() -> SwaggerUi {
+/// Creates a SwaggerUi with OAuth2 security configured from the app config
+pub fn swagger_ui(oauth2_config: &Oauth2) -> SwaggerUi {
     // Create the specs
     let mut bff_spec = BffFlowOpenApi::openapi();
     let mut uploads_spec = BffUploadsOpenApi::openapi();
@@ -39,11 +41,19 @@ pub fn swagger_ui() -> SwaggerUi {
     // Create the Bearer HTTP security scheme
     let bearer_scheme = SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer));
 
-    // Create the OAuth2 security scheme for Keycloak
-    let token_url = "http://localhost:9026/realms/e2e-testing/protocol/openid-connect/token";
+    // Build token URL from issuer - the issuer is like "http://localhost:9026/realms/e2e-testing"
+    // We need to append "/protocol/openid-connect/token"
+    let issuer = oauth2_config.issuer.trim();
+    let token_url = if issuer.ends_with('/') {
+        format!("{}protocol/openid-connect/token", issuer)
+    } else {
+        format!("{}/protocol/openid-connect/token", issuer)
+    };
+
+    // Create the OAuth2 security scheme for Keycloak using the configured issuer
     let oauth2_scheme = SecurityScheme::OAuth2(OAuth2::new([
-        Flow::Password(Password::new(token_url, Scopes::new())),
-        Flow::ClientCredentials(ClientCredentials::new(token_url, Scopes::new())),
+        Flow::Password(Password::new(&token_url, Scopes::new())),
+        Flow::ClientCredentials(ClientCredentials::new(&token_url, Scopes::new())),
     ]));
 
     // Helper to create security requirements
