@@ -104,6 +104,34 @@ pub struct Oauth2 {
     pub base_paths: Vec<String>,
 }
 
+/// Swagger UI and OpenAPI documentation configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SwaggerConfig {
+    /// HTTP host URL for the API server (e.g., "http://localhost:3000").
+    /// Used to configure server URLs in OpenAPI specs.
+    #[serde(alias = "http-host")]
+    pub http_host: Option<String>,
+    /// OAuth2 client configuration for Swagger UI authentication.
+    #[serde(default)]
+    pub oauth2_client: Option<SwaggerOauth2Client>,
+}
+
+impl Default for SwaggerConfig {
+    fn default() -> Self {
+        Self {
+            http_host: None,
+            oauth2_client: None,
+        }
+    }
+}
+
+/// OAuth2 client credentials for Swagger UI to authenticate against the IdP.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SwaggerOauth2Client {
+    #[serde(default, alias = "token-url")]
+    pub token_url: Option<String>
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsS3 {
     /// Optional region override for S3.
@@ -251,6 +279,8 @@ pub struct Config {
     pub cuss: Cuss,
     #[serde(default)]
     pub flow: FlowConfig,
+    #[serde(default)]
+    pub swagger: SwaggerConfig,
 }
 
 /// TLS certificate configuration for HTTPS.

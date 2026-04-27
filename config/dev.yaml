@@ -185,3 +185,14 @@ staff:
 cuss:
   # CUSS API base URL. Supports env var with default.
   api_url: ${CUSS_URL:-http://cuss-wiremock:8080}
+
+# Swagger UI / OpenAPI Configuration
+# Controls the API documentation UI and OAuth2 authentication for testing.
+swagger:
+  # HTTP host URL for the API server used in OpenAPI specs.
+  # Configure this to match your deployment environment (e.g., https://api.example.com).
+  http-host: "http://localhost:3001"
+  # OAuth2 client configuration for Swagger UI "Authorize" button.
+  oauth2-client:
+    # OIDC token URL for Swagger UI authentication.
+    token-url: "http://localhost:9026/realms/e2e-testing/protocol/openid-connect/token"
