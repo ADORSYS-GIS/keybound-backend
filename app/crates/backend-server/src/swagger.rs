@@ -59,7 +59,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
         format!("http://{}:{}", config.server.address, config.server.port)
     };
 
-    // Build base URLs from BFF and Staff config
+    // Build base URLs from BFF, Staff, and Auth config
     let bff_base = config.bff.base_path.trim();
     let staff_base = config.staff.base_path.trim();
     let auth_base = config.auth.base_path.trim();
@@ -134,10 +134,15 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
     auth_spec.security = Some(vec![make_bearer_req(), make_oauth2_req()]);
     auth_spec.servers = Some(vec![Server::new(&format!("{}{}", http_host, auth_base))]);
 
+    let json = include_str!("../../../gen/kc_openapi/openapi.json")
+        .parse::<serde_json::Value>()
+        .expect("KC OpenAPI JSON is invalid");
+
     SwaggerUi::new("/swagger-ui/")
         .url("/api-docs/bff/openapi.json", bff_spec)
         .url("/api-docs/uploads/openapi.json", uploads_spec)
         .url("/api-docs/staff/openapi.json", staff_spec)
         .url("/api-docs/auth/openapi.json", auth_spec)
         .url("/api-docs/core/openapi.json", ApiDoc::openapi())
+        .external_url_unchecked("/api-docs/kc/openapi.json", json)
 }
