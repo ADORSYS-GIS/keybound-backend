@@ -310,21 +310,36 @@ impl OrangeSmsProvider {
         Ok(access_token)
     }
 
-    fn normalize_msisdn(&self, msisdn: &str) -> String {
-        let digits: String = msisdn.chars().filter(|c| c.is_ascii_digit()).collect();
-        if digits.starts_with("237") && digits.len() == 12 {
-            format!("tel:+{}", digits)
-        } else if digits.len() == 9 {
-            format!("tel:+237{}", digits)
-        } else {
-            format!("tel:+{}", digits)
+    fn normalize_msisdn(&self, msisdn: &str) -> Result<String, String> {
+        let mut digits: String = msisdn.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        // Handle 00 prefix → convert to international
+        if digits.starts_with("00") {
+            digits = digits.trim_start_matches("00").to_string();
         }
+
+        // Case 1: Already in international format (Cameroon)
+        if digits.starts_with("237") && digits.len() == 12 {
+            return Ok(format!("tel:+{}", digits));
+        }
+
+        // Case 2: Local Cameroon number (9 digits)
+        if digits.len() == 9 && (digits.starts_with('6') || digits.starts_with('2')) {
+            return Ok(format!("tel:+237{}", digits));
+        }
+
+        // Invalid number
+        Err(format!("Invalid MSISDN format: {}", msisdn))
     }
 
     async fn send_once(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
         let token = self.get_valid_token().await?;
-        let normalized_to = self.normalize_msisdn(msisdn);
-        let normalized_from = self.normalize_msisdn(&self.config.default_sender);
+        let normalized_to = self.normalize_msisdn(msisdn).map_err(|e| {
+            Error::internal("SMS_SEND_PERMANENT", e)
+        })?;
+        let normalized_from = self.normalize_msisdn(&self.config.default_sender).map_err(|e| {
+            Error::internal("SMS_SEND_PERMANENT", e)
+        })?;
 
         // Throttle to 5 SMS per second (200ms per request)
         {

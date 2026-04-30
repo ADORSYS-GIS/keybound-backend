@@ -147,7 +147,7 @@ sms:
     # Orange SMS admin API (for contracts).
     contract_url: "https://api.orange.com/sms/admin/v1"
     # Orange default sender phone number (+237...).
-    default_sender: "SMS 813941"
+    default_sender: "690494946"
 
 # OAuth2 / OIDC Configuration
 # JWT token validation settings for API authentication.
