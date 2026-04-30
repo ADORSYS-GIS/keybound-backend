@@ -8,8 +8,10 @@
 pub(crate) mod api;
 pub(crate) mod auth_signature;
 pub(crate) mod bff_auth;
+pub(crate) mod correlation_id;
 pub(crate) mod flows;
 pub(crate) mod health;
+pub mod metrics;
 pub(crate) mod object_storage;
 pub(crate) mod state;
 pub(crate) mod swagger;
@@ -26,6 +28,7 @@ use backend_auth::{jwks_auth_layer, kc_signature_layer};
 use backend_core::{Config, Result};
 use backend_migrate::connect_postgres_and_migrate;
 use hyper::StatusCode;
+use metrics_exporter_prometheus::PrometheusHandle;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -47,6 +50,7 @@ use tracing::info;
 /// Returns an error if initialization fails or the server cannot start
 pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports) -> Result<()> {
     let listen_addr = core_config.api_listen_addr()?;
+    let prometheus_handle = metrics::install_prometheus_recorder();
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let state = Arc::new(state::AppState::from_config(core_config, pool, imports).await?);
 
@@ -55,7 +59,7 @@ pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports
         state.oidc_state.clone(),
         state.signature_state.clone(),
     );
-    let app = build_router(api, &state.config, state.oidc_state.clone());
+    let app = build_router(api, &state.config, state.oidc_state.clone(), prometheus_handle);
 
     info!("Listening on {}", listen_addr);
 
@@ -191,9 +195,12 @@ fn build_router(
     api: api::BackendApi,
     config: &Config,
     oidc_state: Arc<backend_auth::OidcState>,
+    prometheus_handle: PrometheusHandle,
 ) -> Router {
     // Mount sub-routers onto a fresh root router
-    let mut router = Router::new().merge(health::health_router());
+    let mut router = Router::new()
+        .merge(health::health_router())
+        .merge(metrics::metrics_router(prometheus_handle));
 
     // Mount KC router if base path is provided
     let kc_base = config.kc.base_path.trim();
@@ -261,6 +268,11 @@ fn build_router(
 
     router = router.layer(jwks_auth_layer(oidc_state, jwks_base_paths));
 
+    // Apply correlation ID middleware (outermost so it runs first and last)
+    router = router.layer(axum::middleware::from_fn(
+        correlation_id::correlation_id_middleware,
+    ));
+
     if config.logging.log_requests_enabled {
         router.layer(
             TraceLayer::new_for_http()
@@ -270,11 +282,17 @@ fn build_router(
                         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
                         .map(|ci| ci.0.to_string())
                         .unwrap_or_else(|| "unknown".to_string());
+                    let correlation_id = req
+                        .headers()
+                        .get("X-Correlation-ID")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-");
                     tracing::info_span!(
                         "http-request",
                         method = %req.method(),
                         path = %request_path(req),
                         remote_addr = %remote_addr,
+                        correlation_id = %correlation_id,
                     )
                 })
                 .on_request(|req: &HttpRequest<_>, _span: &tracing::Span| {
