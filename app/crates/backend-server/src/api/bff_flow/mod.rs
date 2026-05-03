@@ -8,6 +8,7 @@ use super::BackendApi;
 
 pub use models::*;
 
+/// BFF Flow API OpenAPI specification with Bearer auth
 #[derive(utoipa::OpenApi)]
 #[openapi(
     paths(
@@ -35,6 +36,10 @@ pub use models::*;
         FlowDetailResponse,
         StepResponse,
     )),
+    // Security requirement for all endpoints - empty scopes means no specific permissions needed
+    security(
+        ("bearerAuth" = [])
+    ),
     tags(
         (name = "users", description = "User profile and completed KYC endpoints"),
         (name = "sessions", description = "Session management endpoints"),

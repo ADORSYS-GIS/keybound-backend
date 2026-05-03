@@ -70,3 +70,8 @@ staff:
 
 cuss:
   api_url: ${CUSS_URL:-http://cuss-wiremock:8080}
+
+swagger:
+  http-host: "http://localhost:3001"
+  oauth2-client:
+    token-url: "http://localhost:9026/realms/e2e-testing/protocol/openid-connect/token"

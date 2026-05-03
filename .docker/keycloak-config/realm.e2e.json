@@ -97,7 +97,10 @@
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
       "fullScopeAllowed": true,
-      "authorizationServicesEnabled": true
+      "authorizationServicesEnabled": true,
+      "webOrigins": [
+        "*"
+      ]
     },
     {
       "clientId": "cuss-client",
