@@ -24,9 +24,6 @@ flow-device-enroll = ["flow-sdk"]
 flow-account-update = ["flow-sdk"]
 flow-admin-user-management = ["flow-sdk"]
 
-auth-token-exchange = []
-auth-jwks = []
-
 flow-cuss-integration = ["flow-first-deposit"]
 
 # Legacy aliases kept for backward compatibility.
@@ -83,7 +80,6 @@ utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
-jsonwebtoken = { workspace = true }
 redis = { workspace = true }
 apalis = { workspace = true }
 apalis-redis = { workspace = true }

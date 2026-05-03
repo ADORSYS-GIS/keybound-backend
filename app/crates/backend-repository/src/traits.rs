@@ -173,16 +173,6 @@ impl FlowStepPatch {
 }
 
 #[derive(Debug, Clone)]
-pub struct SigningKeyCreateInput {
-    pub kid: String,
-    pub private_key_pem: String,
-    pub public_key_jwk: Value,
-    pub algorithm: String,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub is_active: bool,
-}
-
-#[derive(Debug, Clone)]
 pub struct UserDataUpsertInput {
     pub user_id: String,
     pub name: String,
@@ -276,17 +266,6 @@ pub trait FlowRepo: Send + Sync {
         patch: FlowStepPatch,
     ) -> RepoResult<backend_model::db::FlowStepRow>;
 
-    async fn deactivate_signing_keys(&self) -> RepoResult<usize>;
-
-    async fn create_signing_key(
-        &self,
-        input: SigningKeyCreateInput,
-    ) -> RepoResult<backend_model::db::SigningKeyRow>;
-
-    async fn get_active_signing_key(&self) -> RepoResult<Option<backend_model::db::SigningKeyRow>>;
-
-    async fn list_active_signing_keys(&self) -> RepoResult<Vec<backend_model::db::SigningKeyRow>>;
-
     async fn claim_next_system_step(&self) -> RepoResult<Option<backend_model::db::FlowStepRow>>;
 }
 
@@ -348,43 +327,4 @@ pub trait UserRepo: Send + Sync {
         metadata_patch: Value,
         eager_patch: Option<Value>,
     ) -> RepoResult<()>;
-}
-
-#[backend_core::async_trait]
-pub trait DeviceRepo: Send + Sync {
-    async fn lookup_device(
-        &self,
-        req: &backend_model::kc::DeviceLookupRequest,
-    ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
-
-    async fn list_user_devices(
-        &self,
-        user_id: &str,
-        include_revoked: bool,
-    ) -> RepoResult<Vec<backend_model::db::DeviceRow>>;
-
-    async fn get_user_device(
-        &self,
-        user_id: &str,
-        device_id: &str,
-    ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
-
-    async fn update_device_status(
-        &self,
-        record_id: &str,
-        status: &str,
-    ) -> RepoResult<backend_model::db::DeviceRow>;
-
-    async fn find_device_binding(
-        &self,
-        device_id: &str,
-        jkt: &str,
-    ) -> RepoResult<Option<(String, String)>>;
-
-    async fn bind_device(
-        &self,
-        req: &backend_model::kc::EnrollmentBindRequest,
-    ) -> RepoResult<String>;
-
-    async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64>;
 }

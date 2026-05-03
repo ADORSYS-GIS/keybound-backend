@@ -2,7 +2,7 @@ use super::{BackendApi, kc_error};
 use axum_extra::extract::CookieJar;
 use backend_auth::SignatureContext;
 use backend_core::Error;
-use backend_model::kc::{DeviceRecordDto, UserRecordDto, UserSearch, UserUpsert};
+use backend_model::kc::{UserRecordDto, UserSearch, UserUpsert};
 use gen_oas_server_kc::apis::devices::{Devices, LookupDeviceResponse};
 use gen_oas_server_kc::apis::enrollment::{Enrollment, EnrollmentBindResponse};
 use gen_oas_server_kc::apis::users::{
@@ -24,36 +24,13 @@ impl Devices<Error> for BackendApi {
         _host: &Host,
         _cookies: &CookieJar,
         _claims: &Self::Claims,
-        body: &models::DeviceLookupRequest,
+        _body: &models::DeviceLookupRequest,
     ) -> Result<LookupDeviceResponse, Error> {
-        let req = backend_model::kc::DeviceLookupRequest {
-            device_id: body.device_id.clone(),
-            jkt: body.jkt.clone(),
-        };
-
-        self.state
-            .device
-            .lookup_device(&req)
-            .await
-            .map(|res| match res {
-                Some(row) => {
-                    let user_id = row.user_id.clone();
-                    let public_jwk: Option<
-                        std::collections::HashMap<String, gen_oas_server_kc::types::Object>,
-                    > = serde_json::from_str(&row.public_jwk).ok();
-                    let dto = DeviceRecordDto::from(row);
-                    LookupDeviceResponse::Status200_LookupResult(models::DeviceLookupResponse {
-                        device: Some(dto.into()),
-                        found: true,
-                        public_jwk,
-                        user_id: Some(user_id),
-                    })
-                }
-                None => LookupDeviceResponse::Status404_NotFound(kc_error(
-                    "NOT_FOUND",
-                    "Device not found",
-                )),
-            })
+        // Device lookup is no longer supported in the pure KYC engine.
+        Ok(LookupDeviceResponse::Status404_NotFound(kc_error(
+            "GONE",
+            "Device binding is removed in this architecture",
+        )))
     }
 }
 
@@ -185,34 +162,12 @@ impl Enrollment<Error> for BackendApi {
         _cookies: &CookieJar,
         _claims: &Self::Claims,
         _header_params: &models::EnrollmentBindHeaderParams,
-        body: &models::EnrollmentBindRequest,
+        _body: &models::EnrollmentBindRequest,
     ) -> Result<EnrollmentBindResponse, Error> {
-        let req = backend_model::kc::EnrollmentBindRequest::from(body.clone());
-
-        // Check if device is already bound to someone else
-        let existing = self
-            .state
-            .device
-            .find_device_binding(&req.device_id, &req.jkt)
-            .await?;
-
-        if let Some((bound_user_id, _)) = existing
-            && bound_user_id != req.user_id
-        {
-            return Ok(
-                EnrollmentBindResponse::Status409_DeviceAlreadyBoundToADifferentUser(kc_error(
-                    "CONFLICT",
-                    "Device already bound to another user",
-                )),
-            );
-        }
-
-        self.state.device.bind_device(&req).await.map(|record_id| {
-            EnrollmentBindResponse::Status200_Bound(models::EnrollmentBindResponse {
-                status: models::EnrollmentBindResponseStatus::Bound,
-                device_record_id: Some(record_id),
-                bound_user_id: Some(req.user_id),
-            })
-        })
+        // Enrollment is no longer supported in the pure KYC engine.
+        Ok(EnrollmentBindResponse::Status400_BadRequest(kc_error(
+            "GONE",
+            "Enrollment is removed in this architecture",
+        )))
     }
 }

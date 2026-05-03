@@ -1,4 +1,3 @@
-pub mod auth;
 pub mod bff_flow;
 pub mod bff_uploads;
 mod date_deserialization_regression;
@@ -7,7 +6,7 @@ pub mod staff_flow;
 
 use crate::state::AppState;
 use axum::response::IntoResponse;
-use backend_auth::{JwtToken, OidcState, SignatureContext, SignatureState};
+use backend_auth::{SignatureContext, SignatureState};
 use backend_core::{AppResult, Error};
 use http::HeaderMap;
 use std::sync::Arc;
@@ -25,7 +24,6 @@ pub struct BffSignatureClaims {
 #[derive(Clone)]
 pub struct BackendApi {
     pub(crate) state: Arc<AppState>,
-    pub(crate) oidc_state: Arc<OidcState>,
     pub(crate) signature_state: Arc<SignatureState>,
 }
 
@@ -38,12 +36,10 @@ impl AsRef<Self> for BackendApi {
 impl BackendApi {
     pub fn new(
         state: Arc<AppState>,
-        oidc_state: Arc<OidcState>,
         signature_state: Arc<SignatureState>,
     ) -> Self {
         Self {
             state,
-            oidc_state,
             signature_state,
         }
     }
@@ -74,12 +70,6 @@ impl BackendApi {
             .map(ToOwned::to_owned)?;
 
         Some(BffSignatureClaims { user_id, device_id })
-    }
-
-    #[instrument(skip(context))]
-    #[allow(dead_code)]
-    pub(crate) fn require_user_id(context: &JwtToken) -> AppResult<String> {
-        Ok(context.user_id().to_owned())
     }
 }
 

@@ -5,12 +5,10 @@
 
 use crate::db;
 use chrono::{DateTime, Utc};
-use hex::encode;
 use log::info;
 use o2o::o2o;
 use serde_json::Value;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
 pub const USER_DATA_NAME_REGISTRATION_OUTPUT: &str = "registration_output";
 pub const USER_DATA_TYPE_REGISTRATION_OUTPUT: &str = "cuss.registration_response";
@@ -50,90 +48,6 @@ pub struct UserSearch {
     pub attributes: Option<KcMap>,
     pub first_result: Option<i32>,
     pub max_results: Option<i32>,
-}
-
-/// Device descriptor for device binding operations.
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::DeviceDescriptor)]
-pub struct DeviceDescriptor {
-    pub device_id: String,
-    pub jkt: String,
-    #[map(public_jwk)]
-    pub public_jwk: Option<KcAnyMap>,
-    pub platform: String,
-    pub model: String,
-    pub app_version: Option<String>,
-}
-
-/// Device lookup request from Keycloak.
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::DeviceLookupRequest)]
-pub struct DeviceLookupRequest {
-    pub device_id: Option<String>,
-    pub jkt: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApprovalCreateRequest {
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: String,
-    pub new_device: DeviceDescriptor,
-    pub reason: Option<String>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub context: Option<KcAnyMap>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApprovalDecisionRequest {
-    pub decision: String,
-    pub decided_by_device_id: Option<String>,
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EnrollmentPrecheckRequest {
-    pub realm: String,
-    pub client_id: String,
-    pub user_hint: Option<String>,
-    pub device_id: String,
-    pub jkt: String,
-    pub public_jwk: Option<KcAnyMap>,
-    pub proof_context: Option<KcAnyMap>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmsSendRequest {
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: Option<String>,
-    pub phone_number: String,
-    pub session_id: Option<String>,
-    pub trace_id: Option<String>,
-    pub metadata: Option<KcAnyMap>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmsConfirmRequest {
-    pub hash: String,
-    pub otp: String,
-}
-
-#[derive(Debug, Clone, o2o)]
-#[from_owned(gen_oas_server_kc::models::EnrollmentBindRequest)]
-pub struct EnrollmentBindRequest {
-    pub realm: String,
-    pub client_id: String,
-    pub user_id: String,
-    pub user_hint: Option<String>,
-    pub device_id: String,
-    pub jkt: String,
-    #[map(public_jwk)]
-    pub public_jwk: KcAnyMap,
-    pub attributes: Option<KcMap>,
-    pub created_at: Option<DateTime<Utc>>,
-    #[map(proof)]
-    pub proof: Option<KcAnyMap>,
 }
 
 #[derive(Debug, Clone, o2o)]
@@ -248,38 +162,12 @@ pub fn kc_any_map_to_value(map: KcAnyMap) -> Value {
     Value::Object(out)
 }
 
-pub fn device_record_id(device_id: &str, public_jwk: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(public_jwk.as_bytes());
-    let digest = hasher.finalize();
-    let hash = encode(digest);
-    format!("{device_id}:{hash}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{UserRecordDto, device_record_id};
+    use super::UserRecordDto;
     use crate::db;
     use chrono::Utc;
-    use hex::encode as hex_encode;
     use serde_json::json;
-    use sha2::{Digest, Sha256};
-
-    #[test]
-    fn device_record_id_is_deterministic() {
-        let device_id = "dvc_test";
-        let public_jwk = "{\"a\":1,\"b\":2}";
-        let expected_hash = {
-            let mut hasher = Sha256::new();
-            hasher.update(public_jwk.as_bytes());
-            hex_encode(hasher.finalize())
-        };
-
-        assert_eq!(
-            device_record_id(device_id, public_jwk),
-            format!("{device_id}:{expected_hash}")
-        );
-    }
 
     #[test]
     fn user_record_custom_includes_parameters_from_user_data() {
@@ -335,43 +223,5 @@ mod tests {
 impl From<db::UserRow> for UserRecordDto {
     fn from(row: db::UserRow) -> Self {
         Self::from_row_with_user_data(row, &[])
-    }
-}
-
-#[derive(Debug, Clone, o2o)]
-#[owned_into(gen_oas_server_kc::models::DeviceRecord)]
-pub struct DeviceRecordDto {
-    pub device_id: String,
-    pub jkt: String,
-    pub status: gen_oas_server_kc::models::DeviceRecordStatus,
-    pub created_at: DateTime<Utc>,
-    pub last_seen_at: Option<DateTime<Utc>>,
-    pub label: Option<String>,
-    pub device_os: Option<String>,
-    pub device_model: Option<String>,
-    pub device_app_version: Option<String>,
-}
-
-impl DeviceRecordDto {
-    fn parse_status(status: &str) -> gen_oas_server_kc::models::DeviceRecordStatus {
-        status
-            .parse()
-            .unwrap_or(gen_oas_server_kc::models::DeviceRecordStatus::Active)
-    }
-}
-
-impl From<db::DeviceRow> for DeviceRecordDto {
-    fn from(row: db::DeviceRow) -> Self {
-        Self {
-            device_id: row.device_id,
-            jkt: row.jkt,
-            status: Self::parse_status(&row.status),
-            created_at: row.created_at,
-            last_seen_at: row.last_seen_at,
-            label: row.label,
-            device_os: None,
-            device_model: None,
-            device_app_version: None,
-        }
     }
 }
