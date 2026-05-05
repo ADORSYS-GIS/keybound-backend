@@ -230,7 +230,10 @@ pub struct OrangeConfig {
     pub token_url: String,
     pub sms_base_url: String,
     pub contract_url: String,
-    pub default_sender: String,
+    #[serde(default)]
+    pub sender_address: Option<String>,
+    #[serde(default)]
+    pub sender_name: Option<String>,
 }
 
 /// Flow configuration for YAML-based flow and session definitions.

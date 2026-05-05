@@ -146,8 +146,10 @@ sms:
     sms_base_url: "https://api.orange.com/smsmessaging/v1"
     # Orange SMS admin API (for contracts).
     contract_url: "https://api.orange.com/sms/admin/v1"
-    # Orange default sender phone number (+237...).
-    default_sender: "690494946"
+    # Orange sender address used by the SMS messaging API.
+    sender_address: "tel:+2370000"
+    # Optional Orange sender name 
+    sender_name: "Azamra SMS"
 
 # OAuth2 / OIDC Configuration
 # JWT token validation settings for API authentication.
