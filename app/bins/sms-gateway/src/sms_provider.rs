@@ -337,9 +337,6 @@ impl OrangeSmsProvider {
         let normalized_to = self.normalize_msisdn(msisdn).map_err(|e| {
             Error::internal("SMS_SEND_PERMANENT", e)
         })?;
-        let normalized_from = self.normalize_msisdn(&self.config.default_sender).map_err(|e| {
-            Error::internal("SMS_SEND_PERMANENT", e)
-        })?;
 
         // Throttle to 5 SMS per second (200ms per request)
         {
@@ -353,21 +350,31 @@ impl OrangeSmsProvider {
             *last_send = Instant::now();
         }
 
+        let sender_address = self
+            .config
+            .sender_address
+            .as_deref()
+            .unwrap_or("tel:+2370000");
+
         let url = format!(
             "{}/outbound/{}/requests",
             self.config.sms_base_url.trim_end_matches('/'),
-            urlencoding::encode(&normalized_from)
+            urlencoding::encode(sender_address)
         );
 
-        let payload = json!({
+        let mut payload = json!({
             "outboundSMSMessageRequest": {
                 "address": normalized_to,
-                "senderAddress": normalized_from,
+                "senderAddress": sender_address,
                 "outboundSMSTextMessage": {
                     "message": format!("Your verification code is: {}", otp)
                 }
             }
         });
+
+        if let Some(sender_name) = self.config.sender_name.as_deref() {
+            payload["outboundSMSMessageRequest"]["senderName"] = json!(sender_name);
+        }
 
         let response = self
             .client
@@ -693,8 +700,9 @@ mod tests {
             client_secret: "test_secret".to_string(),
             token_url: format!("{}/token", server.uri()),
             sms_base_url: server.uri(),
-            contract_url: "".to_string(),
-            default_sender: "+237000000000".to_string(),
+            contract_url: "https://api.orange.com/sms/admin/v1".to_string(),
+            sender_address: Some("tel:+237000000000".to_string()),
+            sender_name: Some("SMS 123456".to_string()),
         };
         let provider = OrangeSmsProvider::new(client, config);
 
