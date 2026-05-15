@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "^/api/prices/[^/]+/ohlc$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "assetId": "asset-1",
+      "open": 101.0,
+      "high": 103.5,
+      "low": 100.25,
+      "close": 102.5
+    }
+  }
+}

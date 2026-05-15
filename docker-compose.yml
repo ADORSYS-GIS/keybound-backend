@@ -1,0 +1,537 @@
+services:
+  download-core-tools:
+    image: alpine/curl
+    environment:
+      KEYCLOAK_PLUGIN_VERSION: "0.2.3"
+      OPENAPI_GENERATOR_VERSION: "7.19.0"
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -ex;
+      rm -rf /data/*
+      mkdir -p /data/bin
+      mkdir -p /data/kc-plugins
+
+      download() {
+        output="$$1"
+        url="$$2"
+        curl -fL \
+          --retry 8 \
+          --retry-delay 2 \
+          --retry-all-errors \
+          --connect-timeout 10 \
+          --max-time 300 \
+          -o "$$output" "$$url"
+      }
+
+      echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
+      download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
+
+      echo "Download OpenAPI for Keycloak...";
+      download /data/keycloak-interface.openapi.yaml "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
+      echo "Downloaded OpenAPI for Keycloak";
+
+      echo "Download keybound...";
+      download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
+      download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
+      download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+      download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
+      echo "Downloaded keybound";
+      
+      echo "Copying Fineract Theme...";
+      cp /fineract-theme/theme-1.0.1.jar /data/kc-plugins/ || true;
+      echo "Fineract theme copied";
+
+    volumes:
+    - ./.docker/downloaded:/data
+    - ../fineract/fineract-adorsys-keycloak-theme:/fineract-theme
+
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    ports:
+      - '9001:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: user-storage
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - '9003:9000'
+      - '9004:9001'
+    volumes:
+      - minio_data:/data
+
+  minio-create-bucket:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      - minio
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-user-storage-dev}
+    entrypoint: >
+      /bin/sh -c '
+      until /usr/bin/mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+        echo "waiting for minio...";
+        sleep 1;
+      done;
+      /usr/bin/mc mb --ignore-existing local/$${MINIO_BUCKET};
+      '
+
+  cuss-wiremock:
+    image: wiremock/wiremock:3.13.1
+    container_name: upstream-mock
+    command:
+      - --verbose
+    ports:
+      - "9005:8080"
+    volumes:
+      - ./config/e2eTest/resources/wiremock:/home/wiremock:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://cuss-wiremock:8080/__admin/mappings >/dev/null 2>&1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak-azamra:
+    image: quay.io/keycloak/keycloak:26.5.2
+    networks:
+      default:
+        aliases:
+          - keycloak
+    ports:
+      - "9006:9006"
+    environment:
+      KC_HTTP_PORT: 9006
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/user-storage
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+      # Dev-only credentials. Do not reuse in production.
+      BACKEND_HTTP_BASE_PATH_fineract: "http://user-storage:3000/kc"
+      BACKEND_HTTP_SIGNATURE_SECRET_fineract: "some-very-long-secret"
+      BACKEND_HTTP_SIGNATURE_VERSION_fineract: "1"
+      BACKEND_HTTP_TELEMETRY_ENABLED_fineract: "true"
+      BACKEND_HTTP_ACTOR_fineract: "keycloak-u-fineract"
+      BACKEND_HTTP_AUTH_USERNAME: "admin"
+      BACKEND_HTTP_AUTH_PASSWORD: "password"
+      NONCE_CACHE_TTL_fineract: "60"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: password
+    healthcheck:
+      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/localhost/9006 && echo -e 'GET /realms/fineract HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers/
+        /opt/keycloak/bin/kc.sh start-dev --import-realm --health-enabled=true --metrics-enabled=true --log-level=info
+
+    volumes:
+      - ./.docker/keycloak-config/realm.e2e.json:/opt/keycloak/data/import/realm.json:ro
+      - ./.docker/downloaded:/downloaded:ro
+      - type: bind
+        source: ./.docker/downloaded/keycloak-interface.openapi.yaml
+        target: /opt/keycloak/keycloak-interface.openapi.yaml
+        read_only: true
+        bind:
+          # Prevent Docker from auto-creating a directory if the file is missing.
+          create_host_path: false
+    depends_on:
+      download-core-tools:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:latest
+    restart: unless-stopped
+    ports:
+      - '9002:6379'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-storage:
+    build:
+      context: .
+      dockerfile: deploy/docker/user-storage/Dockerfile
+    container_name: user-storage
+    restart: unless-stopped
+    command:
+      - serve
+      - --config-path
+      - config/dev-compose.yml
+      - --mode
+      - shared
+    volumes:
+      - ./config:/app/config/
+      - ./flows:/app/flows/
+      - ./sessions:/app/sessions/
+    ports:
+      - "9011:3000"
+    networks:
+      - default
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/user-storage"
+      REDIS_URL: "redis://redis:6379"
+      MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_REGION: "us-east-1"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-dev}"
+      RUST_LOG: debug
+      SMS_SINK_URL: "http://sms-gateway:3000"
+      CUSS_URL: "http://cuss-wiremock:8080"
+      KC_TOKEN_URL: "http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/token"
+      CUSS_CLIENT_ID: "cuss-client"
+      CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+      sms-gateway:
+        condition: service_healthy
+      customer-self-service:
+        condition: service_started
+
+  sms-gateway:
+    image: ghcr.io/adorsys-gis/sms-gateway:masterdd94de130f78273eafcc2e6250a5cee8851d54e2
+    container_name: sms-gateway
+    restart: unless-stopped
+    command:
+      - --config
+      - config/dev-compose.yml
+    volumes:
+      - ./config:/app/config/
+    ports:
+      - "9007:3000"
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/user-storage"
+      REDIS_URL: "redis://redis:6379"
+      MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_REGION: "us-east-1"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-user-storage-dev}"
+      RUST_LOG: debug
+    depends_on:
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  frontend-mobile:
+    image: ghcr.io/skyengpro/azamra-tokenization-frontend-mobile:sha-a4df069-amd
+    container_name: azamra-frontend-mobile
+    restart: unless-stopped
+    ports:
+      - "9008:8080"
+    environment:
+      EXPO_PUBLIC_FORCE_TRADING: "true"
+    extra_hosts:
+      - "localhost:host-gateway"
+    volumes:
+      - ./config/frontend-mobile-config.json:/usr/share/nginx/html/config.json:ro
+    depends_on:
+      bff:
+        condition: service_started
+      keycloak-azamra:
+        condition: service_healthy
+
+  frontend-kyc-mgr:
+    image: ghcr.io/skyengpro/azamra-tokenization-frontend-kyc-mgr:sha-221e90e-amd
+    container_name: azamra-frontend-kyc-mgr
+    restart: unless-stopped
+    ports:
+      - "9009:3000"
+    environment:
+      OAUTH2_ISSUER: http://localhost:9006/realms/fineract
+      OAUTH2_INTERNAL_ISSUER: http://localhost:9006/realms/fineract
+      OAUTH2_CLIENT_ID: kyc-client
+      OAUTH2_CLIENT_SECRET: some-secret
+      OAUTH2_SCOPES: openid profile email
+      OAUTH2_PROVIDER_ID: keycloak
+      REDIS_URL: redis://redis:6379
+      REDIS_KEY_PREFIX: kyc-mgr
+      AUTH_SESSION_TTL_SECONDS: 86400
+      AUTH_REFRESH_SKEW_SECONDS: 60
+      API_URL: http://user-storage:3000/staff
+      KYC_SESSION_TYPES: kyc_fineract
+      NODE_ENV: development
+      SKIP_ENV_VALIDATION: true
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      bff:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      keycloak-azamra:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+
+  bff:
+    image: ghcr.io/skyengpro/azamra-tokenization-bff:sha-03af6e86a8c5-amd
+    container_name: azamra-bff
+    restart: unless-stopped
+    ports:
+      - "9010:8082"
+    networks:
+      - default
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_APPLICATION_NAME: azamra-tokenization-bff
+      SPRING_CACHE_TYPE: redis
+      SPRING_CACHE_REDIS_TIME_TO_LIVE: 10m
+      SPRING_CACHE_REDIS_CACHE_NULL_VALUES: "false"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      LOGGING_LEVEL_ROOT: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak-azamra:9006/realms/fineract
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/certs
+      APP_SECURITY_SIGNATURE_MAX_CLOCK_SKEW_SECONDS: "60"
+      APP_OAUTH2_CLIENT_ID: web-mobile
+      APP_OAUTH2_TOKEN_ENDPOINT_URL: http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/token
+      APP_ASSET_SERVICE_BASE_URL: http://cuss-wiremock:8080/api
+      APP_CUSS_BASE_URL: http://customer-self-service:8080
+      APP_USER_STORAGE_BASE_URL: http://user-storage:3000
+      APP_PAYMENT_GATEWAY_BASE_URL: http://payment-gateway-service:8082
+      APP_KYC_FIRST_DEPOSIT_AMOUNT: "15000"
+      APP_KYC_FIRST_DEPOSIT_CURRENCY: XAF
+      APP_AZAMRA_FRONTEND_SERVER_API_BASE_PATH: "/api/v1/api"
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "*"
+      SERVER_PORT: "8082"
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-storage:
+        condition: service_started
+      customer-self-service:
+        condition: service_started
+      keycloak-azamra:
+        condition: service_healthy
+
+  customer-self-service:
+    build:
+      context: ../fineract-apps/backend/customer-self-service
+      dockerfile: Dockerfile
+    container_name: customer-self-service
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    depends_on:
+      keycloak-azamra:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+    environment:
+      - KEYCLOAK_JWKS_URI=http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/certs
+      - FINERACT_URL=https://fineract-fineract-1:8443
+      - FINERACT_AUTH_TYPE=basic
+      - FINERACT_USERNAME=mifos
+      - FINERACT_PASSWORD=password
+      - SPRING_REDIS_HOST=redis
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY=DEBUG
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB=DEBUG
+
+  db:
+    container_name: mariadb
+    image: mariadb:10.11
+    volumes:
+      - ../fineract/config/docker/mysql/conf.d/server_collation.cnf:/etc/mysql/conf.d/server_collation.cnf:ro
+      - ../fineract/config/docker/mariadb/conf.d/mariadb_compat.cnf:/etc/mysql/conf.d/mariadb_compat.cnf:ro
+      - ../fineract/config/docker/mysql/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:Z,ro
+    restart: always
+    env_file:
+      - ../fineract/config/docker/env/mysql.env
+    healthcheck:
+      test: [ "CMD", "healthcheck.sh", "--su-mysql", "--connect", "--innodb_initialized" ]
+      timeout: 10s
+      retries: 10
+    ports:
+      - "3306:3306"
+
+  fineract:
+    image: ghcr.io/adorsys-gis/fineract:latest
+    user: "${FINERACT_USER:-root}:${FINERACT_GROUP:-root}"
+    volumes:
+      - ../fineract/config/docker/logback/logback-override.xml:/app/logback-override.xml
+      - ../fineract/config/docker/aws/etc/credentials:/etc/aws/credentials:ro
+      - ../fineract/build/fineract/logs:/var/logs/fineract:rw
+      - ../fineract/fineract-adorsys-pentaho/MifosSecurityPlugin-1.12.1:/app/plugins
+      - ../fineract/fineract-adorsys-pentaho/MifosSecurityPlugin-1.12.1:/pentahoReports
+    healthcheck:
+      test: ["CMD", 'sh', '-c', 'echo -e "Checking for the availability of Fineract server deployment"; while ! nc -z "localhost" 8443; do sleep 1; printf "-"; done; echo -e " >> Fineract server has started";' ]
+      timeout: 1s
+      retries: 60
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak-azamra:
+        condition: service_healthy
+    env_file:
+      - ../fineract/config/docker/env/fineract.env
+      - ../fineract/config/docker/env/fineract-common.env
+      - ../fineract/config/docker/env/fineract-mariadb.env
+      - ../fineract/config/docker/env/fineract-adorsys.env
+    environment:
+      - FINERACT_AUTH_OAUTH2_TOKEN_URL=http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/token
+      - FINERACT_SERVER_OAUTH_RESOURCE_URL=http://keycloak-azamra:9006/realms/fineract
+
+  fineract-config-cli:
+    build:
+      context: ../fineract/fineract-adorsys-data-collection/fineract-config-cli
+    depends_on:
+      fineract:
+        condition: service_healthy
+    env_file:
+      - ../fineract/config/docker/env/fineract-adorsys.env
+    environment:
+      - FINERACT_BASE_URL=https://fineract:8443/fineract-provider
+      - FINERACT_AUTH_OAUTH2_TOKEN_URL=http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/token
+    volumes:
+      - ../fineract/fineract-adorsys-data-collection/fineract-config-cli/config:/config
+      - ../fineract/fineract-adorsys-data-collection/fineract-config-cli/data:/data
+    restart: "no"
+
+  keycloak-config-cli:
+    image: adorsys/keycloak-config-cli:latest
+    depends_on:
+      keycloak-azamra:
+        condition: service_healthy
+    env_file:
+      - ../fineract/config/docker/env/fineract-adorsys.env
+    environment:
+      - KEYCLOAK_URL=http://keycloak-azamra:9006/
+      - IMPORT_FILES_LOCATIONS=/config/*.json
+      - KEYCLOAK_PASSWORD=password
+    volumes:
+      - ../fineract/fineract-adorsys-keycloak-config:/config
+
+  keycloak-setup:
+    build:
+      context: ../fineract
+      dockerfile: Dockerfile.adorsys-keycloak-setup
+    depends_on:
+      keycloak-config-cli:
+        condition: service_completed_successfully
+
+  apache-proxy:
+    build:
+      context: ../fineract/config/fineract-adorsys-apache
+    depends_on:
+      - fineract
+      - keycloak-azamra
+    ports:
+      - "80:80"
+    volumes:
+      - ../fineract/config/fineract-adorsys-apache/httpd.conf:/usr/local/apache2/conf/httpd.conf
+
+  payment-gateway-db:
+    image: postgres:13
+    container_name: payment-gateway-db
+    volumes:
+      - payment-gateway-db-data:/var/lib/postgresql/data
+    env_file:
+      - ../fineract/config/docker/env/fineract-adorsys.env
+    environment:
+      - POSTGRES_DB=${SPRING_DATASOURCE_DB_NAME:-payment_gateway}
+      - POSTGRES_USER=${SPRING_DATASOURCE_USERNAME:-payment_gateway}
+      - POSTGRES_PASSWORD=${SPRING_DATASOURCE_PASSWORD:-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  payment-gateway-redis:
+    image: redis:6-alpine
+    container_name: payment-gateway-redis
+    volumes:
+      - payment-gateway-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  payment-gateway-service:
+    build:
+      context: ../fineract-apps/backend/payment-gateway-service
+    container_name: payment-gateway-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      payment-gateway-db:
+        condition: service_healthy
+      payment-gateway-redis:
+        condition: service_healthy
+      fineract:
+        condition: service_healthy
+      keycloak-azamra:
+        condition: service_healthy
+    env_file:
+      - ../fineract/config/docker/env/fineract-adorsys.env
+    environment:
+      - KEYCLOAK_ISSUER_URI=http://keycloak-azamra:9006/realms/fineract
+      - KEYCLOAK_JWK_SET_URI=http://keycloak-azamra:9006/realms/fineract/protocol/openid-connect/certs
+
+  community-app:
+    image: openmf/web-app:master
+    container_name: mifos-web-app
+    restart: always
+    ports:
+      - 4200:80
+    environment:
+      - FINERACT_API_URL=https://localhost
+
+volumes:
+  payment-gateway-db-data:
+  payment-gateway-redis-data:
+  postgres_data:
+  minio_data:
+
+networks:
+  default:
+    name: fineract-net
+    driver: bridge

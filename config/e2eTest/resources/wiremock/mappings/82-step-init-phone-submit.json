@@ -1,0 +1,31 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/steps/step-init-phone",
+    "bodyPatterns": [
+      { "contains": "\"phone_number\"" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "step-init-phone",
+      "humanId": "H-S001",
+      "flowId": "flow-phone-1",
+      "stepType": "init_phone",
+      "actor": "USER",
+      "status": "COMPLETED",
+      "input": { "phone_number": "+237690000000" },
+      "output": null,
+      "error": null,
+      "attemptNo": 1,
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:30Z",
+      "finishedAt": "2026-03-07T00:00:30Z"
+    }
+  }
+}

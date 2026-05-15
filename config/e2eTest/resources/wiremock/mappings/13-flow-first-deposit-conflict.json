@@ -1,0 +1,21 @@
+{
+  "priority": 4,
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/flow/sessions/[a-z0-9-]+/flows",
+    "bodyPatterns": [
+      { "contains": "\"flowType\":\"first_deposit\"" },
+      { "contains": "\"userId\":\"first-deposit-verified-user\"" }
+    ]
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "Conflict",
+      "message": "First deposit already verified"
+    }
+  }
+}

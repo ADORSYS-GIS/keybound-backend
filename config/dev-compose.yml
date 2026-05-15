@@ -1,0 +1,175 @@
+# Development Environment Configuration
+# This file configures the application for local development.
+# Environment variables are supported using ${VAR} or ${VAR:-default} syntax.
+
+# OpenTelemetry (OTEL) Configuration
+# Distributed tracing and observability settings.
+# Note: OTEL is configured via environment variables, not YAML.
+# Key environment variables:
+#   OTEL_EXPORTER_OTLP_ENDPOINT - OTLP collector URL (default: http://localhost:4317)
+#   OTEL_EXPORTER_OTLP_PROTOCOL - Protocol: grpc (default) or http/protobuf
+#   OTEL_EXPORTER_OTLP_HEADERS  - Additional headers (e.g., API keys)
+#   OTEL_SERVICE_NAME           - Service name shown in traces (default: backend)
+#   OTEL_RESOURCE_ATTRIBUTES    - Key=value pairs for resource attributes
+#   OTEL_TRACES_SAMPLER         - Sampling strategy: always_on, always_off, parentbased_traceidratio
+#   OTEL_TRACES_SAMPLER_ARG     - Sampling ratio (e.g., 0.5 for 50%)
+# Example:
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 OTEL_SERVICE_NAME=user-storage ./backend
+
+# HTTP Server Configuration
+# Controls the API server binding and TLS settings.
+server:
+  # Network interface to bind to. Use "0.0.0.0" to listen on all interfaces.
+  address: "0.0.0.0"
+  # HTTP port for the API server.
+  port: 3000
+  # TLS/HTTPS configuration for secure connections.
+  tls:
+    # Enable TLS termination on the server. Set to true to use HTTPS.
+    enabled: false
+    # HTTPS port when TLS is enabled.
+    port: 3443
+    # Path to the TLS certificate file (PEM format).
+    cert_path: "./config/tls/api.crt"
+    # Path to the TLS private key file (PEM format).
+    key_path: "./config/tls/api.key"
+
+# Logging Configuration
+# Controls log output levels and request logging.
+logging:
+  # Log level: trace, debug, info, warn, error.
+  # Higher levels (warn, error) produce less output.
+  level: "info"
+  # Enable request/response logging for debugging HTTP traffic.
+  # Set to true to log all incoming requests with headers and body.
+  log_requests_enabled: true
+
+# PostgreSQL Database Configuration
+# Connection settings for the primary data store.
+database:
+  # Database connection URL. Supports env var substitution.
+  # Format: postgres://user:password@host:port/database
+  url: ${DATABASE_URL}
+  # Number of connections in the connection pool.
+  # Higher values improve throughput but use more memory.
+  pool_size: 10
+
+# Application Runtime Mode
+# Determines which components start in this process.
+runtime:
+  # Mode: "server" (API only), "worker" (background jobs only), "shared" (both).
+  # Use "shared" for development, separate for production scaling.
+  mode: shared
+
+# Redis Configuration
+# Used for caching, distributed locks, and job queues.
+redis:
+  # Redis connection URL. Supports env var substitution.
+  # Format: redis://host:port or redis://username:password@host:port
+  url: ${REDIS_URL}
+  # TTL (seconds) for distributed worker locks.
+  # Workers must renew locks within this time or be considered dead.
+  worker_lock_ttl_seconds: 30
+  # How often (seconds) to renew the worker lock.
+  # Should be less than worker_lock_ttl_seconds.
+  worker_lock_renew_seconds: 10
+
+# Object Storage Configuration
+# Controls file uploads and document storage.
+storage:
+  # Storage backend type: "minio" (self-hosted) or "s3" (AWS).
+  type: minio
+  # MinIO-specific configuration (used when type=minio).
+  minio:
+    # MinIO server endpoint URL. Supports env var with default.
+    endpoint: ${MINIO_ENDPOINT:-http://minio:9000}
+    # S3 region identifier (used for AWS SDK compatibility).
+    region: ${MINIO_REGION:-us-east-1}
+    # MinIO access key (username). Supports env var with default.
+    access_key: ${MINIO_ACCESS_KEY:-minioadmin}
+    # MinIO secret key (password). Supports env var with default.
+    secret_key: ${MINIO_SECRET_KEY:-minioadmin}
+    # S3 bucket name for storing uploaded files. Supports env var with default.
+    bucket: ${MINIO_BUCKET:-user-storage-dev}
+    # Use path-style URLs (e.g., http://host/bucket/key) instead of virtual-hosted style.
+    force_path_style: true
+    # TTL (seconds) for presigned upload/download URLs.
+    presign_ttl_seconds: 900
+
+# AWS S3 Configuration (Alternative to MinIO)
+# Used when storage.type is set to "s3".
+s3:
+  # AWS region for S3 bucket (e.g., us-east-1, eu-west-1).
+  region: "us-east-1"
+  # S3 bucket name for file storage.
+  bucket: "user-storage-dev"
+  # Use path-style bucket URLs (required for some S3-compatible services).
+  force_path_style: true
+  # Custom S3 endpoint (e.g., for LocalStack or S3-compatible services).
+  # Set to null to use standard AWS S3 endpoints.
+  endpoint: null
+  # TTL (seconds) for presigned S3 URLs.
+  presign_ttl_seconds: 900
+
+# AWS SNS Configuration
+# For SMS notifications and pub/sub messaging.
+sns:
+  # AWS region for SNS service.
+  region: "us-east-1"
+  # Maximum retry attempts for SNS publish operations.
+  max_attempts: 10
+  # Initial backoff delay (seconds) before retrying failed SNS operations.
+  initial_backoff_seconds: 5
+
+# SMS Provider Configuration
+# Controls how SMS messages are sent for OTP and notifications.
+sms:
+  # SMS provider: "console" (logs only), "sns" (AWS SNS), "avlytext" (AvlyText API).
+  provider: console
+  # AvlyText API configuration (used when provider=avlytext).
+  avlytext:
+    # Base URL for AvlyText API.
+    base_url: "https://api.avlytext.com"
+    # API key for AvlyText authentication.
+    api_key: ""
+    # Sender ID shown in SMS messages (requires approval).
+    sender_id: ""
+
+# OAuth2 / OIDC Configuration
+# JWT token validation settings for API authentication.
+oauth2:
+  issuer: "http://keycloak-azamra:9006/realms/fineract"
+  base-paths: []
+
+# Keycloak (KC) Integration Configuration
+# Signature verification for Keycloak device binding flows.
+kc:
+  # Enable KC signature verification for device binding endpoints.
+  enabled: true
+  # Base path for KC API endpoints (e.g., /kc).
+  base-path: /kc
+  # Secret key for HMAC signature verification (must match Keycloak config).
+  signature_secret: "some-very-long-secret"
+  # Maximum allowed clock skew (seconds) for signature timestamps.
+  max_clock_skew_seconds: 60
+  # Maximum request body size (bytes) for KC endpoints (256KB default).
+  max_body_bytes: 262144
+
+# Backend for Frontend (BFF) Configuration
+# API surface for web/mobile client applications.
+bff:
+  # Enable BFF API endpoints.
+  enabled: true
+  base-path: "/flow"
+
+# Staff/Admin API Configuration
+# Administrative interface for internal tools.
+staff:
+  enabled: true
+  base-path: "/staff"
+
+# CUSS (Customer User Service) Integration
+# External KYC/document verification service.
+cuss:
+  # CUSS API base URL. Supports env var with default.
+  api_url: ${CUSS_URL:-http://cuss-wiremock:8080}

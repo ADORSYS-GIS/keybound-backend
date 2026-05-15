@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/trades/orders"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "totalPages": 1,
+      "totalElements": 1,
+      "size": 10,
+      "number": 0,
+      "sort": {
+        "sorted": true,
+        "unsorted": false,
+        "empty": false
+      },
+      "first": true,
+      "last": true,
+      "numberOfElements": 1,
+      "empty": false,
+      "pageable": {
+        "pageNumber": 0,
+        "pageSize": 10,
+        "offset": 0,
+        "paged": true,
+        "unpaged": false,
+        "sort": {
+          "sorted": true,
+          "unsorted": false,
+          "empty": false
+        }
+      },
+      "content": [
+        {
+          "orderId": "order-123",
+          "assetId": "asset-1",
+          "symbol": "SYE",
+          "side": "BUY",
+          "units": 10,
+          "pricePerUnit": 102.5,
+          "totalAmount": 1025.0,
+          "fee": 2.0,
+          "spreadAmount": 0.5,
+          "status": "FILLED",
+          "createdAt": "2026-03-10T12:00:00Z"
+        }
+      ]
+    }
+  }
+}

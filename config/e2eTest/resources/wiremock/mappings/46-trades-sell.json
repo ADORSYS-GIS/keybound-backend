@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/trades/sell"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "orderId": "order-125",
+      "status": "PENDING",
+      "side": "SELL",
+      "units": 5,
+      "pricePerUnit": 102.0,
+      "totalAmount": 510.0,
+      "fee": 1.0,
+      "spreadAmount": 0.3,
+      "executedAt": "2026-03-11T15:05:00Z"
+    }
+  }
+}
