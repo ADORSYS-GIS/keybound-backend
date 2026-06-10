@@ -124,8 +124,19 @@ sns:
 # SMS Provider Configuration
 # Controls how SMS messages are sent for OTP and notifications.
 sms:
-  # SMS provider: "console" (logs only), "sns" (AWS SNS), "avlytext" (AvlyText API).
+  # SMS provider: "console" (logs only), "sns" (AWS SNS), "avlytext" (AvlyText API), "whatsapp".
   provider: console
+  # WhatsApp configuration (used when provider=whatsapp).
+  whatsapp:
+    # Base URL for the WhatsApp provider Node.js service.
+    base_url: "http://whatsapp-provider:3000"
+  
+  # Fallback providers to try if primary (provider field) fails.
+  fallback:
+    # - provider: whatsapp
+    #   whatsapp:
+    #     base_url: "http://whatsapp-provider:3000"
+  
   # AvlyText API configuration (used when provider=avlytext).
   avlytext:
     # Base URL for AvlyText API.
@@ -148,7 +159,7 @@ sms:
     contract_url: "https://api.orange.com/sms/admin/v1"
     # Orange sender address used by the SMS messaging API.
     sender_address: "tel:+2370000"
-    # Optional Orange sender name 
+    # Optional Orange sender name
     sender_name: "Azamra SMS"
 
 # OAuth2 / OIDC Configuration

@@ -1,0 +1,20 @@
+{
+  "name": "whatsapp-provider",
+  "version": "1.0.0",
+  "description": "WhatsApp provider for SMS gateway fallback",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0",
+    "puppeteer": "^21.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
