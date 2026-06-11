@@ -2,14 +2,108 @@ name: Main CI
 
 on:
   push:
+    branches:
+      - master
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+    paths:
+      # Code changes
+      - 'app/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      # Configuration changes
+      - 'config/**'
+      - 'justfile'
+      # OpenAPI changes
+      - 'openapi/**'
+      # Workflow changes
+      - '.github/workflows/ci.yaml'
+      - '.github/actions/**'
+      # Docker changes
+      - 'deploy/docker/**'
   pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      # Code changes
+      - 'app/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      # Configuration changes
+      - 'config/**'
+      - 'justfile'
+      # OpenAPI changes
+      - 'openapi/**'
+      # Workflow changes
+      - '.github/workflows/ci.yaml'
+      - '.github/actions/**'
+      # Docker changes
+      - 'deploy/docker/**'
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip test jobs'
+        required: false
+        default: 'false'
+        type: boolean
+      skip_build:
+        description: 'Skip build jobs'
+        required: false
+        default: 'false'
+        type: boolean
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TARGET_DIR: target
 
 jobs:
+  # Detect if code changes require tests/builds
+  changes:
+    name: Detect Changes 🔍
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      rust: ${{ steps.filter.outputs.rust }}
+      docker: ${{ steps.filter.outputs.docker }}
+      openapi: ${{ steps.filter.outputs.openapi }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'app/**'
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+            rust:
+              - '**/*.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            docker:
+              - 'deploy/docker/**'
+              - '.github/workflows/ci.yaml'
+            openapi:
+              - 'openapi/**'
+
   test-workspace:
     name: Tests (Workspace) 🧪
+    needs: changes
+    if: |
+      needs.changes.outputs.code == 'true' &&
+      github.event.inputs.skip_tests != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -41,6 +135,10 @@ jobs:
 
   test-oas:
     name: Tests (OAS Integration) 🔍
+    needs: changes
+    if: |
+      needs.changes.outputs.openapi == 'true' &&
+      github.event.inputs.skip_tests != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -72,7 +170,10 @@ jobs:
 
   cargo-version:
     name: Cargo Version Detector 🚩
-    if: github.ref == 'refs/heads/master'
+    needs: changes
+    if: |
+      github.ref == 'refs/heads/master' &&
+      needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.change.outputs.changed }}
@@ -133,8 +234,12 @@ jobs:
   build-musl:
     name: Build MUSL (${{ matrix.arch }}) ⚙️
     needs:
+      - changes
       - test-workspace
       - test-oas
+    if: |
+      needs.changes.outputs.code == 'true' &&
+      github.event.inputs.skip_build != 'true'
     runs-on: ${{ matrix.runner }}
     env:
       MUSL_TARGET: ${{ matrix.rust_target }}
@@ -301,10 +406,17 @@ jobs:
       contents: read
       packages: write
     needs:
+      - changes
       - build-musl
       - test-workspace
       - test-oas
-    if: github.ref != 'refs/heads/master'
+    if: |
+      needs.changes.outputs.code == 'true' &&
+      github.ref != 'refs/heads/master' &&
+      always() &&
+      (needs.test-workspace.result == 'success' || needs.test-workspace.result == 'skipped') &&
+      (needs.test-oas.result == 'success' || needs.test-oas.result == 'skipped') &&
+      (needs.build-musl.result == 'success')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -357,11 +469,19 @@ jobs:
       contents: read
       packages: write
     needs:
+      - changes
       - cargo-version
       - build-musl
       - test-workspace
       - test-oas
-    if: github.ref == 'refs/heads/master' && needs.cargo-version.outputs.changed == 'true'
+    if: |
+      needs.changes.outputs.code == 'true' &&
+      github.ref == 'refs/heads/master' &&
+      needs.cargo-version.outputs.changed == 'true' &&
+      always() &&
+      (needs.test-workspace.result == 'success' || needs.test-workspace.result == 'skipped') &&
+      (needs.test-oas.result == 'success' || needs.test-oas.result == 'skipped') &&
+      (needs.build-musl.result == 'success')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
