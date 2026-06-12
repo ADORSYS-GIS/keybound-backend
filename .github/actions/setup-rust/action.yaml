@@ -19,8 +19,38 @@ runs:
 
     - name: Generate code
       shell: bash
-      run: just generate
+      run: |
+        retry=0
+        max_retries=3
+        until [ "$retry" -ge "$max_retries" ]; do
+          if just generate; then
+            exit 0
+          fi
+          retry=$((retry + 1))
+          if [ "$retry" -lt "$max_retries" ]; then
+            delay=$((retry * 10))
+            echo "just generate failed (attempt $retry/$max_retries), retrying in ${delay}s..."
+            sleep "$delay"
+          fi
+        done
+        echo "just generate failed after $max_retries attempts"
+        exit 1
 
     - name: Prime cargo registry cache
       shell: bash
-      run: cargo fetch
+      run: |
+        retry=0
+        max_retries=3
+        until [ "$retry" -ge "$max_retries" ]; do
+          if cargo fetch; then
+            exit 0
+          fi
+          retry=$((retry + 1))
+          if [ "$retry" -lt "$max_retries" ]; then
+            delay=$((retry * 10))
+            echo "cargo fetch failed (attempt $retry/$max_retries), retrying in ${delay}s..."
+            sleep "$delay"
+          fi
+        done
+        echo "cargo fetch failed after $max_retries attempts"
+        exit 1
