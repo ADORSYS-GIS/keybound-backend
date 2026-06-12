@@ -102,6 +102,20 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      whatsapp-provider:
+        condition: service_started
+
+  whatsapp-provider:
+    image: whatsapp-provider
+    build:
+      context: ../../app/bins/whatsapp-provider
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - whatsapp-data:/data
+    environment:
+      - PORT=3000
+      - DATA_PATH=/data
 
   cuss-wiremock:
     image: wiremock/wiremock:3.13.1
@@ -112,7 +126,14 @@ services:
     volumes:
       - ../../.docker/wiremock/cuss/mappings:/home/wiremock/mappings:ro
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/__admin/mappings >/dev/null 2>&1" ]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/__admin/mappings >/dev/null 2>&1",
+        ]
       interval: 5s
       timeout: 3s
       retries: 20
+
+volumes:
+  whatsapp-data:

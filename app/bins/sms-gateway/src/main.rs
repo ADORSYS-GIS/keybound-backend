@@ -5,7 +5,7 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use sms_provider::{
     is_permanent_error, process_notification_job, ApiSmsProvider, AvlytextSmsProvider,
-    ConsoleSmsProvider, OrangeSmsProvider, SnsSmsProvider,
+    ConsoleSmsProvider, FallbackSmsProvider, OrangeSmsProvider, SnsSmsProvider, WhatsappSmsProvider,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -99,6 +99,27 @@ async fn main() -> anyhow::Result<()> {
 async fn create_sms_provider(
     config: &backend_core::config::SmsConfig,
 ) -> anyhow::Result<Arc<dyn sms_provider::SmsProvider>> {
+    let mut providers = Vec::new();
+
+    // 1. Primary provider
+    let primary = create_single_provider(config).await?;
+    providers.push(primary);
+
+    // 2. Fallback providers
+    for fallback_config in &config.fallback {
+        providers.push(create_single_provider(fallback_config).await?);
+    }
+
+    if providers.len() == 1 {
+        Ok(providers.remove(0))
+    } else {
+        Ok(Arc::new(FallbackSmsProvider::new(providers)))
+    }
+}
+
+async fn create_single_provider(
+    config: &backend_core::config::SmsConfig,
+) -> anyhow::Result<Arc<dyn sms_provider::SmsProvider>> {
     match config.provider {
         SmsProviderType::Console => {
             info!("Using Console SMS provider (development mode)");
@@ -145,6 +166,17 @@ async fn create_sms_provider(
             Ok(Arc::new(OrangeSmsProvider::new(
                 client,
                 orange_config.clone(),
+            )))
+        }
+        SmsProviderType::Whatsapp => {
+            let whatsapp_config = config.whatsapp.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("WhatsApp configuration is required when provider is 'whatsapp'")
+            })?;
+            info!("Using WhatsApp provider: {}", whatsapp_config.base_url);
+            let client = reqwest::Client::new();
+            Ok(Arc::new(WhatsappSmsProvider::new(
+                client,
+                whatsapp_config.base_url.clone(),
             )))
         }
     }
