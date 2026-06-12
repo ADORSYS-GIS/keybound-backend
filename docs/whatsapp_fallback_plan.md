@@ -71,7 +71,28 @@ sms:
 docker compose -f compose.yml up -d sms-gateway whatsapp-provider
 ```
 
-Expected health:
+### QR Code Authentication (First-time only)
+
+When the `whatsapp-provider` starts for the first time, it displays a **QR code** in the logs. You must scan this QR code with your phone's WhatsApp app to authenticate the session.
+
+```bash
+# Watch the logs until the QR code appears
+docker compose -f compose.yml logs --tail 30 whatsapp-provider
+```
+
+The QR code will look like an ASCII-art matrix. Scan it using:
+- **Android:** Open WhatsApp → Menu (⋮) → Linked devices → Link a device
+- **iOS:** Open WhatsApp → Settings → Linked devices → Link a device
+
+After successful scan, the logs will show:
+```
+AUTHENTICATED
+Client is ready!
+```
+
+The session is persisted in a Docker volume (`whatsapp-data`) and survives container restarts. Re-authentication is only needed if the session is explicitly disconnected.
+
+Verify authentication:
 ```bash
 docker run --rm --network keybound-backend_default alpine:3.20 sh -c '
 apk add -q curl
