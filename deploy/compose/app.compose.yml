@@ -126,7 +126,11 @@ services:
     volumes:
       - ../../.docker/wiremock/cuss/mappings:/home/wiremock/mappings:ro
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/__admin/mappings >/dev/null 2>&1" ]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/__admin/mappings >/dev/null 2>&1",
+        ]
       interval: 5s
       timeout: 3s
       retries: 20
