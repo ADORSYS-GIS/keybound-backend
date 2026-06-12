@@ -73,55 +73,39 @@ docker compose -f compose.yml up -d sms-gateway whatsapp-provider
 
 ### QR Code Authentication (First-time only)
 
-When the `whatsapp-provider` starts for the first time, it generates a **QR code**. You can retrieve it via API or view it in the logs.
-
-#### Option 1: API Endpoint (Recommended for Frontend)
+When the `whatsapp-provider` starts for the first time, it displays a **QR code** in the logs. You must scan this QR code with your phone's WhatsApp app to authenticate the session.
 
 ```bash
-# Get QR code for frontend display
-curl http://whatsapp-provider:3000/qr
-
-# Response:
-# {"authenticated":false,"qrCode":"2@...","message":"Scan this QR code with WhatsApp on your phone"}
-```
-
-The frontend can use a QR code library (e.g., `qrcode` npm package) to render the `qrCode` string.
-
-#### Option 2: View in Logs
-
-```bash
+# Watch the logs until the QR code appears
 docker compose -f compose.yml logs --tail 30 whatsapp-provider
 ```
 
-The QR code will appear as ASCII art in the logs.
+The QR code will look like an ASCII-art matrix. Scan it using:
+- **Android:** Open WhatsApp → Menu (⋮) → Linked devices → Link a device
+- **iOS:** Open WhatsApp → Settings → Linked devices → Link a device
 
-#### Option 3: Pair Code (Phone Number Authentication)
-
-Alternative to QR code — request an 8-digit code to enter on your phone:
-
-```bash
-# Request pairing code for phone number
-curl -X POST http://whatsapp-provider:3000/pair-code \
-  -H "Content-Type: application/json" \
-  -d '{"phone": "+237XXXXXXXXX"}'
-
-# Response:
-# {"success":true,"phone":"237XXXXXXXXX","pairingCode":"ABCD-EFGH","message":"Enter this code..."}
+After successful scan, the logs will show:
+```
+AUTHENTICATED
+Client is ready!
 ```
 
-On your phone: WhatsApp → Settings → Linked Devices → Link a Device → Enter the code.
+The session is persisted in a Docker volume (`whatsapp-data`) and survives container restarts. Re-authentication is only needed if the session is explicitly disconnected.
 
-#### Verify Authentication
-
+Verify authentication:
 ```bash
-# Check authentication status
-curl http://whatsapp-provider:3000/auth/status
-
-# Response when authenticated:
-# {"authenticated":true,"ready":true,"hasQrCode":false,"pairCodeRequested":false,"phoneNumber":"237XXXXXXXXX"}
+docker run --rm --network keybound-backend_default alpine:3.20 sh -c '
+apk add -q curl
+echo "SMS Gateway: $(curl -s -m 5 http://sms-gateway:3000/health)"
+echo "WhatsApp:    $(curl -s -m 5 http://whatsapp-provider:3000/health)"
+'
 ```
 
-The session is persisted in a Docker volume (`whatsapp-data`) and survives container restarts. Re-authentication is only needed if explicitly logged out or session expires.
+Expected output:
+```
+SMS Gateway: {"ok":true}
+WhatsApp:    {"ready":true,"authenticated":true}
+```
 
 ### Current Config (dev)
 
@@ -212,60 +196,3 @@ docker compose -f compose.yml start whatsapp-provider
 | `{"authenticated":false}` | QR not scanned | Check logs for QR code, scan with phone |
 | `Connection reset by peer` in CI | Transient network error | Rerun the CI job |
 | `provider: console` in logs | Config not picked up | Verify `config/dev.yaml` has `provider: whatsapp` |
-| `ProtocolError: Runtime.callFunctionOn timed out` | Puppeteer timeout | Increase `protocolTimeout` in puppeteer config |
-
-## 7. WhatsApp Provider API Reference
-
-The `whatsapp-provider` service exposes the following REST endpoints:
-
-### Authentication Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check — returns `{ready, authenticated, hasQrCode}` |
-| `/qr` | GET | Get QR code string for frontend display |
-| `/pair-code` | POST | Request pairing code for phone number auth |
-| `/auth/status` | GET | Full authentication status |
-| `/logout` | POST | Logout and clear session |
-
-### Messaging Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/send` | POST | Send WhatsApp message |
-| `/info` | GET | Get client info (when authenticated) |
-
-### Request/Response Examples
-
-#### GET /qr
-```json
-// Response when not authenticated
-{"authenticated": false, "qrCode": "2@...", "message": "Scan this QR code with WhatsApp on your phone"}
-
-// Response when authenticated
-{"authenticated": true, "message": "Client is already authenticated"}
-```
-
-#### POST /pair-code
-```json
-// Request
-{"phone": "+237XXXXXXXXX"}
-
-// Response
-{"success": true, "phone": "237XXXXXXXXX", "pairingCode": "ABCD-EFGH", "message": "Enter this code on your phone..."}
-```
-
-#### POST /send
-```json
-// Request
-{"phone": "+237XXXXXXXXX", "message": "Your OTP is 123456"}
-
-// Response
-{"success": true, "messageId": "3EB0...", "to": "237XXXXXXXXX@c.us"}
-```
-
-#### GET /info
-```json
-// Response (when authenticated)
-{"phoneNumber": "237XXXXXXXXX", "platform": "safari", "pushname": "Your Name"}
-```
