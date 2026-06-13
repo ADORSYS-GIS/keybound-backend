@@ -5,7 +5,7 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use sms_provider::{
     is_permanent_error, process_notification_job, ApiSmsProvider, AvlytextSmsProvider,
-    ConsoleSmsProvider, OrangeSmsProvider, SnsSmsProvider, WhatsappSmsProvider,
+    ConsoleSmsProvider, FallbackSmsProvider, OrangeSmsProvider, SnsSmsProvider, WhatsappSmsProvider,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -97,6 +97,27 @@ async fn main() -> anyhow::Result<()> {
 
 /// Create the appropriate SMS provider based on configuration
 async fn create_sms_provider(
+    config: &backend_core::config::SmsConfig,
+) -> anyhow::Result<Arc<dyn sms_provider::SmsProvider>> {
+    let mut providers = Vec::new();
+
+    // 1. Primary provider
+    let primary = create_single_provider(config).await?;
+    providers.push(primary);
+
+    // 2. Fallback providers
+    for fallback_config in &config.fallback {
+        providers.push(create_single_provider(fallback_config).await?);
+    }
+
+    if providers.len() == 1 {
+        Ok(providers.remove(0))
+    } else {
+        Ok(Arc::new(FallbackSmsProvider::new(providers)))
+    }
+}
+
+async fn create_single_provider(
     config: &backend_core::config::SmsConfig,
 ) -> anyhow::Result<Arc<dyn sms_provider::SmsProvider>> {
     match config.provider {

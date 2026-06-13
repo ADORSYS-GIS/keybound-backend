@@ -201,8 +201,11 @@ pub struct SmsConfig {
     pub orange: Option<OrangeConfig>,
     #[serde(default)]
     pub whatsapp: Option<WhatsappConfig>,
+    #[serde(default)]
+    pub fallback: Vec<SmsConfig>,
 }
 
+/// WhatsApp SMS provider configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WhatsappConfig {
     pub base_url: String,

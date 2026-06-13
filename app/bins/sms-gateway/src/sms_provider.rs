@@ -293,17 +293,18 @@ impl SmsProvider for FallbackSmsProvider {
             match provider.send_otp(msisdn, otp).await {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    warn!("SMS provider {} failed, falling back to next: {}", i + 1, e);
+                    warn!(
+                        "SMS provider {} failed, falling back to next: {}",
+                        i + 1,
+                        e
+                    );
                     last_error = Some(e);
                 }
             }
         }
 
         Err(last_error.unwrap_or_else(|| {
-            Error::internal(
-                "SMS_SEND_FAILED",
-                "No SMS providers configured for fallback",
-            )
+            Error::internal("SMS_SEND_FAILED", "No SMS providers configured for fallback")
         }))
     }
 }
@@ -853,10 +854,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/send/message"))
-            .and(wiremock::matchers::query_param(
-                "device_id",
-                "my-device-123",
-            ))
+            .and(wiremock::matchers::query_param("device_id", "my-device-123"))
             .and(wiremock::matchers::body_json(json!({
                 "phone": "1234567890",
                 "message": "Your verification code is: 123456",
