@@ -96,7 +96,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
     }
     bff_spec.security = Some(vec![make_bearer_req(), make_oauth2_req()]);
     // Add server URL with /bff prefix so paths resolve correctly
-    bff_spec.servers = Some(vec![Server::new(&format!("{}{}", http_host, bff_base))]);
+    bff_spec.servers = Some(vec![Server::new(format!("{}{}", http_host, bff_base))]);
 
     // Add security scheme and requirement to uploads spec
     if let Some(components) = uploads_spec.components.as_mut() {
@@ -120,7 +120,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
             .insert("keycloak".to_string(), oauth2_scheme.clone());
     }
     staff_spec.security = Some(vec![make_bearer_req(), make_oauth2_req()]);
-    staff_spec.servers = Some(vec![Server::new(&format!("{}{}", http_host, staff_base))]);
+    staff_spec.servers = Some(vec![Server::new(format!("{}{}", http_host, staff_base))]);
 
     // Add security scheme and requirement to auth spec
     if let Some(components) = auth_spec.components.as_mut() {
@@ -132,7 +132,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
             .insert("keycloak".to_string(), oauth2_scheme);
     }
     auth_spec.security = Some(vec![make_bearer_req(), make_oauth2_req()]);
-    auth_spec.servers = Some(vec![Server::new(&format!("{}{}", http_host, auth_base))]);
+    auth_spec.servers = Some(vec![Server::new(format!("{}{}", http_host, auth_base))]);
 
     let json = include_str!("../../../gen/kc_openapi/openapi.json")
         .parse::<serde_json::Value>()

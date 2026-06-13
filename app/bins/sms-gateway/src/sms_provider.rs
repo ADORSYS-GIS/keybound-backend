@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 #[cfg(test)]
 use wiremock::{
@@ -218,6 +218,96 @@ pub struct OrangeSmsProvider {
     rate_limiter: Mutex<Instant>,
 }
 
+/// WhatsApp SMS provider via GOWA (go-whatsapp-web-multidevice) sidecar
+pub struct WhatsappSmsProvider {
+    client: reqwest::Client,
+    base_url: String,
+    device_id: Option<String>,
+}
+
+impl WhatsappSmsProvider {
+    pub fn new(client: reqwest::Client, base_url: String, device_id: Option<String>) -> Self {
+        Self {
+            client,
+            base_url,
+            device_id,
+        }
+    }
+}
+
+#[async_trait]
+impl SmsProvider for WhatsappSmsProvider {
+    async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        let mut url = format!("{}/send/message", self.base_url.trim_end_matches('/'));
+        if let Some(ref device_id) = self.device_id {
+            url = format!("{}?device_id={}", url, urlencoding::encode(device_id));
+        }
+        let message = format!("Your verification code is: {}", otp);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&json!({
+                "phone": msisdn,
+                "message": message,
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    format!("Failed to contact WhatsApp provider: {}", e),
+                )
+            })?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("WhatsApp provider error ({}): {}", status, error_text),
+            ))
+        }
+    }
+}
+
+/// Fallback SMS provider that tries providers in order until one succeeds
+pub struct FallbackSmsProvider {
+    providers: Vec<Arc<dyn SmsProvider>>,
+}
+
+impl FallbackSmsProvider {
+    pub fn new(providers: Vec<Arc<dyn SmsProvider>>) -> Self {
+        Self { providers }
+    }
+}
+
+#[async_trait]
+impl SmsProvider for FallbackSmsProvider {
+    async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        let mut last_error = None;
+
+        for (i, provider) in self.providers.iter().enumerate() {
+            match provider.send_otp(msisdn, otp).await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    warn!("SMS provider {} failed, falling back to next: {}", i + 1, e);
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            Error::internal(
+                "SMS_SEND_FAILED",
+                "No SMS providers configured for fallback",
+            )
+        }))
+    }
+}
+
 struct OrangeToken {
     access_token: String,
     expires_at: Instant,
@@ -263,8 +353,10 @@ impl OrangeSmsProvider {
         debug!("Fetching new Orange OAuth token");
         let auth_header = format!(
             "Basic {}",
-            base64::engine::general_purpose::STANDARD
-                .encode(format!("{}:{}", self.config.client_id, self.config.client_secret))
+            base64::engine::general_purpose::STANDARD.encode(format!(
+                "{}:{}",
+                self.config.client_id, self.config.client_secret
+            ))
         );
 
         let response = self
@@ -334,9 +426,9 @@ impl OrangeSmsProvider {
 
     async fn send_once(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
         let token = self.get_valid_token().await?;
-        let normalized_to = self.normalize_msisdn(msisdn).map_err(|e| {
-            Error::internal("SMS_SEND_PERMANENT", e)
-        })?;
+        let normalized_to = self
+            .normalize_msisdn(msisdn)
+            .map_err(|e| Error::internal("SMS_SEND_PERMANENT", e))?;
 
         // Throttle to 5 SMS per second (200ms per request)
         {
@@ -418,7 +510,7 @@ impl OrangeSmsProvider {
             let body = response.text().await.unwrap_or_default();
             // Handle "Insufficient bundle" or other client errors as permanent
             if body.contains("EXPIRED_QUOTA") || body.contains("OUT_OF_BALANCE") {
-                 Err(Error::internal(
+                Err(Error::internal(
                     "SMS_SEND_PERMANENT",
                     format!("Orange API reported insufficient balance: {}", body),
                 ))
@@ -720,12 +812,88 @@ mod tests {
         let sender_path = urlencoding::encode("tel:+237000000000");
         Mock::given(method("POST"))
             .and(path(format!("/outbound/{}/requests", sender_path)))
-            .and(wiremock::matchers::header("Authorization", "Bearer test_token"))
+            .and(wiremock::matchers::header(
+                "Authorization",
+                "Bearer test_token",
+            ))
             .respond_with(ResponseTemplate::new(201))
             .mount(&server)
             .await;
 
         let result = provider.send_otp("+237654066316", "123456").await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_sends_message() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
+
+        Mock::given(method("POST"))
+            .and(path("/send/message"))
+            .and(wiremock::matchers::body_json(json!({
+                "phone": "1234567890",
+                "message": "Your verification code is: 123456",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "success": true })))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_sends_message_with_device_id() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider =
+            WhatsappSmsProvider::new(client, server.uri(), Some("my-device-123".to_string()));
+
+        Mock::given(method("POST"))
+            .and(path("/send/message"))
+            .and(wiremock::matchers::query_param(
+                "device_id",
+                "my-device-123",
+            ))
+            .and(wiremock::matchers::body_json(json!({
+                "phone": "1234567890",
+                "message": "Your verification code is: 123456",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "success": true })))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn fallback_provider_uses_secondary_on_failure() {
+        let primary_calls = Arc::new(AtomicUsize::new(0));
+        let secondary_calls = Arc::new(AtomicUsize::new(0));
+
+        struct MockProvider(Arc<AtomicUsize>, bool);
+        #[async_trait]
+        impl SmsProvider for MockProvider {
+            async fn send_otp(&self, _msisdn: &str, _otp: &str) -> Result<(), Error> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                if self.1 {
+                    Ok(())
+                } else {
+                    Err(Error::internal("SMS_SEND_TRANSIENT", "failed"))
+                }
+            }
+        }
+
+        let primary = Arc::new(MockProvider(primary_calls.clone(), false));
+        let secondary = Arc::new(MockProvider(secondary_calls.clone(), true));
+        let fallback = FallbackSmsProvider::new(vec![primary, secondary]);
+
+        let result = fallback.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
     }
 }

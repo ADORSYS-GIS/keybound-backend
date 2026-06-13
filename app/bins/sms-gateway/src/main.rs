@@ -5,7 +5,7 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use sms_provider::{
     is_permanent_error, process_notification_job, ApiSmsProvider, AvlytextSmsProvider,
-    ConsoleSmsProvider, OrangeSmsProvider, SnsSmsProvider,
+    ConsoleSmsProvider, OrangeSmsProvider, SnsSmsProvider, WhatsappSmsProvider,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -145,6 +145,21 @@ async fn create_sms_provider(
             Ok(Arc::new(OrangeSmsProvider::new(
                 client,
                 orange_config.clone(),
+            )))
+        }
+        SmsProviderType::Whatsapp => {
+            let whatsapp_config = config.whatsapp.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("WhatsApp configuration is required when provider is 'whatsapp'")
+            })?;
+            info!(
+                "Using WhatsApp provider: {}, device_id: {:?}",
+                whatsapp_config.base_url, whatsapp_config.device_id
+            );
+            let client = reqwest::Client::new();
+            Ok(Arc::new(WhatsappSmsProvider::new(
+                client,
+                whatsapp_config.base_url.clone(),
+                whatsapp_config.device_id.clone(),
             )))
         }
     }

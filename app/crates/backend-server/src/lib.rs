@@ -59,7 +59,12 @@ pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports
         state.oidc_state.clone(),
         state.signature_state.clone(),
     );
-    let app = build_router(api, &state.config, state.oidc_state.clone(), prometheus_handle);
+    let app = build_router(
+        api,
+        &state.config,
+        state.oidc_state.clone(),
+        prometheus_handle,
+    );
 
     info!("Listening on {}", listen_addr);
 
@@ -238,7 +243,7 @@ fn build_router(
     }
 
     // Mount Swagger UI - pass full config so server URLs are dynamically configured
-    router = router.merge(Into::<Router>::into(swagger::swagger_ui(&config)));
+    router = router.merge(Into::<Router>::into(swagger::swagger_ui(config)));
 
     // 404 fallback for unmatched routes
     router = router.fallback(|| async { (StatusCode::NOT_FOUND, "Not Found") });
