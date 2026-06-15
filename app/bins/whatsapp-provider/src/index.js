@@ -29,7 +29,10 @@ let isReady = false;
 
 client.on('qr', (qr) => {
     console.log('QR RECEIVED — scan with WhatsApp on your phone');
-    qrcode.generate(qr, { small: true });
+    console.log('QR DATA:', qr);
+    qrcode.generate(qr, { small: true }, (qrCode) => {
+        console.log(qrCode);
+    });
 });
 
 client.on('ready', () => {
