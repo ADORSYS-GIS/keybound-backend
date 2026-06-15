@@ -8,13 +8,18 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Initialize WhatsApp Client
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: process.env.DATA_PATH || path.join(__dirname, '../.wwebjs_auth')
     }),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-first-run',
+        ],
         executablePath: process.env.CHROME_PATH || null,
         headless: true
     }
@@ -23,8 +28,11 @@ const client = new Client({
 let isReady = false;
 
 client.on('qr', (qr) => {
-    console.log('QR RECEIVED', qr);
-    qrcode.generate(qr, { small: true });
+    console.log('QR RECEIVED — scan with WhatsApp on your phone');
+    console.log('QR DATA:', qr);
+    qrcode.generate(qr, { small: true }, (qrCode) => {
+        console.log(qrCode);
+    });
 });
 
 client.on('ready', () => {
@@ -36,20 +44,31 @@ client.on('authenticated', () => {
     console.log('AUTHENTICATED');
 });
 
-client.on('auth_failure', msg => {
+client.on('auth_failure', (msg) => {
     console.error('AUTHENTICATION FAILURE', msg);
+    // Let the process exit so Kubernetes restarts it cleanly
+    process.exit(1);
 });
 
 client.on('disconnected', (reason) => {
-    console.log('Client was logged out', reason);
+    console.log('Client disconnected:', reason);
     isReady = false;
-    client.initialize();
+    // Let Kubernetes restart the pod rather than re-initializing in-process
+    process.exit(0);
 });
 
-client.initialize();
+// Prevent unhandled rejections from crashing silently — log and exit cleanly
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled rejection:', reason);
+    process.exit(1);
+});
 
-// Routes
-app.get('/health', (req, res) => {
+client.initialize().catch((err) => {
+    console.error('Failed to initialize WhatsApp client:', err);
+    process.exit(1);
+});
+
+app.get('/health', (_req, res) => {
     res.json({
         ready: isReady,
         authenticated: client.info ? true : false
@@ -68,7 +87,6 @@ app.post('/send', async (req, res) => {
     }
 
     try {
-        // WhatsApp numbers should be in format 237xxxxxxxxx@c.us
         const formattedPhone = phone.includes('@c.us') ? phone : `${phone.replace('+', '')}@c.us`;
         const response = await client.sendMessage(formattedPhone, message);
         res.json({ success: true, messageId: response.id.id });
