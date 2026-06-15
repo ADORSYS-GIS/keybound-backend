@@ -545,3 +545,99 @@ jobs:
             echo "- Example tag: ${{ steps.tags.outputs.first_tag }}"
             echo "- Digest: ${{ steps.build_image.outputs.digest }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  container-build-whatsapp-dev:
+    name: Container Build Dev (whatsapp-provider) 📱
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - test-workspace
+      - test-oas
+    if: github.ref != 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-docker
+        id: setup
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          app-version: dev-${{ github.sha }}
+          image-name: ${{ github.repository_owner }}/whatsapp-provider
+      - name: Build and push dev image
+        id: build_image
+        uses: docker/build-push-action@v6
+        with:
+          context: app/bins/whatsapp-provider
+          file: app/bins/whatsapp-provider/Dockerfile
+          push: true
+          no-cache: false
+          platforms: linux/amd64
+          tags: ${{ steps.setup.outputs.tags }}
+      - name: Image report
+        if: always()
+        run: |
+          {
+            echo "### 📱 Container Report: Dev (whatsapp-provider)"
+            echo "- Platforms: linux/amd64"
+            echo "- Tags: |"
+            echo "${{ steps.setup.outputs.tags }}"
+            echo "- Digest: ${{ steps.build_image.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  container-build-whatsapp-prod:
+    name: Container Build Prod (whatsapp-provider) 📱
+    permissions:
+      contents: read
+      packages: write
+    needs:
+      - cargo-version
+      - test-workspace
+      - test-oas
+    if: github.ref == 'refs/heads/master' && needs.cargo-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-docker
+        id: setup
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          app-version: ${{ needs.cargo-version.outputs.version }}
+          image-name: ${{ github.repository_owner }}/whatsapp-provider
+      - name: Derive tags
+        id: tags
+        env:
+          COMPONENT_TAGS: ${{ steps.setup.outputs.tags }}
+        run: |
+          first_tag=""
+          {
+            echo "arch_tags<<EOF"
+            while IFS= read -r tag; do
+              [ -z "$tag" ] && continue
+              [ -z "$first_tag" ] && first_tag="$tag"
+              echo "$tag"
+            done <<< "${COMPONENT_TAGS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "first_tag=${first_tag}" >> "$GITHUB_OUTPUT"
+      - name: Build and push prod image
+        id: build_image
+        uses: docker/build-push-action@v6
+        with:
+          context: app/bins/whatsapp-provider
+          file: app/bins/whatsapp-provider/Dockerfile
+          push: true
+          no-cache: true
+          platforms: linux/amd64
+          tags: ${{ steps.tags.outputs.arch_tags }}
+          provenance: true
+          sbom: true
+      - name: Image report
+        if: always()
+        run: |
+          {
+            echo "### 📱 Container Report: Prod (whatsapp-provider)"
+            echo "- Platforms: linux/amd64"
+            echo "- Example tag: ${{ steps.tags.outputs.first_tag }}"
+            echo "- Digest: ${{ steps.build_image.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"
