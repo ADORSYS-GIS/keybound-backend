@@ -106,16 +106,15 @@ services:
         condition: service_started
 
   whatsapp-provider:
-    image: whatsapp-provider
-    build:
-      context: ../../app/bins/whatsapp-provider
-      dockerfile: Dockerfile
+    image: aldinokemal2104/go-whatsapp-web-multidevice:latest
     restart: unless-stopped
+    command: rest --debug
+    ports:
+      - 3030:3000
     volumes:
-      - whatsapp-data:/data
+      - whatsapp-data:/app/storages
     environment:
       - PORT=3000
-      - DATA_PATH=/data
 
   cuss-wiremock:
     image: wiremock/wiremock:3.13.1

@@ -106,6 +106,7 @@ pub struct Oauth2 {
 
 /// Swagger UI and OpenAPI documentation configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[derive(Default)]
 pub struct SwaggerConfig {
     /// HTTP host URL for the API server (e.g., "http://localhost:3000").
     /// Used to configure server URLs in OpenAPI specs.
@@ -116,20 +117,12 @@ pub struct SwaggerConfig {
     pub oauth2_client: Option<SwaggerOauth2Client>,
 }
 
-impl Default for SwaggerConfig {
-    fn default() -> Self {
-        Self {
-            http_host: None,
-            oauth2_client: None,
-        }
-    }
-}
 
 /// OAuth2 client credentials for Swagger UI to authenticate against the IdP.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SwaggerOauth2Client {
     #[serde(default, alias = "token-url")]
-    pub token_url: Option<String>
+    pub token_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -216,6 +209,7 @@ pub struct SmsConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WhatsappConfig {
     pub base_url: String,
+    pub device_id: Option<String>,
 }
 
 /// Third-party SMS API configuration.

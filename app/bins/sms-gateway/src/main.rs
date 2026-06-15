@@ -172,11 +172,15 @@ async fn create_single_provider(
             let whatsapp_config = config.whatsapp.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("WhatsApp configuration is required when provider is 'whatsapp'")
             })?;
-            info!("Using WhatsApp provider: {}", whatsapp_config.base_url);
+            info!(
+                "Using WhatsApp provider: {}, device_id: {:?}",
+                whatsapp_config.base_url, whatsapp_config.device_id
+            );
             let client = reqwest::Client::new();
             Ok(Arc::new(WhatsappSmsProvider::new(
                 client,
                 whatsapp_config.base_url.clone(),
+                whatsapp_config.device_id.clone(),
             )))
         }
     }

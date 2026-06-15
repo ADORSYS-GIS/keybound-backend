@@ -128,7 +128,7 @@ sms:
   provider: whatsapp
   # WhatsApp configuration (used when provider=whatsapp).
   whatsapp:
-    # Base URL for the WhatsApp provider Node.js service.
+    # Base URL for the WhatsApp provider service (GOWA sidecar).
     base_url: "http://whatsapp-provider:3000"
 
   # Fallback providers to try if primary (provider field) fails.

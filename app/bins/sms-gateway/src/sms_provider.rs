@@ -218,22 +218,30 @@ pub struct OrangeSmsProvider {
     rate_limiter: Mutex<Instant>,
 }
 
-/// WhatsApp SMS provider via Node.js sidecar
+/// WhatsApp SMS provider via GOWA (go-whatsapp-web-multidevice) sidecar
 pub struct WhatsappSmsProvider {
     client: reqwest::Client,
     base_url: String,
+    device_id: Option<String>,
 }
 
 impl WhatsappSmsProvider {
-    pub fn new(client: reqwest::Client, base_url: String) -> Self {
-        Self { client, base_url }
+    pub fn new(client: reqwest::Client, base_url: String, device_id: Option<String>) -> Self {
+        Self {
+            client,
+            base_url,
+            device_id,
+        }
     }
 }
 
 #[async_trait]
 impl SmsProvider for WhatsappSmsProvider {
     async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
-        let url = format!("{}/send", self.base_url.trim_end_matches('/'));
+        let mut url = format!("{}/send/message", self.base_url.trim_end_matches('/'));
+        if let Some(ref device_id) = self.device_id {
+            url = format!("{}?device_id={}", url, urlencoding::encode(device_id));
+        }
         let message = format!("Your verification code is: {}", otp);
 
         let response = self
@@ -346,8 +354,10 @@ impl OrangeSmsProvider {
         debug!("Fetching new Orange OAuth token");
         let auth_header = format!(
             "Basic {}",
-            base64::engine::general_purpose::STANDARD
-                .encode(format!("{}:{}", self.config.client_id, self.config.client_secret))
+            base64::engine::general_purpose::STANDARD.encode(format!(
+                "{}:{}",
+                self.config.client_id, self.config.client_secret
+            ))
         );
 
         let response = self
@@ -417,9 +427,9 @@ impl OrangeSmsProvider {
 
     async fn send_once(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
         let token = self.get_valid_token().await?;
-        let normalized_to = self.normalize_msisdn(msisdn).map_err(|e| {
-            Error::internal("SMS_SEND_PERMANENT", e)
-        })?;
+        let normalized_to = self
+            .normalize_msisdn(msisdn)
+            .map_err(|e| Error::internal("SMS_SEND_PERMANENT", e))?;
 
         // Throttle to 5 SMS per second (200ms per request)
         {
@@ -501,7 +511,7 @@ impl OrangeSmsProvider {
             let body = response.text().await.unwrap_or_default();
             // Handle "Insufficient bundle" or other client errors as permanent
             if body.contains("EXPIRED_QUOTA") || body.contains("OUT_OF_BALANCE") {
-                 Err(Error::internal(
+                Err(Error::internal(
                     "SMS_SEND_PERMANENT",
                     format!("Orange API reported insufficient balance: {}", body),
                 ))
@@ -803,7 +813,10 @@ mod tests {
         let sender_path = urlencoding::encode("tel:+237000000000");
         Mock::given(method("POST"))
             .and(path(format!("/outbound/{}/requests", sender_path)))
-            .and(wiremock::matchers::header("Authorization", "Bearer test_token"))
+            .and(wiremock::matchers::header(
+                "Authorization",
+                "Bearer test_token",
+            ))
             .respond_with(ResponseTemplate::new(201))
             .mount(&server)
             .await;
@@ -816,10 +829,32 @@ mod tests {
     async fn whatsapp_provider_sends_message() {
         let server = MockServer::start().await;
         let client = reqwest::Client::new();
-        let provider = WhatsappSmsProvider::new(client, server.uri());
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
 
         Mock::given(method("POST"))
-            .and(path("/send"))
+            .and(path("/send/message"))
+            .and(wiremock::matchers::body_json(json!({
+                "phone": "1234567890",
+                "message": "Your verification code is: 123456",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "success": true })))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_sends_message_with_device_id() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider =
+            WhatsappSmsProvider::new(client, server.uri(), Some("my-device-123".to_string()));
+
+        Mock::given(method("POST"))
+            .and(path("/send/message"))
+            .and(wiremock::matchers::query_param("device_id", "my-device-123"))
             .and(wiremock::matchers::body_json(json!({
                 "phone": "1234567890",
                 "message": "Your verification code is: 123456",
