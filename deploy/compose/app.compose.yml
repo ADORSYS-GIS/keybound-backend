@@ -115,6 +115,7 @@ services:
       - whatsapp-data:/app/storages
     environment:
       - PORT=3000
+      - APP_BASIC_AUTH=${WHATSAPP_BASIC_AUTH:-admin:secret}
 
   cuss-wiremock:
     image: wiremock/wiremock:3.13.1

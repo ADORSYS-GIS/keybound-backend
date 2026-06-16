@@ -130,6 +130,9 @@ sms:
   whatsapp:
     # Base URL for the WhatsApp provider service (GOWA sidecar).
     base_url: "http://whatsapp-provider:3000"
+    # Basic auth credentials for GOWA (must match BASIC_AUTH_USER/PASS on the container).
+    # username: "admin"
+    # password: "secret"
 
   # Fallback providers to try if primary (provider field) fails.
   fallback:

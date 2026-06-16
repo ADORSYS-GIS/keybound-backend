@@ -223,14 +223,24 @@ pub struct WhatsappSmsProvider {
     client: reqwest::Client,
     base_url: String,
     device_id: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 impl WhatsappSmsProvider {
-    pub fn new(client: reqwest::Client, base_url: String, device_id: Option<String>) -> Self {
+    pub fn new(
+        client: reqwest::Client,
+        base_url: String,
+        device_id: Option<String>,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Self {
         Self {
             client,
             base_url,
             device_id,
+            username,
+            password,
         }
     }
 }
@@ -244,21 +254,21 @@ impl SmsProvider for WhatsappSmsProvider {
         }
         let message = format!("Your verification code is: {}", otp);
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&json!({
-                "phone": msisdn,
-                "message": message,
-            }))
-            .send()
-            .await
-            .map_err(|e| {
-                Error::internal(
-                    "SMS_SEND_TRANSIENT",
-                    format!("Failed to contact WhatsApp provider: {}", e),
-                )
-            })?;
+        let mut request = self.client.post(&url).json(&json!({
+            "phone": msisdn,
+            "message": message,
+        }));
+
+        if let (Some(ref username), Some(ref password)) = (&self.username, &self.password) {
+            request = request.basic_auth(username, Some(password));
+        }
+
+        let response = request.send().await.map_err(|e| {
+            Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("Failed to contact WhatsApp provider: {}", e),
+            )
+        })?;
 
         if response.status().is_success() {
             Ok(())
@@ -829,7 +839,7 @@ mod tests {
     async fn whatsapp_provider_sends_message() {
         let server = MockServer::start().await;
         let client = reqwest::Client::new();
-        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None, None, None);
 
         Mock::given(method("POST"))
             .and(path("/send/message"))
@@ -850,11 +860,41 @@ mod tests {
         let server = MockServer::start().await;
         let client = reqwest::Client::new();
         let provider =
-            WhatsappSmsProvider::new(client, server.uri(), Some("my-device-123".to_string()));
+            WhatsappSmsProvider::new(client, server.uri(), Some("my-device-123".to_string()), None, None);
 
         Mock::given(method("POST"))
             .and(path("/send/message"))
             .and(wiremock::matchers::query_param("device_id", "my-device-123"))
+            .and(wiremock::matchers::body_json(json!({
+                "phone": "1234567890",
+                "message": "Your verification code is: 123456",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "success": true })))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_sends_message_with_basic_auth() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = WhatsappSmsProvider::new(
+            client,
+            server.uri(),
+            None,
+            Some("admin".to_string()),
+            Some("secret".to_string()),
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/send/message"))
+            .and(wiremock::matchers::header(
+                "Authorization",
+                "Basic YWRtaW46c2VjcmV0",
+            ))
             .and(wiremock::matchers::body_json(json!({
                 "phone": "1234567890",
                 "message": "Your verification code is: 123456",
