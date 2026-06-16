@@ -1,0 +1,9 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^/api/favorites/[^/]+$"
+  },
+  "response": {
+    "status": 200
+  }
+}

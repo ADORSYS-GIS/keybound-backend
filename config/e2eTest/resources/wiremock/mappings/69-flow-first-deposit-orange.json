@@ -1,0 +1,29 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/flow/sessions/[a-z0-9-]+/flows",
+    "bodyPatterns": [
+      { "contains": "\"flowType\":\"first_deposit\"" },
+      { "contains": "\"userId\":\"orange-user-id\"" }
+    ]
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "flow-deposit-orange",
+      "humanId": "H-FD-ORANGE",
+      "sessionId": "session-1",
+      "flowType": "first_deposit",
+      "status": "RUNNING",
+      "currentStep": "step-init-first-deposit-orange",
+      "stepIds": ["step-init-first-deposit-orange"],
+      "context": { "currency": "XAF", "amount": "15000" },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}

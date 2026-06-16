@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/payments/deposit",
+    "headers": {
+      "X-Idempotency-Key": { "matches": ".+" }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "transactionId": "txn-deposit-001",
+      "providerReference": "ref-orange-001",
+      "provider": "ORANGE_MONEY",
+      "type": "DEPOSIT",
+      "amount": 10000,
+      "currency": "XAF",
+      "status": "PENDING",
+      "message": "Deposit initiated",
+      "paymentUrl": "https://payment.example.com/pay/txn-deposit-001",
+      "ussdCode": "*126*123#",
+      "createdAt": "2026-03-17T10:00:00Z",
+      "fineractTransactionId": null
+    }
+  }
+}

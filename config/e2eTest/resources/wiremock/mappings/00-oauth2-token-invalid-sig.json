@@ -1,0 +1,20 @@
+{
+  "priority": 0,
+  "request": {
+    "method": "POST",
+    "urlPath": "/protocol/openid-connect/token",
+    "bodyPatterns": [
+      { "contains": "sig=invalid" }
+    ]
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "signature_verification_failed",
+      "error_description": "Invalid signature"
+    }
+  }
+}

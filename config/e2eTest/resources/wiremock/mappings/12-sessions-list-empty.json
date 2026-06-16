@@ -1,0 +1,14 @@
+{
+  "priority": 20,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/sessions"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": []
+  }
+}

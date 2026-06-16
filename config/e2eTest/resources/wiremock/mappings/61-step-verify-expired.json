@@ -1,0 +1,31 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/steps/step-verify-otp",
+    "bodyPatterns": [
+      { "contains": "\"code\":\"9999\"" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "step-verify-otp",
+      "humanId": "H-S002",
+      "flowId": "flow-phone-expired",
+      "stepType": "verify_otp",
+      "actor": "USER",
+      "status": "FAILED",
+      "input": { "code": "9999" },
+      "output": null,
+      "error": { "code": "OTP_EXPIRED", "message": "OTP has expired" },
+      "attemptNo": 1,
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:10:00Z",
+      "finishedAt": "2026-03-07T00:10:00Z"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+    "backendUrl": "http://localhost:9010/api/v1/api",
+    "powDifficulty": "4",
+    "otlpEndpoint": "http://localhost:4378",
+    "keycloak": {
+        "realm": "fineract",
+        "kcUrl": "http://localhost:9006",
+        "issuer": "http://localhost:9006/realms/fineract",
+        "clientId": "web-mobile",
+        "scheme": "azamra"
+    }
+}

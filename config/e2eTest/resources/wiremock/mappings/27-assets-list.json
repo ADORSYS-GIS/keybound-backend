@@ -1,0 +1,51 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/assets"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "totalPages": 1,
+      "totalElements": 1,
+      "size": 10,
+      "number": 0,
+      "sort": {
+        "sorted": true,
+        "unsorted": false,
+        "empty": false
+      },
+      "first": true,
+      "last": true,
+      "numberOfElements": 1,
+      "empty": false,
+      "pageable": {
+        "pageNumber": 0,
+        "pageSize": 10,
+        "offset": 0,
+        "paged": true,
+        "unpaged": false,
+        "sort": {
+          "sorted": true,
+          "unsorted": false,
+          "empty": false
+        }
+      },
+      "content": [
+        {
+          "id": "asset-1",
+          "name": "Solar Yield ETF",
+          "symbol": "SYE",
+          "category": "STOCKS",
+          "status": "ACTIVE",
+          "imageUrl": "https://cdn.azamra.local/assets/solar.png",
+          "currentPrice": 102.5,
+          "change24hPercent": 1.23
+        }
+      ]
+    }
+  }
+}

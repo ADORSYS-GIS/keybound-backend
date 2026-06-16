@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/trades/preview"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "assetId": "asset-1",
+      "side": "BUY",
+      "units": 10,
+      "executionPrice": 102.5,
+      "netAmount": 1025.0,
+      "fee": 2.0,
+      "feePercent": 0.195,
+      "spreadPercent": 0.1,
+      "grossAmount": 1027.0,
+      "spreadAmount": 0.5,
+      "basePrice": 102.3,
+      "feasible": true,
+      "blockers": []
+    }
+  }
+}

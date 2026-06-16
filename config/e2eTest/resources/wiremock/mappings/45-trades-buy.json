@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/trades/buy"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "orderId": "order-124",
+      "status": "PENDING",
+      "side": "BUY",
+      "units": 10,
+      "pricePerUnit": 102.5,
+      "totalAmount": 1025.0,
+      "fee": 2.0,
+      "spreadAmount": 0.5,
+      "executedAt": "2026-03-11T15:00:00Z"
+    }
+  }
+}

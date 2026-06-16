@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "^/api/assets/[^/]+/recent-trades$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": [
+      {
+        "price": 102.4,
+        "quantity": 50,
+        "side": "BUY",
+        "executedAt": "2026-03-11T14:00:00Z"
+      },
+      {
+        "price": 102.6,
+        "quantity": 30,
+        "side": "SELL",
+        "executedAt": "2026-03-11T13:45:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/flows/flow-phone-1"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "flow": {
+        "id": "flow-phone-1",
+        "humanId": "H-F001",
+        "sessionId": "session-1",
+        "flowType": "phone_otp",
+        "status": "RUNNING",
+        "currentStep": "step-verify-otp",
+        "stepIds": ["step-init-phone", "step-verify-otp"],
+        "context": { "phoneNumber": "+237690000000" },
+        "createdAt": "2026-03-07T00:00:00Z",
+        "updatedAt": "2026-03-07T00:00:00Z"
+      },
+      "steps": [
+        {
+          "id": "step-init-phone",
+          "humanId": "H-S001",
+          "flowId": "flow-phone-1",
+          "stepType": "init_phone",
+          "actor": "USER",
+          "status": "PENDING_INPUT",
+          "input": null,
+          "output": null,
+          "error": null,
+          "attemptNo": 1,
+          "createdAt": "2026-03-07T00:00:00Z",
+          "updatedAt": "2026-03-07T00:00:00Z",
+          "finishedAt": null
+        },
+        {
+          "id": "step-verify-otp",
+          "humanId": "H-S002",
+          "flowId": "flow-phone-1",
+          "stepType": "verify_otp",
+          "actor": "USER",
+          "status": "WAITING",
+          "input": null,
+          "output": null,
+          "error": null,
+          "attemptNo": 1,
+          "createdAt": "2026-03-07T00:00:00Z",
+          "updatedAt": "2026-03-07T00:00:00Z",
+          "finishedAt": null
+        }
+      ]
+    }
+  }
+}

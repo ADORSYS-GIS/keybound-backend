@@ -1,0 +1,28 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/flow/steps/step-init-first-deposit-unknown"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "step-init-first-deposit-unknown",
+      "humanId": "H-DUNKNOWN",
+      "flowId": "flow-deposit-unknown",
+      "stepType": "init_first_deposit",
+      "actor": "USER",
+      "status": "COMPLETED",
+      "input": null,
+      "output": null,
+      "error": null,
+      "attemptNo": 1,
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:02:00Z",
+      "finishedAt": "2026-03-07T00:02:00Z"
+    }
+  }
+}
