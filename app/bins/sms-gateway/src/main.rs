@@ -181,6 +181,8 @@ async fn create_single_provider(
                 client,
                 whatsapp_config.base_url.clone(),
                 whatsapp_config.device_id.clone(),
+                whatsapp_config.username.clone(),
+                whatsapp_config.password.clone(),
             )))
         }
     }

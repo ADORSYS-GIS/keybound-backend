@@ -50,12 +50,12 @@ on:
       skip_tests:
         description: 'Skip test jobs'
         required: false
-        default: 'false'
+        default: false
         type: boolean
       skip_build:
         description: 'Skip build jobs'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 # Cancel in-progress runs for the same branch/PR
@@ -237,7 +237,6 @@ jobs:
     needs:
       - changes
       - test-workspace
-      - test-oas
     if: |
       needs.changes.outputs.code == 'true' &&
       github.event.inputs.skip_build != 'true'

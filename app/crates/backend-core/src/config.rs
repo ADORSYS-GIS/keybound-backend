@@ -210,6 +210,8 @@ pub struct SmsConfig {
 pub struct WhatsappConfig {
     pub base_url: String,
     pub device_id: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 /// Third-party SMS API configuration.
