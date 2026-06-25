@@ -295,23 +295,28 @@ impl WhatsappSmsProvider {
     /// Call `GET /user/check?phone=<msisdn>` on the GOWA sidecar.
     ///
     /// Returns `Ok(())` when the number is confirmed to be on WhatsApp.
-    /// Returns `Err(SMS_SEND_PERMANENT)` when the number is NOT on WhatsApp so
-    /// that `FallbackSmsProvider` can immediately try the next provider.
-    /// Returns `Err(SMS_SEND_TRANSIENT)` for network / HTTP errors so that the
-    /// retry loop can retry before falling back.
+    ///
+    /// Returns `Err(SMS_SEND_PERMANENT)` when the number is confirmed NOT to be on WhatsApp
+    /// or if the query itself is rejected with a 4xx error (e.g. invalid phone format).
+    ///
+    /// Returns `Err(SMS_SEND_TRANSIENT)` for network/HTTP 5xx errors or unexpected payloads.
+    ///
+    /// Note: `FallbackSmsProvider::send_otp` will fall back to the next provider on *any*
+    /// error, regardless of whether it is transient or permanent. However, returning the
+    /// correct error classification ensures proper behavior when used outside a fallback chain
+    /// (e.g. retry loops will not try to retry a permanent error like number not on WA).
     async fn check_is_on_whatsapp(&self, msisdn: &str) -> Result<(), Error> {
-        let mut check_url = format!(
-            "{}/user/check?phone={}",
-            self.base_url.trim_end_matches('/'),
-            urlencoding::encode(msisdn)
-        );
-        if let Some(ref device_id) = self.device_id {
-            check_url = format!("{}?device_id={}&phone={}",
-                format!("{}/user/check", self.base_url.trim_end_matches('/')),
+        let base = self.base_url.trim_end_matches('/');
+        let check_url = if let Some(ref device_id) = self.device_id {
+            format!(
+                "{}/user/check?device_id={}&phone={}",
+                base,
                 urlencoding::encode(device_id),
                 urlencoding::encode(msisdn)
-            );
-        }
+            )
+        } else {
+            format!("{}/user/check?phone={}", base, urlencoding::encode(msisdn))
+        };
 
         debug!("Checking WhatsApp registration for {}: GET {}", msisdn, check_url);
 
@@ -330,8 +335,14 @@ impl WhatsappSmsProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            // Client error (4xx) is a permanent failure (e.g. invalid format); server error (5xx) is transient
+            let error_key = if status.is_client_error() {
+                "SMS_SEND_PERMANENT"
+            } else {
+                "SMS_SEND_TRANSIENT"
+            };
             return Err(Error::internal(
-                "SMS_SEND_TRANSIENT",
+                error_key,
                 format!("WhatsApp /user/check returned HTTP {}: {}", status, body),
             ));
         }
@@ -343,23 +354,31 @@ impl WhatsappSmsProvider {
             )
         })?;
 
-        let is_on_whatsapp = check
-            .results
-            .map(|r| r.is_on_whatsapp)
-            .unwrap_or(false);
-
-        if is_on_whatsapp {
-            info!("WhatsApp check passed: {} is on WhatsApp", msisdn);
-            Ok(())
-        } else {
-            warn!(
-                "WhatsApp check failed: {} is NOT on WhatsApp — falling back to next provider",
-                msisdn
-            );
-            Err(Error::internal(
-                "SMS_SEND_PERMANENT",
-                format!("Phone number {} is not registered on WhatsApp", msisdn),
-            ))
+        match check.results {
+            Some(r) if r.is_on_whatsapp => {
+                info!("WhatsApp check passed: {} is on WhatsApp", msisdn);
+                Ok(())
+            }
+            Some(_) => {
+                warn!(
+                    "WhatsApp check failed: {} is NOT on WhatsApp — falling back to next provider",
+                    msisdn
+                );
+                Err(Error::internal(
+                    "SMS_SEND_PERMANENT",
+                    format!("Phone number {} is not registered on WhatsApp", msisdn),
+                ))
+            }
+            None => {
+                warn!(
+                    "WhatsApp /user/check returned success but no results payload for {} — treating as transient error",
+                    msisdn
+                );
+                Err(Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    "WhatsApp /user/check response missing check results payload".to_string(),
+                ))
+            }
         }
     }
 }
@@ -1057,6 +1076,90 @@ mod tests {
         let result = fallback.send_otp("1234567890", "123456").await;
         assert!(result.is_ok());
         assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_returns_transient_error_when_results_payload_is_missing() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
+
+        // Mock: /user/check → 200 OK but with null/missing results payload
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "code": "SUCCESS",
+                "results": null
+            })))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_err());
+        if let Error::Http { error_key, .. } = result.unwrap_err() {
+            assert_eq!(error_key, "SMS_SEND_TRANSIENT");
+        } else {
+            panic!("Expected Http error");
+        }
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_returns_permanent_error_when_check_endpoint_returns_4xx() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
+
+        // Mock: /user/check → 400 Bad Request
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("Invalid phone format"))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("invalid-number", "123456").await;
+        assert!(result.is_err());
+        if let Error::Http { error_key, .. } = result.unwrap_err() {
+            assert_eq!(error_key, "SMS_SEND_PERMANENT");
+        } else {
+            panic!("Expected Http error");
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_provider_triggers_on_whatsapp_check_failure() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        
+        // WhatsApp provider mocked to fail /user/check with not on WhatsApp (400 or false registration)
+        let wa_provider = Arc::new(WhatsappSmsProvider::new(client, server.uri(), None));
+        
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "code": "SUCCESS",
+                "results": { "is_on_whatsapp": false }
+            })))
+            .mount(&server)
+            .await;
+
+        // Secondary mock provider (e.g. SNS fallback)
+        let secondary_calls = Arc::new(AtomicUsize::new(0));
+        struct MockSecondary(Arc<AtomicUsize>);
+        #[async_trait]
+        impl SmsProvider for MockSecondary {
+            async fn send_otp(&self, _msisdn: &str, _otp: &str) -> Result<(), Error> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let secondary_provider = Arc::new(MockSecondary(secondary_calls.clone()));
+
+        // Fallback chain
+        let fallback = FallbackSmsProvider::new(vec![wa_provider, secondary_provider]);
+
+        let result = fallback.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
         assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
     }
 }
