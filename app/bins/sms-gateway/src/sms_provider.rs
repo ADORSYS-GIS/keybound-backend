@@ -10,6 +10,17 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
+/// Response shape for `GET /user/check` from go-whatsapp-web-multidevice.
+#[derive(Debug, Deserialize)]
+struct UserCheckResults {
+    is_on_whatsapp: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserCheckResponse {
+    results: Option<UserCheckResults>,
+}
+
 #[cfg(test)]
 use wiremock::{
     matchers::{method, path},
@@ -238,6 +249,13 @@ impl WhatsappSmsProvider {
 #[async_trait]
 impl SmsProvider for WhatsappSmsProvider {
     async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        // ── Step 1: verify the number is registered on WhatsApp ──────────────
+        // If the number is not on WhatsApp we return SMS_SEND_PERMANENT so that
+        // FallbackSmsProvider immediately skips to the next provider (e.g. SNS)
+        // without wasting the transient-retry budget.
+        self.check_is_on_whatsapp(msisdn).await?;
+
+        // ── Step 2: send the OTP message ─────────────────────────────────────
         let mut url = format!("{}/send/message", self.base_url.trim_end_matches('/'));
         if let Some(ref device_id) = self.device_id {
             url = format!("{}?device_id={}", url, urlencoding::encode(device_id));
@@ -268,6 +286,79 @@ impl SmsProvider for WhatsappSmsProvider {
             Err(Error::internal(
                 "SMS_SEND_TRANSIENT",
                 format!("WhatsApp provider error ({}): {}", status, error_text),
+            ))
+        }
+    }
+}
+
+impl WhatsappSmsProvider {
+    /// Call `GET /user/check?phone=<msisdn>` on the GOWA sidecar.
+    ///
+    /// Returns `Ok(())` when the number is confirmed to be on WhatsApp.
+    /// Returns `Err(SMS_SEND_PERMANENT)` when the number is NOT on WhatsApp so
+    /// that `FallbackSmsProvider` can immediately try the next provider.
+    /// Returns `Err(SMS_SEND_TRANSIENT)` for network / HTTP errors so that the
+    /// retry loop can retry before falling back.
+    async fn check_is_on_whatsapp(&self, msisdn: &str) -> Result<(), Error> {
+        let mut check_url = format!(
+            "{}/user/check?phone={}",
+            self.base_url.trim_end_matches('/'),
+            urlencoding::encode(msisdn)
+        );
+        if let Some(ref device_id) = self.device_id {
+            check_url = format!("{}?device_id={}&phone={}",
+                format!("{}/user/check", self.base_url.trim_end_matches('/')),
+                urlencoding::encode(device_id),
+                urlencoding::encode(msisdn)
+            );
+        }
+
+        debug!("Checking WhatsApp registration for {}: GET {}", msisdn, check_url);
+
+        let response = self
+            .client
+            .get(&check_url)
+            .send()
+            .await
+            .map_err(|e| {
+                Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    format!("Failed to reach WhatsApp /user/check: {}", e),
+                )
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("WhatsApp /user/check returned HTTP {}: {}", status, body),
+            ));
+        }
+
+        let check: UserCheckResponse = response.json().await.map_err(|e| {
+            Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("Failed to parse WhatsApp /user/check response: {}", e),
+            )
+        })?;
+
+        let is_on_whatsapp = check
+            .results
+            .map(|r| r.is_on_whatsapp)
+            .unwrap_or(false);
+
+        if is_on_whatsapp {
+            info!("WhatsApp check passed: {} is on WhatsApp", msisdn);
+            Ok(())
+        } else {
+            warn!(
+                "WhatsApp check failed: {} is NOT on WhatsApp — falling back to next provider",
+                msisdn
+            );
+            Err(Error::internal(
+                "SMS_SEND_PERMANENT",
+                format!("Phone number {} is not registered on WhatsApp", msisdn),
             ))
         }
     }
@@ -826,11 +917,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn whatsapp_provider_sends_message() {
+    async fn whatsapp_provider_sends_message_when_number_is_on_whatsapp() {
         let server = MockServer::start().await;
         let client = reqwest::Client::new();
         let provider = WhatsappSmsProvider::new(client, server.uri(), None);
 
+        // Mock: /user/check → number IS on WhatsApp
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .and(wiremock::matchers::query_param("phone", "1234567890"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "code": "SUCCESS",
+                "results": { "is_on_whatsapp": true }
+            })))
+            .mount(&server)
+            .await;
+
+        // Mock: /send/message → OK
         Mock::given(method("POST"))
             .and(path("/send/message"))
             .and(wiremock::matchers::body_json(json!({
@@ -846,12 +949,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn whatsapp_provider_returns_permanent_error_when_number_not_on_whatsapp() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
+
+        // Mock: /user/check → number is NOT on WhatsApp
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .and(wiremock::matchers::query_param("phone", "9999999999"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "code": "SUCCESS",
+                "results": { "is_on_whatsapp": false }
+            })))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("9999999999", "123456").await;
+        assert!(result.is_err());
+        // Must be PERMANENT so FallbackSmsProvider skips to the next provider
+        if let Error::Http { error_key, .. } = result.unwrap_err() {
+            assert_eq!(error_key, "SMS_SEND_PERMANENT");
+        } else {
+            panic!("Expected Http error");
+        }
+    }
+
+    #[tokio::test]
+    async fn whatsapp_provider_returns_transient_error_when_check_endpoint_fails() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let provider = WhatsappSmsProvider::new(client, server.uri(), None);
+
+        // Mock: /user/check → server error (treat as transient so retry fires)
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_err());
+        if let Error::Http { error_key, .. } = result.unwrap_err() {
+            assert_eq!(error_key, "SMS_SEND_TRANSIENT");
+        } else {
+            panic!("Expected Http error");
+        }
+    }
+
+    #[tokio::test]
     async fn whatsapp_provider_sends_message_with_device_id() {
         let server = MockServer::start().await;
         let client = reqwest::Client::new();
         let provider =
             WhatsappSmsProvider::new(client, server.uri(), Some("my-device-123".to_string()));
 
+        // Mock: /user/check with device_id
+        Mock::given(method("GET"))
+            .and(path("/user/check"))
+            .and(wiremock::matchers::query_param("device_id", "my-device-123"))
+            .and(wiremock::matchers::query_param("phone", "1234567890"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "code": "SUCCESS",
+                "results": { "is_on_whatsapp": true }
+            })))
+            .mount(&server)
+            .await;
+
+        // Mock: /send/message with device_id
         Mock::given(method("POST"))
             .and(path("/send/message"))
             .and(wiremock::matchers::query_param("device_id", "my-device-123"))
