@@ -187,6 +187,7 @@ pub enum SmsProviderType {
     Avlytext,
     Orange,
     Whatsapp,
+    Mtarget,
 }
 
 /// SMS configuration for OTP delivery.
@@ -202,7 +203,20 @@ pub struct SmsConfig {
     #[serde(default)]
     pub whatsapp: Option<WhatsappConfig>,
     #[serde(default)]
+    pub mtarget: Option<MTargetConfig>,
+    #[serde(default)]
     pub fallback: Vec<SmsConfig>,
+}
+
+/// M-Target SMS provider configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MTargetConfig {
+    pub base_url: String,
+    pub username: String,
+    pub password: String,
+    pub service_id: String,
+    #[serde(default)]
+    pub sender_id: Option<String>,
 }
 
 /// WhatsApp SMS provider configuration.

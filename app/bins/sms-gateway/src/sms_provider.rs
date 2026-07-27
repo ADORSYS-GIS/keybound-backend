@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use backend_core::config::OrangeConfig;
+use backend_core::config::{MTargetConfig, OrangeConfig};
 use backend_core::{Error, NotificationJob};
 use base64::Engine;
 use serde::Deserialize;
@@ -217,6 +217,103 @@ pub struct OrangeSmsProvider {
     token_cache: RwLock<Option<OrangeToken>>,
     rate_limiter: Mutex<Instant>,
 }
+
+/// M-Target SMS provider
+pub struct MTargetSmsProvider {
+    client: reqwest::Client,
+    config: MTargetConfig,
+}
+
+impl MTargetSmsProvider {
+    pub fn new(client: reqwest::Client, config: MTargetConfig) -> Self {
+        Self { client, config }
+    }
+
+    /// Normalize MSISDN to M-Target's accepted format: +<country_code><number>
+    /// e.g. "676123456" → "+237676123456", "+237676123456" → "+237676123456"
+    fn normalize_msisdn(&self, msisdn: &str) -> String {
+        let trimmed = msisdn.trim();
+
+        // If already starts with +, use as-is
+        if trimmed.starts_with('+') {
+            return trimmed.to_string();
+        }
+
+        // Strip leading zeros (00XX → +XX)
+        let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits.starts_with("00") {
+            return format!("+{}", &digits[2..]);
+        }
+
+        // 9-digit local Cameroon number → prepend +237
+        if digits.len() == 9 && (digits.starts_with('6') || digits.starts_with('2')) {
+            return format!("+237{}", digits);
+        }
+
+        // 12-digit number already in international format (237XXXXXXXXX) → add +
+        if digits.len() == 12 && digits.starts_with("237") {
+            return format!("+{}", digits);
+        }
+
+        // Return as-is if we can't determine the format
+        format!("+{}", digits)
+    }
+}
+
+#[async_trait]
+impl SmsProvider for MTargetSmsProvider {
+    async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        let recipient = self.normalize_msisdn(msisdn);
+        let url = format!("{}/messages", self.config.base_url.trim_end_matches('/'));
+
+        // Whitelisted message format required by M-Target account
+        let message = format!("Your verification code is : {} by SkyEngPro", otp);
+
+        let mut form_data = std::collections::HashMap::new();
+        form_data.insert("username", self.config.username.as_str());
+        form_data.insert("password", self.config.password.as_str());
+        form_data.insert("serviceid", self.config.service_id.as_str());
+        form_data.insert("msisdn", recipient.as_str());
+        form_data.insert("msg", message.as_str());
+
+        let sender_str;
+        if let Some(ref sender) = self.config.sender_id {
+            sender_str = sender.clone();
+            form_data.insert("sender", sender_str.as_str());
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .form(&form_data)
+            .send()
+            .await
+            .map_err(|e| {
+                Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    format!("Failed to connect to M-Target API: {}", e),
+                )
+            })?;
+
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let error_text = response.text().await.unwrap_or_default();
+            Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("M-Target API server error ({}): {}", status, error_text),
+            ))
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            Err(Error::internal(
+                "SMS_SEND_PERMANENT",
+                format!("M-Target API client error ({}): {}", status, error_text),
+            ))
+        }
+    }
+}
+
 
 /// WhatsApp SMS provider via GOWA (go-whatsapp-web-multidevice) sidecar
 pub struct WhatsappSmsProvider {
@@ -864,6 +961,54 @@ mod tests {
             .await;
 
         let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mtarget_sms_provider_sends_sms_successfully() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let config = MTargetConfig {
+            base_url: server.uri(),
+            username: "skyengpro".to_string(),
+            password: "test_password".to_string(),
+            service_id: "36949".to_string(),
+            sender_id: Some("SkyEngPro".to_string()),
+        };
+        let provider = MTargetSmsProvider::new(client, config);
+
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        // Test with a local 9-digit Cameroon number
+        let result = provider.send_otp("676123456", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mtarget_normalizes_msisdn_with_plus_prefix() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let config = MTargetConfig {
+            base_url: server.uri(),
+            username: "skyengpro".to_string(),
+            password: "test_password".to_string(),
+            service_id: "36949".to_string(),
+            sender_id: Some("SkyEngPro".to_string()),
+        };
+        let provider = MTargetSmsProvider::new(client, config);
+
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        // Test with a + prefixed number (as Postman confirmed)
+        let result = provider.send_otp("+237678532402", "654321").await;
         assert!(result.is_ok());
     }
 
