@@ -105,8 +105,7 @@ pub struct Oauth2 {
 }
 
 /// Swagger UI and OpenAPI documentation configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct SwaggerConfig {
     /// HTTP host URL for the API server (e.g., "http://localhost:3000").
     /// Used to configure server URLs in OpenAPI specs.
@@ -116,7 +115,6 @@ pub struct SwaggerConfig {
     #[serde(default)]
     pub oauth2_client: Option<SwaggerOauth2Client>,
 }
-
 
 /// OAuth2 client credentials for Swagger UI to authenticate against the IdP.
 #[derive(Debug, Clone, Deserialize)]
