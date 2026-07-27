@@ -215,8 +215,7 @@ pub struct MTargetConfig {
     pub username: String,
     pub password: String,
     pub service_id: String,
-    #[serde(default)]
-    pub sender_id: Option<String>,
+    pub sender_id: String,
 }
 
 /// WhatsApp SMS provider configuration.

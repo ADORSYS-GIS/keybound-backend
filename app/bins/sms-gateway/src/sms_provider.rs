@@ -230,17 +230,19 @@ impl MTargetSmsProvider {
     }
 
     /// Normalize MSISDN to M-Target's accepted format: +<country_code><number>
-    /// e.g. "676123456" → "+237676123456", "+237676123456" → "+237676123456"
+    /// e.g. "676123456" → "+237676123456", "+237 678 532 402" → "+237678532402"
     fn normalize_msisdn(&self, msisdn: &str) -> String {
         let trimmed = msisdn.trim();
 
-        // If already starts with +, use as-is
+        // Extract digits only
+        let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        // If input starts with +, preserve + prefix and strip any non-digit formatting characters
         if trimmed.starts_with('+') {
-            return trimmed.to_string();
+            return format!("+{}", digits);
         }
 
         // Strip leading zeros (00XX → +XX)
-        let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
         if digits.starts_with("00") {
             return format!("+{}", &digits[2..]);
         }
@@ -255,7 +257,11 @@ impl MTargetSmsProvider {
             return format!("+{}", digits);
         }
 
-        // Return as-is if we can't determine the format
+        // Fallback for un-recognized MSISDN format
+        tracing::warn!(
+            "MSISDN '{}' did not match standard local or international patterns during normalization",
+            msisdn
+        );
         format!("+{}", digits)
     }
 }
@@ -275,12 +281,7 @@ impl SmsProvider for MTargetSmsProvider {
         form_data.insert("serviceid", self.config.service_id.as_str());
         form_data.insert("msisdn", recipient.as_str());
         form_data.insert("msg", message.as_str());
-
-        let sender_str;
-        if let Some(ref sender) = self.config.sender_id {
-            sender_str = sender.clone();
-            form_data.insert("sender", sender_str.as_str());
-        }
+        form_data.insert("sender", self.config.sender_id.as_str());
 
         let response = self
             .client
@@ -313,7 +314,6 @@ impl SmsProvider for MTargetSmsProvider {
         }
     }
 }
-
 
 /// WhatsApp SMS provider via GOWA (go-whatsapp-web-multidevice) sidecar
 pub struct WhatsappSmsProvider {
@@ -973,7 +973,7 @@ mod tests {
             username: "skyengpro".to_string(),
             password: "test_password".to_string(),
             service_id: "36949".to_string(),
-            sender_id: Some("SkyEngPro".to_string()),
+            sender_id: "SkyEngPro".to_string(),
         };
         let provider = MTargetSmsProvider::new(client, config);
 
@@ -989,7 +989,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mtarget_normalizes_msisdn_with_plus_prefix() {
+    async fn mtarget_normalizes_msisdn_variations() {
         let server = MockServer::start().await;
         let client = reqwest::Client::new();
         let config = MTargetConfig {
@@ -997,7 +997,7 @@ mod tests {
             username: "skyengpro".to_string(),
             password: "test_password".to_string(),
             service_id: "36949".to_string(),
-            sender_id: Some("SkyEngPro".to_string()),
+            sender_id: "SkyEngPro".to_string(),
         };
         let provider = MTargetSmsProvider::new(client, config);
 
@@ -1007,9 +1007,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Test with a + prefixed number (as Postman confirmed)
-        let result = provider.send_otp("+237678532402", "654321").await;
-        assert!(result.is_ok());
+        // Test with formatted + number (+237-678-532-402)
+        assert!(provider.send_otp("+237-678-532-402", "654321").await.is_ok());
+
+        // Test with 00-prefixed international number (00237678532402 -> +237678532402)
+        assert!(provider.send_otp("00237678532402", "654321").await.is_ok());
+
+        // Test with non-standard length number (triggers fallback warning branch)
+        assert!(provider.send_otp("12345", "654321").await.is_ok());
     }
 
     #[tokio::test]
