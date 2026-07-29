@@ -19,6 +19,8 @@ runs:
 
     - name: Generate code
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         retry=0
         max_retries=3
