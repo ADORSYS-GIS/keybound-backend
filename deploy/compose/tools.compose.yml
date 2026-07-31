@@ -4,6 +4,7 @@ services:
     environment:
       KEYCLOAK_PLUGIN_VERSION: "0.2.6"
       OPENAPI_GENERATOR_VERSION: "7.19.0"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
     command:
       - /bin/sh
       - -c
@@ -16,13 +17,24 @@ services:
         download() {
           output="$$1"
           url="$$2"
-          curl -fL \
-            --retry 8 \
-            --retry-delay 2 \
-            --retry-all-errors \
-            --connect-timeout 10 \
-            --max-time 300 \
-            -o "$$output" "$$url"
+          if [ -n "$$GITHUB_TOKEN" ]; then
+            curl -fL \
+              -H "Authorization: Bearer $$GITHUB_TOKEN" \
+              --retry 8 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              --connect-timeout 10 \
+              --max-time 300 \
+              -o "$$output" "$$url"
+          else
+            curl -fL \
+              --retry 8 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              --connect-timeout 10 \
+              --max-time 300 \
+              -o "$$output" "$$url"
+          fi
         }
 
         echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
