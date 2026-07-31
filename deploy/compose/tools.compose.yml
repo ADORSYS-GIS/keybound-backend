@@ -29,15 +29,15 @@ services:
         download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
 
         echo "Download OpenAPI for Keycloak...";
-        download /data/keycloak-interface.openapi.yaml "https://github.com/ADORSYS-GIS/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
+        download /data/keycloak-interface.openapi.yaml "https://github.com/skyengpro/keycloak-spi-registry/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
         echo "Downloaded OpenAPI for Keycloak";
 
         echo "Download keybound...";
-        download /data/kc-plugins/keycloak-keybound-all.jar "https://github.com/ADORSYS-GIS/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
-        download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/ADORSYS-GIS/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/ADORSYS-GIS/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/ADORSYS-GIS/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/ADORSYS-GIS/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        download /data/kc-plugins/keycloak-keybound-all.jar "https://github.com/skyengpro/keycloak-spi-registry/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
+        download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/skyengpro/keycloak-spi-registry/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/skyengpro/keycloak-spi-registry/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/skyengpro/keycloak-spi-registry/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/skyengpro/keycloak-spi-registry/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
         echo "Downloaded keybound";
 
     volumes:
