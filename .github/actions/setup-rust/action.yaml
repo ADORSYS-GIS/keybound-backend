@@ -6,9 +6,6 @@ inputs:
     description: Rust version to install.
     required: false
     default: 'stable'
-  github-token:
-    description: GitHub token with read access to keycloak-keybound releases.
-    required: true
 runs:
   using: composite
   steps:
@@ -22,8 +19,6 @@ runs:
 
     - name: Generate code
       shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         retry=0
         max_retries=3

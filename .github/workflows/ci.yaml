@@ -110,8 +110,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         name: Setup rust
-        with:
-          github-token: ${{ secrets.KC_PLUGIN_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-tests-${{ runner.os }}-workspace
@@ -147,8 +145,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         name: Setup rust
-        with:
-          github-token: ${{ secrets.KC_PLUGIN_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-tests-${{ runner.os }}-oas
@@ -266,8 +262,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         name: Setup rust
-        with:
-          github-token: ${{ secrets.KC_PLUGIN_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-musl-${{ runner.os }}-${{ matrix.rust_target }}
