@@ -105,8 +105,7 @@ pub struct Oauth2 {
 }
 
 /// Swagger UI and OpenAPI documentation configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct SwaggerConfig {
     /// HTTP host URL for the API server (e.g., "http://localhost:3000").
     /// Used to configure server URLs in OpenAPI specs.
@@ -116,7 +115,6 @@ pub struct SwaggerConfig {
     #[serde(default)]
     pub oauth2_client: Option<SwaggerOauth2Client>,
 }
-
 
 /// OAuth2 client credentials for Swagger UI to authenticate against the IdP.
 #[derive(Debug, Clone, Deserialize)]
@@ -187,6 +185,7 @@ pub enum SmsProviderType {
     Avlytext,
     Orange,
     Whatsapp,
+    Mtarget,
 }
 
 /// SMS configuration for OTP delivery.
@@ -202,7 +201,19 @@ pub struct SmsConfig {
     #[serde(default)]
     pub whatsapp: Option<WhatsappConfig>,
     #[serde(default)]
+    pub mtarget: Option<MTargetConfig>,
+    #[serde(default)]
     pub fallback: Vec<SmsConfig>,
+}
+
+/// M-Target SMS provider configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MTargetConfig {
+    pub base_url: String,
+    pub username: String,
+    pub password: String,
+    pub service_id: String,
+    pub sender_id: String,
 }
 
 /// WhatsApp SMS provider configuration.

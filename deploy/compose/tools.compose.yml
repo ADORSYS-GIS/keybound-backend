@@ -4,6 +4,7 @@ services:
     environment:
       KEYCLOAK_PLUGIN_VERSION: "0.2.6"
       OPENAPI_GENERATOR_VERSION: "7.19.0"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
     command:
       - /bin/sh
       - -c
@@ -13,6 +14,9 @@ services:
         mkdir -p /data/bin
         mkdir -p /data/kc-plugins
 
+        apk add --no-cache jq
+
+        # Download from a public URL (e.g. Maven Central)
         download() {
           output="$$1"
           url="$$2"
@@ -25,19 +29,51 @@ services:
             -o "$$output" "$$url"
         }
 
+        # Download a release asset from a private GitHub repo via the REST API.
+        # Usage: gh_download <output_path> <asset_filename>
+        # Requires RELEASE_META to be set (fetched once below).
+        gh_download() {
+          output="$$1"
+          asset_name="$$2"
+          asset_id=$$(echo "$$RELEASE_META" | jq -r --arg name "$$asset_name" '.assets[] | select(.name == $$name) | .id')
+          if [ -z "$$asset_id" ] || [ "$$asset_id" = "null" ]; then
+            echo "ERROR: Asset '$$asset_name' not found in release v$$KEYCLOAK_PLUGIN_VERSION"
+            echo "Available assets:"
+            echo "$$RELEASE_META" | jq -r '.assets[].name'
+            exit 1
+          fi
+          curl -fL \
+            -H "Authorization: Bearer $$GITHUB_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            --retry 8 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 300 \
+            -o "$$output" \
+            "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/assets/$$asset_id"
+        }
+
         echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
         download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
 
+        echo "Fetching release metadata for v$$KEYCLOAK_PLUGIN_VERSION...";
+        RELEASE_META=$$(curl -fsSL \
+          -H "Authorization: Bearer $$GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/v$$KEYCLOAK_PLUGIN_VERSION")
+        echo "Found $$(echo "$$RELEASE_META" | jq '.assets | length') assets in release"
+
         echo "Download OpenAPI for Keycloak...";
-        download /data/keycloak-interface.openapi.yaml "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
+        gh_download /data/keycloak-interface.openapi.yaml "backend.open-api.yml"
         echo "Downloaded OpenAPI for Keycloak";
 
         echo "Download keybound...";
-        download /data/kc-plugins/keycloak-keybound-all.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
-        download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-all.jar "keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
         echo "Downloaded keybound";
 
     volumes:
