@@ -349,3 +349,43 @@ just test-cucumber-all
 - Supports env var expansion: `${VAR}` or `${VAR:-default}`
 - Use `clap` for CLI args in binaries
 - Shared state in `AppState` with `Arc<dyn Trait>` abstractions
+
+## Versioning & CI Release Gate
+
+The `container-build-prod` job (`ci.yaml`) builds & pushes the `user-storage` and
+`sms-gateway` images (used by the dev environment via the `latest` tag) **only when
+the workspace version changes**.
+
+To determine this, the `cargo-version` job compares the `[workspace.package].version`
+in `Cargo.toml` against the most recent git tag:
+
+```bash
+latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || echo none)"
+```
+
+If the version is unchanged, `cargo-version.outputs.changed` is `false` and the
+container build is **skipped** (this is intentional, to avoid burning runner minutes
+when nothing is released).
+
+**Before merging any change to `master` that should produce a deployable image, bump
+the workspace version.**
+
+```bash
+# In Cargo.toml:
+[workspace.package]
+version = "0.2.8"   # <- bump (e.g. 0.2.7 -> 0.2.8)
+```
+
+Guidelines:
+
+- Use [SemVer](https://semver.org/): bump **patch** for bug fixes, **minor** for
+  additive/backward-compatible features, **major** for breaking changes.
+- Bumping only `[workspace.package].version` is enough — all crates that use
+  `version.workspace = true` inherit it. `sms-gateway` keeps its own version and does
+  not need changing.
+- After editing `Cargo.toml`, run `cargo check` (or any cargo command) so `Cargo.lock`
+  is refreshed to the new version, and commit both files.
+- The `latest` image tag used by the dev deployment is only produced on `master`.
+
+If you change code without bumping the version, tests and MUSL builds still run, but
+the container images will **not** be rebuilt/pushed.
