@@ -15,7 +15,7 @@ use backend_repository::{
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 const FLOW_STATUS_RUNNING: &str = "RUNNING";
 const FLOW_STATUS_COMPLETED: &str = "COMPLETED";
@@ -1041,17 +1041,19 @@ pub async fn get_user(
     user_id: String,
     caller_id: String,
 ) -> Result<UserResponse, Error> {
-    if user_id != caller_id {
+    let clean_user_id = user_id.rsplit(':').next().unwrap_or(&user_id).to_string();
+
+    if clean_user_id != caller_id {
         return Err(Error::unauthorized("Cannot access other users' data"));
     }
 
     let user = api
         .state
         .user
-        .get_user(&user_id)
+        .get_user(&clean_user_id)
         .await?
         .ok_or_else(|| Error::not_found("USER_NOT_FOUND", "User not found"))?;
-    let metadata = api.state.user.get_user_metadata(&user_id).await?;
+    let metadata = api.state.user.get_user_metadata(&clean_user_id).await?;
 
     Ok(UserResponse::from_row_with_metadata(user, metadata))
 }
@@ -1062,17 +1064,32 @@ pub async fn get_completed_kyc(
     user_id: String,
     caller_id: String,
 ) -> Result<CompletedKycResponse, Error> {
-    debug!("Will get completed kyc");
-    if user_id != caller_id {
+    let clean_user_id = user_id.rsplit(':').next().unwrap_or(&user_id).to_string();
+    debug!(%clean_user_id, %caller_id, "Will get completed kyc");
+    if clean_user_id != caller_id {
+        debug!(%clean_user_id, %caller_id, "Caller tried to access another user's completed KYC");
         return Err(Error::unauthorized("Cannot access other users' data"));
     }
 
     api.state
         .user
-        .get_user(&user_id)
-        .await?
+        .get_user(&clean_user_id)
+        .await
+        .map_err(|err| {
+            error!(error = %err, %clean_user_id, "Failed to load user for completed KYC");
+            err
+        })?
         .ok_or_else(|| Error::not_found("USER_NOT_FOUND", "User not found"))?;
-    let metadata = api.state.user.get_user_metadata(&user_id).await?;
+
+    let metadata = api
+        .state
+        .user
+        .get_user_metadata(&clean_user_id)
+        .await
+        .map_err(|err| {
+            error!(error = %err, %clean_user_id, "Failed to load user metadata for completed KYC");
+            err
+        })?;
 
     let completed_kyc = metadata
         .get("kyc")
@@ -1080,8 +1097,14 @@ pub async fn get_completed_kyc(
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
 
+    debug!(
+        %clean_user_id,
+        kyc_keys = ?completed_kyc.as_object().map(|m| m.keys().cloned().collect::<Vec<_>>()),
+        "Completed KYC metadata resolved"
+    );
+
     Ok(CompletedKycResponse {
-        user_id,
+        user_id: clean_user_id,
         completed_kyc,
     })
 }

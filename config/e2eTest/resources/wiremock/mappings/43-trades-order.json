@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "^/api/trades/orders/[^/]+$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "orderId": "order-123",
+      "assetId": "asset-1",
+      "symbol": "SYE",
+      "side": "BUY",
+      "units": 10,
+      "pricePerUnit": 102.5,
+      "totalAmount": 1025.0,
+      "fee": 2.0,
+      "spreadAmount": 0.5,
+      "status": "FILLED",
+      "createdAt": "2026-03-10T12:00:00Z"
+    }
+  }
+}

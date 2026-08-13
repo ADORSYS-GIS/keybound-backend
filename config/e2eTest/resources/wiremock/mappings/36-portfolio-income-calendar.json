@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/portfolio/income-calendar"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "events": [
+        {
+          "assetId": "asset-1",
+          "symbol": "SYE",
+          "assetName": "Solar Yield ETF",
+          "incomeType": "DIVIDEND",
+          "paymentDate": "2026-04-01",
+          "expectedAmount": 120.0,
+          "units": 100.0,
+          "rateApplied": 6.0
+        }
+      ],
+      "monthlyTotals": [
+        {
+          "month": "2026-04",
+          "totalAmount": 120.0,
+          "eventCount": 1
+        }
+      ],
+      "totalExpectedIncome": 120.0,
+      "totalByIncomeType": {
+        "DIVIDEND": 120.0
+      }
+    }
+  }
+}

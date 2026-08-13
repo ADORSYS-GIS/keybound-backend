@@ -1,0 +1,26 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/orange-user-id"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "orange-user-id",
+      "realm": "azamra-realm",
+      "username": "orange-user",
+      "email": "orange@azamra.test",
+      "emailVerified": true,
+      "disabled": false,
+      "fullName": "Orange User",
+      "phoneNumber": "+237699999999",
+      "metadata": { "savingsAccountId": 101 },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/portfolio/history"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "period": "1M",
+      "snapshots": [
+        {
+          "date": "2026-02-01",
+          "totalValue": 9800.0,
+          "totalCostBasis": 9500.0,
+          "unrealizedPnl": 300.0,
+          "positionCount": 1
+        },
+        {
+          "date": "2026-02-15",
+          "totalValue": 10000.0,
+          "totalCostBasis": 9500.0,
+          "unrealizedPnl": 500.0,
+          "positionCount": 1
+        },
+        {
+          "date": "2026-03-01",
+          "totalValue": 10250.0,
+          "totalCostBasis": 9500.0,
+          "unrealizedPnl": 750.0,
+          "positionCount": 1
+        }
+      ]
+    }
+  }
+}

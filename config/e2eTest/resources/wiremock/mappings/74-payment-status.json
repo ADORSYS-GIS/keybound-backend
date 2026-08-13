@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/payments/status/txn-deposit-001"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "transactionId": "txn-deposit-001",
+      "providerReference": "ref-orange-001",
+      "provider": "ORANGE_MONEY",
+      "type": "DEPOSIT",
+      "amount": 10000,
+      "currency": "XAF",
+      "status": "SUCCESSFUL",
+      "message": "Deposit completed successfully",
+      "createdAt": "2026-03-17T10:00:00Z",
+      "updatedAt": "2026-03-17T10:05:00Z",
+      "completedAt": "2026-03-17T10:05:00Z",
+      "fineractTransactionId": 12345,
+      "externalId": "ext-deposit-uuid",
+      "accountId": 101
+    }
+  }
+}

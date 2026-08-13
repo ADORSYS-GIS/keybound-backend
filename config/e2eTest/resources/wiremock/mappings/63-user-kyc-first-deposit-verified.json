@@ -1,0 +1,25 @@
+{
+  "priority": 1,
+  "scenarioName": "kyc-level-phone-otp",
+  "requiredScenarioState": "FIRST_DEPOSIT_VERIFIED",
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/azamra-user-id/completed-kyc"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "azamra-user-id",
+      "completedKyc": {
+        "kyc_fineract": {
+          "phone_otp": { "completed": true },
+          "legal_acceptance": { "completed": false },
+          "first_deposit": { "completed": true }
+        }
+      }
+    }
+  }
+}

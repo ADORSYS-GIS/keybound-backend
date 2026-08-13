@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/market/status"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "isOpen": true,
+      "schedule": "Mon-Fri 08:00-16:00",
+      "secondsUntilClose": 3600,
+      "secondsUntilOpen": 0,
+      "timezone": "Africa/Douala"
+    }
+  }
+}

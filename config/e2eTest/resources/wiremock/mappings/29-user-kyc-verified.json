@@ -1,0 +1,23 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/first-deposit-verified-user/completed-kyc"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "first-deposit-verified-user",
+      "completedKyc": {
+        "kyc_fineract": {
+          "phone_otp": { "completed": true },
+          "legal_acceptance": { "completed": true },
+          "first_deposit": { "completed": true }
+        }
+      }
+    }
+  }
+}

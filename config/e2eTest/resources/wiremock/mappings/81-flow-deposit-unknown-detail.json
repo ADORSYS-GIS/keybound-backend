@@ -1,0 +1,55 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/flows/flow-deposit-unknown"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "flow": {
+        "id": "flow-deposit-unknown",
+        "humanId": "H-DUNKNOWN",
+        "sessionId": "session-1",
+        "flowType": "first_deposit",
+        "status": "RUNNING",
+        "currentStep": "step-init-first-deposit-unknown",
+        "stepIds": ["step-init-first-deposit-unknown"],
+        "context": {
+          "amount": "15000",
+          "currency": "XAF",
+          "step_output": {
+            "resolve_recipient": {
+              "recipientContact": {
+                "fullName": "Agent Orange",
+                "phoneNumber": "+237699111222"
+              }
+            }
+          }
+        },
+        "createdAt": "2026-03-07T00:00:00Z",
+        "updatedAt": "2026-03-07T00:00:00Z"
+      },
+      "steps": [
+        {
+          "id": "step-init-first-deposit-unknown",
+          "humanId": "H-DUNKNOWN",
+          "flowId": "flow-deposit-unknown",
+          "stepType": "init_first_deposit",
+          "actor": "USER",
+          "status": "PENDING_INPUT",
+          "input": null,
+          "output": null,
+          "error": null,
+          "attemptNo": 1,
+          "createdAt": "2026-03-07T00:00:00Z",
+          "updatedAt": "2026-03-07T00:00:00Z",
+          "finishedAt": null
+        }
+      ]
+    }
+  }
+}

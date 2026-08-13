@@ -251,12 +251,19 @@ mod axum_impl {
         http::StatusCode,
         response::{IntoResponse, Response},
     };
+    use tracing::error;
 
     impl IntoResponse for Error {
         fn into_response(self) -> Response {
             let meta = self.meta();
             let status =
                 StatusCode::from_u16(meta.status_code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            error!(
+                status = %status.as_u16(),
+                error_key = %meta.error_key,
+                message = %meta.message,
+                "request failed"
+            );
             (status, Json(meta.payload())).into_response()
         }
     }

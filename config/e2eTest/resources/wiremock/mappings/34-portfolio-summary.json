@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/portfolio"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "totalValue": 10250.0,
+      "totalCostBasis": 9500.0,
+      "unrealizedPnl": 750.0,
+      "unrealizedPnlPercent": 7.89,
+      "positions": [
+        {
+          "assetId": "asset-1",
+          "symbol": "SYE",
+          "name": "Solar Yield ETF",
+          "totalUnits": 100.0,
+          "avgPurchasePrice": 95.0,
+          "currentPrice": 102.5,
+          "marketValue": 10250.0,
+          "costBasis": 9500.0,
+          "unrealizedPnl": 750.0,
+          "unrealizedPnlPercent": 7.89,
+          "realizedPnl": 0.0
+        }
+      ],
+      "allocations": [
+        {
+          "category": "STOCKS",
+          "totalValue": 10250.0,
+          "percentage": 100.0
+        }
+      ],
+      "estimatedAnnualYieldPercent": 4.2,
+      "categoryCount": 1
+    }
+  }
+}

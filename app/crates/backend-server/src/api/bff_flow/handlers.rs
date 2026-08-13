@@ -3,7 +3,7 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use backend_core::Error;
-use tracing::instrument;
+use tracing::{debug, error, instrument};
 
 use crate::api::BackendApi;
 
@@ -44,8 +44,19 @@ pub async fn get_completed_kyc(
     Path(user_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<CompletedKycResponse>, Error> {
-    let caller_id = service::require_user_id(&api, &headers).await?;
-    let completed_kyc = service::get_completed_kyc(&api, user_id, caller_id).await?;
+    debug!(%user_id, "get_completed_kyc handler start");
+    let caller_id = service::require_user_id(&api, &headers).await.map_err(|err| {
+        error!(%user_id, error = %err, "require_user_id failed in get_completed_kyc");
+        err
+    })?;
+    debug!(%user_id, %caller_id, "get_completed_kyc caller authorized");
+    let completed_kyc = service::get_completed_kyc(&api, user_id.clone(), caller_id.clone())
+        .await
+        .map_err(|err| {
+            error!(%user_id, %caller_id, error = %err, "get_completed_kyc failed");
+            err
+        })?;
+    debug!(%user_id, %caller_id, "get_completed_kyc returning success");
     Ok(Json(completed_kyc))
 }
 

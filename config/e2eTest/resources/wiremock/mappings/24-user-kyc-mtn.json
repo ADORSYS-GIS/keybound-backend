@@ -1,0 +1,23 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/azamra-user-mtn-id/completed-kyc"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "azamra-user-mtn-id",
+      "completedKyc": {
+        "kyc_fineract": {
+          "phone_otp": { "completed": false },
+          "legal_acceptance": { "completed": false },
+          "first_deposit": { "completed": false }
+        }
+      }
+    }
+  }
+}

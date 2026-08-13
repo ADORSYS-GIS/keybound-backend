@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/favorites"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": [
+      {
+        "assetId": "asset-1",
+        "symbol": "SYE",
+        "name": "Solar Yield ETF",
+        "currentPrice": 102.5,
+        "change24hPercent": 1.23
+      }
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/accounts/savings/101/transactions"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "transactions": [
+        {
+          "id": 9001,
+          "transactionType": {
+            "id": 1,
+            "code": "DEPOSIT",
+            "value": "DEPOSIT"
+          },
+          "accountId": 101,
+          "accountNo": "SV-0001",
+          "date": [2026, 3, 1],
+          "amount": 5000.0,
+          "runningBalance": 5000.0,
+          "reversed": false,
+          "submittedOnDate": [2026, 3, 1],
+          "currency": {
+            "code": "XAF"
+          }
+        },
+        {
+          "id": 9002,
+          "transactionType": {
+            "id": 2,
+            "code": "WITHDRAWAL",
+            "value": "WITHDRAWAL"
+          },
+          "accountId": 101,
+          "accountNo": "SV-0001",
+          "date": [2026, 3, 2],
+          "amount": 1000.0,
+          "runningBalance": 4000.0,
+          "reversed": false,
+          "submittedOnDate": [2026, 3, 2],
+          "currency": {
+            "code": "XAF"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/users/mtn-user-id"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "userId": "mtn-user-id",
+      "realm": "azamra-realm",
+      "username": "mtn-user",
+      "email": "mtn@azamra.test",
+      "emailVerified": true,
+      "disabled": false,
+      "fullName": "Mtn User",
+      "phoneNumber": "+237659999999",
+      "metadata": { "savingsAccountId": 101 },
+      "createdAt": "2026-03-07T00:00:00Z",
+      "updatedAt": "2026-03-07T00:00:00Z"
+    }
+  }
+}

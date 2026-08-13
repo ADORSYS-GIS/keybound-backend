@@ -1,0 +1,55 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPath": "/flow/flows/flow-deposit-mtn"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "flow": {
+        "id": "flow-deposit-mtn",
+        "humanId": "H-DMTN",
+        "sessionId": "session-1",
+        "flowType": "first_deposit",
+        "status": "RUNNING",
+        "currentStep": "step-init-first-deposit-mtn",
+        "stepIds": ["step-init-first-deposit-mtn"],
+        "context": {
+          "amount": "15000",
+          "currency": "XAF",
+          "step_output": {
+            "resolve_recipient": {
+              "recipientContact": {
+                "fullName": "Agent MTN",
+                "phoneNumber": "+237659000333"
+              }
+            }
+          }
+        },
+        "createdAt": "2026-03-07T00:00:00Z",
+        "updatedAt": "2026-03-07T00:00:00Z"
+      },
+      "steps": [
+        {
+          "id": "step-init-first-deposit-mtn",
+          "humanId": "H-DMTN",
+          "flowId": "flow-deposit-mtn",
+          "stepType": "init_first_deposit",
+          "actor": "USER",
+          "status": "PENDING_INPUT",
+          "input": null,
+          "output": null,
+          "error": null,
+          "attemptNo": 1,
+          "createdAt": "2026-03-07T00:00:00Z",
+          "updatedAt": "2026-03-07T00:00:00Z",
+          "finishedAt": null
+        }
+      ]
+    }
+  }
+}

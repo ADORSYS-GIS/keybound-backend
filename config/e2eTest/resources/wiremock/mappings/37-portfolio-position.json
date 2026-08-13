@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "^/api/portfolio/positions/[^/]+$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "assetId": "asset-1",
+      "symbol": "SYE",
+      "name": "Solar Yield ETF",
+      "totalUnits": 100.0,
+      "avgPurchasePrice": 95.0,
+      "currentPrice": 102.5,
+      "marketValue": 10250.0,
+      "costBasis": 9500.0,
+      "unrealizedPnl": 750.0,
+      "unrealizedPnlPercent": 7.89,
+      "realizedPnl": 0.0
+    }
+  }
+}

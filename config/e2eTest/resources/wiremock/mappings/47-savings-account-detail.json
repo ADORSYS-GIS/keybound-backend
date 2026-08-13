@@ -1,0 +1,56 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "^/api/accounts/savings/[^/]+$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": 101,
+      "accountNo": "SV-0001",
+      "clientId": 501,
+      "clientName": "Azamra User",
+      "savingsProductId": 201,
+      "savingsProductName": "Azamra Youth Savings",
+      "status": {
+        "id": 1,
+        "code": "ACTIVE",
+        "value": "Active"
+      },
+      "timeline": {
+        "submittedOnDate": [2024, 1, 5],
+        "approvedOnDate": [2024, 1, 10],
+        "activatedOnDate": [2024, 1, 11]
+      },
+      "currency": {
+        "code": "XAF",
+        "name": "Central African CFA Franc",
+        "decimalPlaces": 0,
+        "displaySymbol": "FCFA",
+        "nameCode": "currency.XAF",
+        "displayLabel": "XAF"
+      },
+      "summary": {
+        "currency": {
+          "code": "XAF",
+          "name": "Central African CFA Franc",
+          "decimalPlaces": 0,
+          "displaySymbol": "FCFA",
+          "nameCode": "currency.XAF",
+          "displayLabel": "XAF"
+        },
+        "totalDeposits": 5000.0,
+        "totalWithdrawals": 1000.0,
+        "totalInterestEarned": 120.0,
+        "totalInterestPosted": 100.0,
+        "accountBalance": 4120.0,
+        "totalOverdraftInterestDerived": 0.0,
+        "interestNotPosted": 0.0,
+        "availableBalance": 4120.0
+      }
+    }
+  }
+}
