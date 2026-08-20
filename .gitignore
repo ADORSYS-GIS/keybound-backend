@@ -13,3 +13,4 @@ gen*
 *.log
 
 node_modules
+.docker/downloaded/
