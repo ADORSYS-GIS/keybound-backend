@@ -139,6 +139,19 @@ pub struct SigningKeyRow {
     pub is_active: bool,
 }
 
+/// Recovery device binding idempotency record stored in recovery_idempotency table.
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::recovery_idempotency)]
+pub struct RecoveryIdempotencyRow {
+    pub idempotency_key: String,
+    pub recovery_case_id: String,
+    pub request_hash: String,
+    pub bound_user_id: String,
+    pub device_id: String,
+    pub binding_operation_id: String,
+    pub created_at: DateTime<Utc>,
+}
+
 /// State machine instance - represents a single KYC flow execution.
 impl diesel::associations::HasTable for UserRow {
     type Table = crate::schema::app_user::table;
@@ -201,6 +214,14 @@ impl diesel::associations::HasTable for SigningKeyRow {
 
     fn table() -> Self::Table {
         crate::schema::signing_key::table
+    }
+}
+
+impl diesel::associations::HasTable for RecoveryIdempotencyRow {
+    type Table = crate::schema::recovery_idempotency::table;
+
+    fn table() -> Self::Table {
+        crate::schema::recovery_idempotency::table
     }
 }
 
@@ -269,5 +290,13 @@ impl<'a> diesel::Identifiable for &'a SigningKeyRow {
 
     fn id(self) -> Self::Id {
         self.kid.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a RecoveryIdempotencyRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.idempotency_key.as_str()
     }
 }

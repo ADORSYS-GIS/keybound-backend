@@ -133,6 +133,19 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    /// Recovery device binding idempotency records
+    recovery_idempotency (idempotency_key) {
+        idempotency_key -> Text,
+        recovery_case_id -> Text,
+        request_hash -> Text,
+        bound_user_id -> Text,
+        device_id -> Text,
+        binding_operation_id -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
 // Foreign key relationships
 diesel::joinable!(app_user_data -> app_user (user_id));
 diesel::joinable!(device -> app_user (user_id));
@@ -149,4 +162,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     flow_session,
     flow_step,
     signing_key,
+    recovery_idempotency,
 );
