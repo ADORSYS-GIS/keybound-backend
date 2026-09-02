@@ -372,36 +372,32 @@ impl DeviceRepo for DeviceRepository {
                     last_seen_at: Some(now),
                 };
 
-                let insert_device_res = diesel::insert_into(device_dsl::device)
+                diesel::insert_into(device_dsl::device)
                     .values(&new_device)
+                    .on_conflict_do_nothing()
                     .execute(conn)
-                    .await;
+                    .await
+                    .map_err(Into::<Error>::into)?;
 
-                if let Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) =
-                    insert_device_res
+                let winner = device_dsl::device
+                    .filter(
+                        device_dsl::device_id
+                            .eq(&req.device_id)
+                            .or(device_dsl::jkt.eq(&req.jkt)),
+                    )
+                    .select(db::DeviceRow::as_select())
+                    .first::<db::DeviceRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(winner) = winner
+                    && winner.user_id != req.target_user_id
                 {
-                    let winner = device_dsl::device
-                        .filter(
-                            device_dsl::device_id
-                                .eq(&req.device_id)
-                                .or(device_dsl::jkt.eq(&req.jkt)),
-                        )
-                        .select(db::DeviceRow::as_select())
-                        .first::<db::DeviceRow>(conn)
-                        .await
-                        .optional()
-                        .map_err(Into::<Error>::into)?;
-
-                    if let Some(winner) = winner
-                        && winner.user_id != req.target_user_id
-                    {
-                        return Err(Error::conflict(
-                            "DEVICE_ALREADY_BOUND",
-                            "Device already bound to a different user",
-                        ));
-                    }
-                } else {
-                    insert_device_res.map_err(Into::<Error>::into)?;
+                    return Err(Error::conflict(
+                        "DEVICE_ALREADY_BOUND",
+                        "Device already bound to a different user",
+                    ));
                 }
 
                 // 6. Insert idempotency record
@@ -418,9 +414,34 @@ impl DeviceRepo for DeviceRepository {
 
                 diesel::insert_into(recip_dsl::recovery_idempotency)
                     .values(&new_idempotency)
+                    .on_conflict_do_nothing()
                     .execute(conn)
                     .await
                     .map_err(Into::<Error>::into)?;
+
+                let winner = recip_dsl::recovery_idempotency
+                    .filter(
+                        recip_dsl::idempotency_key
+                            .eq(idempotency_key_val)
+                            .or(recip_dsl::binding_operation_id.eq(&req.binding_operation_id)),
+                    )
+                    .first::<db::RecoveryIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(winner) = winner {
+                    if winner.request_hash == request_hash_val
+                        && winner.recovery_case_id == recovery_case_id_val
+                    {
+                        return Ok(winner.device_record_id);
+                    } else {
+                        return Err(Error::conflict(
+                            "IDEMPOTENCY_CONFLICT",
+                            "Idempotency key or operation ID reused with modified payload",
+                        ));
+                    }
+                }
 
                 Ok(record_id)
             })
