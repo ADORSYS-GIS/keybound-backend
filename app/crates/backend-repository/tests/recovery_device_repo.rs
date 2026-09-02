@@ -83,6 +83,8 @@ async fn recovery_device_bind_flow() -> Result<()> {
     assert_eq!(stored_idempotency.bound_user_id, user_id);
     assert_eq!(stored_idempotency.device_id, device_id);
     assert_eq!(stored_idempotency.binding_operation_id, binding_op_id);
+    assert_eq!(stored_idempotency.device_record_id, record_id);
+
 
     // 4. Cleanup test data
     {

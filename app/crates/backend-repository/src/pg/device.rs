@@ -3,9 +3,9 @@ use backend_core::{Error, async_trait};
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use diesel_async::AsyncPgConnection;
-use diesel_async::RunQueryDsl;
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use diesel_async::pooled_connection::deadpool::Pool;
+
 use tracing::{debug, instrument};
 
 #[derive(Clone)]
@@ -270,8 +270,8 @@ impl DeviceRepo for DeviceRepository {
         req: &kc_map::RecoveryBindRequest,
     ) -> RepoResult<String> {
         debug!(
-            "Binding recovery device: {} to target_user: {}",
-            req.device_id, req.target_user_id
+            "Binding recovery device: {} to target_user: {} in realm: {}",
+            req.device_id, req.target_user_id, req.realm
         );
         use backend_model::schema::app_user::dsl as user_dsl;
         use backend_model::schema::device::dsl as device_dsl;
@@ -279,120 +279,153 @@ impl DeviceRepo for DeviceRepository {
 
         let mut conn = self.get_conn().await?;
 
-        // 1. Verify target user exists
-        let user_count = user_dsl::app_user
-            .filter(user_dsl::user_id.eq(&req.target_user_id))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(Into::<Error>::into)?;
+        conn.transaction::<_, Error, _>(|conn| {
+            Box::pin(async move {
+                // 1. Check existing idempotency by idempotency_key OR binding_operation_id
+                let existing_op = recip_dsl::recovery_idempotency
+                    .filter(
+                        recip_dsl::idempotency_key
+                            .eq(idempotency_key_val)
+                            .or(recip_dsl::binding_operation_id.eq(&req.binding_operation_id)),
+                    )
+                    .first::<db::RecoveryIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
 
-        if user_count == 0 {
-            return Err(Error::bad_request(
-                "USER_NOT_FOUND",
-                "Target user does not exist",
-            ));
-        }
+                if let Some(existing) = existing_op {
+                    if existing.request_hash == request_hash_val
+                        && existing.recovery_case_id == recovery_case_id_val
+                    {
+                        return Ok(existing.device_record_id);
+                    } else {
+                        return Err(Error::conflict(
+                            "IDEMPOTENCY_CONFLICT",
+                            "Idempotency key or operation ID reused with modified payload",
+                        ));
+                    }
+                }
 
-        // 2. Canonicalize JWK
-        let mut sorted_jwk: std::collections::BTreeMap<String, serde_json::Value> =
-            std::collections::BTreeMap::new();
-        for (k, v) in &req.public_jwk {
-            sorted_jwk.insert(k.clone(), v.0.clone());
-        }
-        let public_jwk_str = serde_json::to_string(&sorted_jwk).map_err(|e| {
-            Error::Server(format!(
-                "Failed to serialize public_jwk for recovery device bind: {e}"
-            ))
-        })?;
+                // 2. Verify target user exists AND matches specified realm
+                let user_count = user_dsl::app_user
+                    .filter(user_dsl::user_id.eq(&req.target_user_id))
+                    .filter(user_dsl::realm.eq(&req.realm))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
 
-        let record_id = backend_model::kc::device_record_id(&req.device_id, &public_jwk_str);
-        let now = chrono::Utc::now();
+                if user_count == 0 {
+                    return Err(Error::bad_request(
+                        "USER_NOT_FOUND",
+                        "Target user does not exist in the specified realm",
+                    ));
+                }
 
-        // 3. Check for conflicting device binding with another user
-        let conflicting = device_dsl::device
-            .filter(
-                device_dsl::device_id
-                    .eq(&req.device_id)
-                    .or(device_dsl::jkt.eq(&req.jkt)),
-            )
-            .select(db::DeviceRow::as_select())
-            .first::<db::DeviceRow>(&mut conn)
-            .await
-            .optional()
-            .map_err(Into::<Error>::into)?;
+                // 3. Canonicalize JWK
+                let mut sorted_jwk: std::collections::BTreeMap<String, serde_json::Value> =
+                    std::collections::BTreeMap::new();
+                for (k, v) in &req.public_jwk {
+                    sorted_jwk.insert(k.clone(), v.0.clone());
+                }
+                let public_jwk_str = serde_json::to_string(&sorted_jwk).map_err(|e| {
+                    Error::Server(format!(
+                        "Failed to serialize public_jwk for recovery device bind: {e}"
+                    ))
+                })?;
 
-        if let Some(existing) = conflicting
-            && existing.user_id != req.target_user_id
-        {
-            return Err(Error::conflict(
-                "DEVICE_ALREADY_BOUND",
-                "Device already bound to a different user",
-            ));
-        }
+                let record_id = backend_model::kc::device_record_id(&req.device_id, &public_jwk_str);
+                let now = chrono::Utc::now();
 
-        // 4. Insert or verify device binding
-        let new_device = db::DeviceRow {
-            device_id: req.device_id.clone(),
-            user_id: req.target_user_id.clone(),
-            jkt: req.jkt.clone(),
-            public_jwk: public_jwk_str,
-            device_record_id: record_id.clone(),
-            status: "ACTIVE".to_string(),
-            label: None,
-            created_at: now,
-            last_seen_at: Some(now),
-        };
+                // 4. Check for conflicting device binding with another user
+                let conflicting = device_dsl::device
+                    .filter(
+                        device_dsl::device_id
+                            .eq(&req.device_id)
+                            .or(device_dsl::jkt.eq(&req.jkt)),
+                    )
+                    .select(db::DeviceRow::as_select())
+                    .first::<db::DeviceRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
 
-        let insert_device_res = diesel::insert_into(device_dsl::device)
-            .values(&new_device)
-            .execute(&mut conn)
-            .await;
+                if let Some(existing) = conflicting
+                    && existing.user_id != req.target_user_id
+                {
+                    return Err(Error::conflict(
+                        "DEVICE_ALREADY_BOUND",
+                        "Device already bound to a different user",
+                    ));
+                }
 
-        if let Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) =
-            insert_device_res
-        {
-            let winner = device_dsl::device
-                .filter(
-                    device_dsl::device_id
-                        .eq(&req.device_id)
-                        .or(device_dsl::jkt.eq(&req.jkt)),
-                )
-                .select(db::DeviceRow::as_select())
-                .first::<db::DeviceRow>(&mut conn)
-                .await
-                .optional()
-                .map_err(Into::<Error>::into)?;
+                // 5. Insert or verify device binding
+                let new_device = db::DeviceRow {
+                    device_id: req.device_id.clone(),
+                    user_id: req.target_user_id.clone(),
+                    jkt: req.jkt.clone(),
+                    public_jwk: public_jwk_str,
+                    device_record_id: record_id.clone(),
+                    status: "ACTIVE".to_string(),
+                    label: None,
+                    created_at: now,
+                    last_seen_at: Some(now),
+                };
 
-            if let Some(winner) = winner
-                && winner.user_id != req.target_user_id
-            {
-                return Err(Error::conflict(
-                    "DEVICE_ALREADY_BOUND",
-                    "Device already bound to a different user",
-                ));
-            }
-        } else {
-            insert_device_res.map_err(Into::<Error>::into)?;
-        }
+                let insert_device_res = diesel::insert_into(device_dsl::device)
+                    .values(&new_device)
+                    .execute(conn)
+                    .await;
 
-        // 5. Insert idempotency record
-        let new_idempotency = db::RecoveryIdempotencyRow {
-            idempotency_key: idempotency_key_val.to_string(),
-            recovery_case_id: recovery_case_id_val.to_string(),
-            request_hash: request_hash_val.to_string(),
-            bound_user_id: req.target_user_id.clone(),
-            device_id: req.device_id.clone(),
-            binding_operation_id: req.binding_operation_id.clone(),
-            created_at: now,
-        };
+                if let Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) =
+                    insert_device_res
+                {
+                    let winner = device_dsl::device
+                        .filter(
+                            device_dsl::device_id
+                                .eq(&req.device_id)
+                                .or(device_dsl::jkt.eq(&req.jkt)),
+                        )
+                        .select(db::DeviceRow::as_select())
+                        .first::<db::DeviceRow>(conn)
+                        .await
+                        .optional()
+                        .map_err(Into::<Error>::into)?;
 
-        diesel::insert_into(recip_dsl::recovery_idempotency)
-            .values(&new_idempotency)
-            .execute(&mut conn)
-            .await
-            .map_err(Into::<Error>::into)?;
+                    if let Some(winner) = winner
+                        && winner.user_id != req.target_user_id
+                    {
+                        return Err(Error::conflict(
+                            "DEVICE_ALREADY_BOUND",
+                            "Device already bound to a different user",
+                        ));
+                    }
+                } else {
+                    insert_device_res.map_err(Into::<Error>::into)?;
+                }
 
-        Ok(record_id)
+                // 6. Insert idempotency record
+                let new_idempotency = db::RecoveryIdempotencyRow {
+                    idempotency_key: idempotency_key_val.to_string(),
+                    recovery_case_id: recovery_case_id_val.to_string(),
+                    request_hash: request_hash_val.to_string(),
+                    bound_user_id: req.target_user_id.clone(),
+                    device_id: req.device_id.clone(),
+                    binding_operation_id: req.binding_operation_id.clone(),
+                    device_record_id: record_id.clone(),
+                    created_at: now,
+                };
+
+                diesel::insert_into(recip_dsl::recovery_idempotency)
+                    .values(&new_idempotency)
+                    .execute(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+
+                Ok(record_id)
+            })
+        })
+        .await
     }
 }
+

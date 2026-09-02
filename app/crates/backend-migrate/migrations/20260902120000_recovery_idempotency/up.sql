@@ -5,7 +5,9 @@ CREATE TABLE recovery_idempotency (
   bound_user_id text NOT NULL,
   device_id text NOT NULL,
   binding_operation_id text NOT NULL,
+  device_record_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX recovery_idempotency_binding_op_idx ON recovery_idempotency(binding_operation_id);
+CREATE UNIQUE INDEX recovery_idempotency_binding_op_uq ON recovery_idempotency(binding_operation_id);
+

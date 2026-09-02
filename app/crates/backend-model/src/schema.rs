@@ -142,9 +142,11 @@ diesel::table! {
         bound_user_id -> Text,
         device_id -> Text,
         binding_operation_id -> Text,
+        device_record_id -> Text,
         created_at -> Timestamptz,
     }
 }
+
 
 // Foreign key relationships
 diesel::joinable!(app_user_data -> app_user (user_id));

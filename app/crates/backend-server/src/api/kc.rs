@@ -218,9 +218,11 @@ impl Enrollment<Error> for BackendApi {
     }
 }
 
-fn compute_recovery_bind_hash(body: &models::RecoveryBindRequest) -> String {
+fn compute_recovery_bind_hash(recovery_case_id: &str, body: &models::RecoveryBindRequest) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
+    hasher.update(recovery_case_id.as_bytes());
+    hasher.update(b"|");
     hasher.update(body.realm.as_bytes());
     hasher.update(b"|");
     hasher.update(body.target_user_id.as_bytes());
@@ -289,7 +291,7 @@ impl Recovery<Error> for BackendApi {
             )));
         }
 
-        let req_hash = compute_recovery_bind_hash(body);
+        let req_hash = compute_recovery_bind_hash(&path_params.recovery_case_id, body);
 
         // 3. Check for existing idempotency record
         let existing_idempotency = self
@@ -299,18 +301,20 @@ impl Recovery<Error> for BackendApi {
             .await?;
 
         if let Some(existing) = existing_idempotency {
-            if existing.request_hash == req_hash {
+            if existing.request_hash == req_hash
+                && existing.recovery_case_id == path_params.recovery_case_id
+            {
                 return Ok(RecoveryBindResponse::Status200_Bound(
                     models::EnrollmentBindResponse {
                         status: models::EnrollmentBindResponseStatus::AlreadyBound,
-                        device_record_id: None,
+                        device_record_id: Some(existing.device_record_id),
                         bound_user_id: existing.bound_user_id,
                     },
                 ));
             } else {
                 return Ok(RecoveryBindResponse::Status409_Conflict(kc_error(
                     "CONFLICT",
-                    "Idempotency-Key reused with modified payload",
+                    "Idempotency-Key reused with modified payload or path case ID",
                 )));
             }
         }
@@ -357,6 +361,7 @@ impl Recovery<Error> for BackendApi {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,8 +398,8 @@ mod tests {
             binding_operation_id: "op_001".to_string(),
         };
 
-        let hash1 = compute_recovery_bind_hash(&req1);
-        let hash2 = compute_recovery_bind_hash(&req2);
+        let hash1 = compute_recovery_bind_hash("case_123", &req1);
+        let hash2 = compute_recovery_bind_hash("case_123", &req2);
         assert_eq!(hash1, hash2);
 
         // Modified payload should produce different hash
@@ -408,7 +413,12 @@ mod tests {
             binding_operation_id: "op_001".to_string(),
         };
 
-        let hash_mod = compute_recovery_bind_hash(&req_modified);
+        let hash_mod = compute_recovery_bind_hash("case_123", &req_modified);
         assert_ne!(hash1, hash_mod);
+
+        // Modified recovery_case_id should also produce different hash
+        let hash_diff_case = compute_recovery_bind_hash("case_999", &req1);
+        assert_ne!(hash1, hash_diff_case);
     }
 }
+

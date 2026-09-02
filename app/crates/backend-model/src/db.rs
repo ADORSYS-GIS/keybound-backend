@@ -149,8 +149,10 @@ pub struct RecoveryIdempotencyRow {
     pub bound_user_id: String,
     pub device_id: String,
     pub binding_operation_id: String,
+    pub device_record_id: String,
     pub created_at: DateTime<Utc>,
 }
+
 
 /// State machine instance - represents a single KYC flow execution.
 impl diesel::associations::HasTable for UserRow {
