@@ -61,6 +61,10 @@ services:
         RELEASE_META=$$(curl -fsSL \
           -H "Authorization: Bearer $$GITHUB_TOKEN" \
           -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/keybound-v$$KEYCLOAK_PLUGIN_VERSION" || \
+          curl -fsSL \
+          -H "Authorization: Bearer $$GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
           "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/v$$KEYCLOAK_PLUGIN_VERSION")
         echo "Found $$(echo "$$RELEASE_META" | jq '.assets | length') assets in release"
 
