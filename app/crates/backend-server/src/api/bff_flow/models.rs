@@ -55,6 +55,17 @@ pub struct CompletedKycResponse {
     pub completed_kyc: Value,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LookupByPhoneRequest {
+    pub phone: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LookupByPhoneResponse {
+    pub users: Vec<UserResponse>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionResponse {

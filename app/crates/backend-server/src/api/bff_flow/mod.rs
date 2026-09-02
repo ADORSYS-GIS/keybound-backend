@@ -2,7 +2,10 @@ mod handlers;
 mod models;
 pub(crate) mod service;
 
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    routing::{get, post},
+};
 
 use super::BackendApi;
 
@@ -13,6 +16,7 @@ pub use models::*;
 #[openapi(
     paths(
         handlers::get_user,
+        handlers::lookup_user_by_phone,
         handlers::get_completed_kyc,
         handlers::list_sessions,
         handlers::create_session,
@@ -27,6 +31,8 @@ pub use models::*;
     components(schemas(
         UserResponse,
         CompletedKycResponse,
+        LookupByPhoneRequest,
+        LookupByPhoneResponse,
         CreateSessionRequest,
         AddFlowRequest,
         SubmitStepRequest,
@@ -51,6 +57,10 @@ pub struct BffFlowOpenApi;
 
 pub fn router(api: BackendApi) -> Router {
     Router::new()
+        .route(
+            "/users/lookup-by-phone",
+            post(handlers::lookup_user_by_phone),
+        )
         .route("/users/{user_id}", get(handlers::get_user))
         .route(
             "/users/{user_id}/completed-kyc",

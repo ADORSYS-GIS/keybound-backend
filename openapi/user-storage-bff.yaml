@@ -14,6 +14,36 @@ tags:
   - name: steps
 
 paths:
+  /users/lookup-by-phone:
+    post:
+      tags: [ users ]
+      summary: Look up candidate accounts by phone number
+      description: >
+        Server-to-server directory lookup used by the tokenization BFF for
+        account recovery phone resolution. Returns EVERY account whose
+        phone_number or username matches the supplied E.164 phone (users
+        registered by phone have the phone as their username) so the caller
+        can enforce its own uniqueness/ambiguity rules. POST + JSON body so
+        the literal `+` in E.164 phones survives transit. NOTE: the older
+        /flow/ path prefixes in this document are stale; the live surface is
+        mounted at the bff base path with the routes below.
+      operationId: lookupFlowUserByPhone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LookupByPhoneRequest"
+      responses:
+        "200":
+          description: Matching accounts (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LookupByPhoneResponse"
+        "400":
+          description: Phone missing or invalid
+
   /flow/users/{userId}:
     get:
       tags: [ users ]
@@ -299,6 +329,26 @@ components:
           type: object
           additionalProperties: true
       required: [ userId, completedKyc ]
+
+    LookupByPhoneRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        phone:
+          type: string
+          minLength: 1
+          description: E.164-style phone number to resolve.
+      required: [ phone ]
+
+    LookupByPhoneResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/InternalUserRecord"
+      required: [ users ]
 
     UploadMethod:
       type: string

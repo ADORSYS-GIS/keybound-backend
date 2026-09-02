@@ -1,6 +1,7 @@
 use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, FlowDetailResponse, FlowResponse,
-    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    LookupByPhoneRequest, LookupByPhoneResponse, SessionDetailResponse, SessionResponse,
+    StepResponse, SubmitStepRequest, UserResponse,
 };
 use crate::api::BackendApi;
 use crate::flows::registry::{actor_label, waiting_status};
@@ -1057,6 +1058,34 @@ pub async fn get_user(
 }
 
 #[instrument(skip(api))]
+pub async fn lookup_users_by_phone(
+    api: &BackendApi,
+    body: LookupByPhoneRequest,
+) -> Result<LookupByPhoneResponse, Error> {
+    let phone = body.phone.trim();
+    if phone.is_empty() {
+        return Err(Error::bad_request("INVALID_PHONE", "phone is required"));
+    }
+
+    let rows = api.state.user.find_users_by_phone(phone).await?;
+    let mut users = Vec::with_capacity(rows.len());
+    for row in rows {
+        let metadata = api.state.user.get_user_metadata(&row.user_id).await?;
+        users.push(UserResponse::from_row_with_metadata(row, metadata));
+    }
+
+    Ok(LookupByPhoneResponse { users })
+}
+
+pub async fn require_authenticated_caller(
+    api: &BackendApi,
+    headers: &HeaderMap,
+) -> Result<(), Error> {
+    api.require_bff_claims(headers)?;
+    Ok(())
+}
+
+#[instrument(skip(api))]
 pub async fn get_completed_kyc(
     api: &BackendApi,
     user_id: String,
@@ -1084,4 +1113,111 @@ pub async fn get_completed_kyc(
         user_id,
         completed_kyc,
     })
+}
+
+#[cfg(test)]
+mod lookup_by_phone_tests {
+    use super::*;
+    use crate::test_utils::{MockUserRepo, TestAppStateBuilder};
+    use backend_model::db::UserRow;
+    use chrono::Utc;
+    use std::sync::Arc;
+
+    fn user_row(user_id: &str, username: &str, phone: Option<String>, disabled: bool) -> UserRow {
+        UserRow {
+            user_id: user_id.to_owned(),
+            realm: "fineract".to_owned(),
+            username: username.to_owned(),
+            full_name: None,
+            email: None,
+            email_verified: false,
+            phone_number: phone,
+            disabled,
+            attributes: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn api_with(user: MockUserRepo) -> BackendApi {
+        let state = TestAppStateBuilder::new().with_user(Arc::new(user)).build();
+        let oidc = state.oidc_state.clone();
+        let signature = state.signature_state.clone();
+        BackendApi::new(Arc::new(state), oidc, signature)
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_returns_all_candidates_with_metadata() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone()
+            .withf(move |p: &str| p == phone)
+            .returning(|_| {
+                Ok(vec![
+                    user_row("usr-1", phone, Some(phone.to_owned()), false),
+                    user_row("usr-2", phone, Some(phone.to_owned()), true),
+                ])
+            });
+        user.expect_get_user_metadata()
+            .returning(|_| Ok(json!({ "kyc": { "fineractClientId": "c-1" } })));
+
+        let api = api_with(user);
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.users.len(), 2);
+        assert_eq!(response.users[0].user_id, "usr-1");
+        assert!(!response.users[0].disabled);
+        assert!(response.users[1].disabled);
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_returns_empty_list_when_no_candidates() {
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone().returning(|_| Ok(vec![]));
+
+        let api = api_with(user);
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: "+237699999999".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(response.users.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_rejects_blank_phone() {
+        let user = MockUserRepo::new();
+        let api = api_with(user);
+        let error = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: "   ".to_owned(),
+            },
+        )
+        .await
+        .unwrap_err();
+
+        match error {
+            Error::Http {
+                error_key,
+                status_code,
+                ..
+            } => {
+                assert_eq!(status_code, 400);
+                assert_eq!(error_key, "INVALID_PHONE");
+            }
+            other => panic!("expected 400 Http error, got {:?}", other),
+        }
+    }
 }
