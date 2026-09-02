@@ -40,7 +40,7 @@ services:
             echo "ERROR: Asset '$$asset_name' not found in release v$$KEYCLOAK_PLUGIN_VERSION"
             echo "Available assets:"
             echo "$$RELEASE_META" | jq -r '.assets[].name'
-            exit 1
+            return 1
           fi
           curl -fL \
             -H "Authorization: Bearer $$GITHUB_TOKEN" \
@@ -57,19 +57,17 @@ services:
         echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
         download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
 
-        echo "Fetching release metadata for v$$KEYCLOAK_PLUGIN_VERSION...";
-        RELEASE_META=$$(curl -fsSL \
+        echo "Download OpenAPI for Keycloak from pinned recovery contract commit 635ca14...";
+        curl -fL \
           -H "Authorization: Bearer $$GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/keybound-v$$KEYCLOAK_PLUGIN_VERSION" || \
-          curl -fsSL \
-          -H "Authorization: Bearer $$GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/v$$KEYCLOAK_PLUGIN_VERSION")
-        echo "Found $$(echo "$$RELEASE_META" | jq '.assets | length') assets in release"
-
-        echo "Download OpenAPI for Keycloak...";
-        gh_download /data/keycloak-interface.openapi.yaml "backend.open-api.yml"
+          -H "Accept: application/vnd.github.raw" \
+          --retry 8 \
+          --retry-delay 2 \
+          --retry-all-errors \
+          --connect-timeout 10 \
+          --max-time 300 \
+          -o /data/keycloak-interface.openapi.yaml \
+          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/contents/keybound/openapi/backend.open-api.yml?ref=635ca14bdd71e9341678f78ed6a0f6f21d51dd86"
         echo "Downloaded OpenAPI for Keycloak";
 
         echo "Download keybound...";
