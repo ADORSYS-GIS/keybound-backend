@@ -3,8 +3,8 @@ use backend_core::{Error, async_trait};
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 
 use tracing::{debug, instrument};
 
@@ -364,7 +364,7 @@ impl DeviceRepo for DeviceRepository {
                     device_id: req.device_id.clone(),
                     user_id: req.target_user_id.clone(),
                     jkt: req.jkt.clone(),
-                    public_jwk: public_jwk_str,
+                    public_jwk: public_jwk_str.clone(),
                     device_record_id: record_id.clone(),
                     status: "ACTIVE".to_string(),
                     label: None,
@@ -391,13 +391,34 @@ impl DeviceRepo for DeviceRepository {
                     .optional()
                     .map_err(Into::<Error>::into)?;
 
-                if let Some(winner) = winner
-                    && winner.user_id != req.target_user_id
-                {
-                    return Err(Error::conflict(
-                        "DEVICE_ALREADY_BOUND",
-                        "Device already bound to a different user",
-                    ));
+                if let Some(winner) = winner {
+                    if winner.user_id != req.target_user_id {
+                        return Err(Error::conflict(
+                            "DEVICE_ALREADY_BOUND",
+                            "Device already bound to a different user",
+                        ));
+                    }
+                    // Idempotent success must prove the EXACT approved credential is durably
+                    // present in an active state. A same-user row that merely collides on
+                    // device_id or jkt (different key / public JWK / record id) or that sits in
+                    // a revoked/incompatible state must never be reported as a successful
+                    // recovery bind, so we do not write the recovery-idempotency success row.
+                    let exact_credential = winner.device_id == req.device_id
+                        && winner.jkt == req.jkt
+                        && winner.public_jwk == public_jwk_str
+                        && winner.device_record_id == record_id;
+                    if !exact_credential {
+                        return Err(Error::conflict(
+                            "DEVICE_CREDENTIAL_MISMATCH",
+                            "A device row collides on device id or JKT but does not match the approved recovery credential",
+                        ));
+                    }
+                    if winner.status != "ACTIVE" {
+                        return Err(Error::conflict(
+                            "DEVICE_NOT_ACTIVE",
+                            "The approved recovery credential exists but is not in an active state",
+                        ));
+                    }
                 }
 
                 // 6. Insert idempotency record
@@ -449,4 +470,3 @@ impl DeviceRepo for DeviceRepository {
         .await
     }
 }
-
