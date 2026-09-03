@@ -2,7 +2,7 @@ services:
   download-core-tools:
     image: alpine/curl
     environment:
-      KEYCLOAK_PLUGIN_VERSION: "0.2.7"
+      KEYCLOAK_PLUGIN_VERSION: "0.2.6"
       OPENAPI_GENERATOR_VERSION: "7.19.0"
       GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
     command:
@@ -57,26 +57,20 @@ services:
         echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
         download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
 
-        echo "Download OpenAPI for Keycloak from pinned recovery contract commit 635ca14...";
-        curl -fL \
+        echo "Fetching release metadata for v$$KEYCLOAK_PLUGIN_VERSION...";
+        RELEASE_META=$$(curl -fsSL \
           -H "Authorization: Bearer $$GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github.raw" \
-          --retry 8 \
-          --retry-delay 2 \
-          --retry-all-errors \
-          --connect-timeout 10 \
-          --max-time 300 \
-          -o /data/keycloak-interface.openapi.yaml \
-          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/contents/keybound/openapi/backend.open-api.yml?ref=635ca14bdd71e9341678f78ed6a0f6f21d51dd86"
-        echo "Downloaded OpenAPI for Keycloak";
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/v$$KEYCLOAK_PLUGIN_VERSION")
+        echo "Found $$(echo "$$RELEASE_META" | jq '.assets | length') assets in release"
 
-        echo "Download keybound...";
-        if ! gh_download /data/kc-plugins/keycloak-keybound-all.jar "keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"; then echo "WARN: keycloak-keybound-all.jar not present in release; skipping (not required for codegen)"; fi
-        if ! gh_download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"; then echo "WARN: keycloak-keybound-api-gateway-http.jar not present in release; skipping (not required for codegen)"; fi
-        if ! gh_download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"; then echo "WARN: keycloak-keybound-custom-endpoint.jar not present in release; skipping (not required for codegen)"; fi
-        if ! gh_download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"; then echo "WARN: keycloak-keybound-grant-device-key.jar not present in release; skipping (not required for codegen)"; fi
-        if ! gh_download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"; then echo "WARN: keycloak-keybound-user-storage-backend.jar not present in release; skipping (not required for codegen)"; fi
-        echo "Downloaded keybound";
+        echo "Download keybound runtime plugin...";
+        gh_download /data/kc-plugins/keycloak-keybound-all.jar "keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        echo "Downloaded keybound runtime plugin";
 
     volumes:
       - downloaded_data:/data
@@ -162,7 +156,7 @@ configs:
   oas_server_kc:
     content: |
       {
-        "inputSpec": "/data/keycloak-interface.openapi.yaml",
+        "inputSpec": "/openapi/keycloak-interface.openapi.yaml",
         "generatorName": "rust-axum",
         "packageName": "gen_oas_server_kc",
         "packageVersion": "9.9.9"
@@ -178,7 +172,7 @@ configs:
   oas_kc_openapi:
     content: |
       {
-        "inputSpec": "/data/keycloak-interface.openapi.yaml",
+        "inputSpec": "/openapi/keycloak-interface.openapi.yaml",
         "generatorName": "openapi",
         "packageName": "kc_openapi",
         "packageVersion": "9.9.9"
