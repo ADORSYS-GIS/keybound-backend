@@ -32,7 +32,7 @@ paths:
         phones survives transit. NOTE: the older /flow/ path prefixes in
         this document are stale; the live surface is mounted at the bff base
         path with the routes below.
-      operationId: lookupFlowUserByPhone
+      operationId: lookup_user_by_phone
       requestBody:
         required: true
         content:
