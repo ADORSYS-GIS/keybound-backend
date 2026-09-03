@@ -529,6 +529,42 @@ impl UserRepo for UserRepository {
     }
 
     #[instrument(skip(self))]
+    async fn get_metadata_fields_for_users(
+        &self,
+        user_ids: Vec<String>,
+        names: Vec<String>,
+    ) -> RepoResult<std::collections::HashMap<String, serde_json::Value>> {
+        use backend_model::schema::app_user_data::dsl::*;
+        use std::collections::HashMap;
+
+        let mut conn = self.get_conn().await?;
+
+        if user_ids.is_empty() || names.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows = app_user_data
+            .filter(user_id.eq_any(user_ids))
+            .filter(name.eq_any(names))
+            .filter(data_type.eq(USER_METADATA_DATA_TYPE))
+            .select((user_id, name, content))
+            .load::<(String, String, serde_json::Value)>(&mut conn)
+            .await
+            .map_err(Into::<backend_core::Error>::into)?;
+
+        let mut out: HashMap<String, serde_json::Value> = HashMap::new();
+        for (uid, key, value) in rows {
+            out.entry(uid)
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+                .expect("entry always an object")
+                .insert(key, value);
+        }
+
+        Ok(out)
+    }
+
+    #[instrument(skip(self))]
     async fn update_metadata(
         &self,
         user_id_val: &str,

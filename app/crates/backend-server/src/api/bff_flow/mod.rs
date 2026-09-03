@@ -33,6 +33,8 @@ pub use models::*;
         CompletedKycResponse,
         LookupByPhoneRequest,
         LookupByPhoneResponse,
+        LookupByPhoneCandidate,
+        PhoneMatchField,
         CreateSessionRequest,
         AddFlowRequest,
         SubmitStepRequest,

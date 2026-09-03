@@ -190,6 +190,12 @@ mock! {
         async fn update_full_name(&self, user_id: &str, full_name: &str) -> RepoResult<()>;
         async fn get_user_metadata(&self, user_id: &str) -> RepoResult<serde_json::Value>;
 
+        async fn get_metadata_fields_for_users(
+            &self,
+            user_ids: Vec<String>,
+            names: Vec<String>,
+        ) -> RepoResult<std::collections::HashMap<String, serde_json::Value>>;
+
         async fn update_metadata(&self, user_id: &str, metadata_patch: serde_json::Value, eager_patch: Option<serde_json::Value>) -> RepoResult<()>;
     }
 }

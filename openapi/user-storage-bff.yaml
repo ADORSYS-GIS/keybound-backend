@@ -21,12 +21,17 @@ paths:
       description: >
         Server-to-server directory lookup used by the tokenization BFF for
         account recovery phone resolution. Returns EVERY account whose
-        phone_number or username matches the supplied E.164 phone (users
-        registered by phone have the phone as their username) so the caller
-        can enforce its own uniqueness/ambiguity rules. POST + JSON body so
-        the literal `+` in E.164 phones survives transit. NOTE: the older
-        /flow/ path prefixes in this document are stale; the live surface is
-        mounted at the bff base path with the routes below.
+        phone_number or username matches the supplied E.164 phone, with only
+        the minimal fields the BFF recovery resolver needs (least privilege:
+        no contact details, timestamps, or arbitrary metadata). The
+        `matchedBy` field states which column matched so the caller can
+        distinguish an authoritative registered-phone match
+        (`matchedBy=phone`) from a username-only match. The phone is
+        validated as E.164 server-side; malformed input is rejected with
+        400/INVALID_PHONE. POST + JSON body so the literal `+` in E.164
+        phones survives transit. NOTE: the older /flow/ path prefixes in
+        this document are stale; the live surface is mounted at the bff base
+        path with the routes below.
       operationId: lookupFlowUserByPhone
       requestBody:
         required: true
@@ -337,18 +342,45 @@ components:
         phone:
           type: string
           minLength: 1
-          description: E.164-style phone number to resolve.
+          pattern: '^\+[1-9]\d{7,14}$'
+          description: E.164 phone number to resolve.
       required: [ phone ]
 
     LookupByPhoneResponse:
       type: object
       additionalProperties: false
       properties:
-        users:
+        candidates:
           type: array
           items:
-            $ref: "#/components/schemas/InternalUserRecord"
-      required: [ users ]
+            $ref: "#/components/schemas/LookupByPhoneCandidate"
+      required: [ candidates ]
+
+    LookupByPhoneCandidate:
+      type: object
+      additionalProperties: false
+      description: >
+        Minimal recovery-resolution candidate. Deliberately excludes contact
+        details, timestamps, and arbitrary user metadata (least privilege).
+      properties:
+        userId:
+          type: string
+        disabled:
+          type: boolean
+        matchedBy:
+          type: string
+          enum: [ phone, username ]
+          description: >
+            Column that matched the submitted phone. BFF recovery requires
+            matchedBy=phone to treat a number as an authoritative registered
+            phone.
+        fineractClientId:
+          type: string
+          nullable: true
+        fineractCustomerCode:
+          type: string
+          nullable: true
+      required: [ userId, disabled, matchedBy ]
 
     UploadMethod:
       type: string

@@ -1,7 +1,7 @@
 use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, FlowDetailResponse, FlowResponse,
-    LookupByPhoneRequest, LookupByPhoneResponse, SessionDetailResponse, SessionResponse,
-    StepResponse, SubmitStepRequest, UserResponse,
+    LookupByPhoneCandidate, LookupByPhoneRequest, LookupByPhoneResponse, PhoneMatchField,
+    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use crate::api::BackendApi;
 use crate::flows::registry::{actor_label, waiting_status};
@@ -1057,24 +1057,82 @@ pub async fn get_user(
     Ok(UserResponse::from_row_with_metadata(user, metadata))
 }
 
+const RECOVERY_METADATA_FIELDS: &[&str] = &["fineractClientId", "fineractCustomerCode"];
+
+fn is_e164(value: &str) -> bool {
+    match value.strip_prefix('+') {
+        Some(digits) => {
+            (8..=15).contains(&digits.len())
+                && !digits.starts_with('0')
+                && digits.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
+    }
+}
+
+fn metadata_scalar_to_string(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
 #[instrument(skip(api))]
 pub async fn lookup_users_by_phone(
     api: &BackendApi,
     body: LookupByPhoneRequest,
 ) -> Result<LookupByPhoneResponse, Error> {
     let phone = body.phone.trim();
-    if phone.is_empty() {
-        return Err(Error::bad_request("INVALID_PHONE", "phone is required"));
+    if !is_e164(phone) {
+        return Err(Error::bad_request(
+            "INVALID_PHONE",
+            "phone must be an E.164 number (e.g. +237690000000)",
+        ));
     }
 
     let rows = api.state.user.find_users_by_phone(phone).await?;
-    let mut users = Vec::with_capacity(rows.len());
-    for row in rows {
-        let metadata = api.state.user.get_user_metadata(&row.user_id).await?;
-        users.push(UserResponse::from_row_with_metadata(row, metadata));
+    if rows.is_empty() {
+        return Ok(LookupByPhoneResponse { candidates: vec![] });
     }
 
-    Ok(LookupByPhoneResponse { users })
+    let user_ids: Vec<String> = rows.iter().map(|row| row.user_id.clone()).collect();
+    let metadata = api
+        .state
+        .user
+        .get_metadata_fields_for_users(
+            user_ids,
+            RECOVERY_METADATA_FIELDS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+        .await?;
+
+    let candidates = rows
+        .into_iter()
+        .map(|row| {
+            let matched_by = if row.phone_number.as_deref() == Some(phone) {
+                PhoneMatchField::Phone
+            } else {
+                PhoneMatchField::Username
+            };
+            let user_metadata = metadata.get(&row.user_id);
+            LookupByPhoneCandidate {
+                user_id: row.user_id,
+                disabled: row.disabled,
+                matched_by,
+                fineract_client_id: metadata_scalar_to_string(
+                    user_metadata.and_then(|m| m.get("fineractClientId")),
+                ),
+                fineract_customer_code: metadata_scalar_to_string(
+                    user_metadata.and_then(|m| m.get("fineractCustomerCode")),
+                ),
+            }
+        })
+        .collect();
+
+    Ok(LookupByPhoneResponse { candidates })
 }
 
 pub async fn require_authenticated_caller(
@@ -1121,6 +1179,7 @@ mod lookup_by_phone_tests {
     use crate::test_utils::{MockUserRepo, TestAppStateBuilder};
     use backend_model::db::UserRow;
     use chrono::Utc;
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn user_row(user_id: &str, username: &str, phone: Option<String>, disabled: bool) -> UserRow {
@@ -1128,9 +1187,9 @@ mod lookup_by_phone_tests {
             user_id: user_id.to_owned(),
             realm: "fineract".to_owned(),
             username: username.to_owned(),
-            full_name: None,
-            email: None,
-            email_verified: false,
+            full_name: Some("Jane Somebody".to_owned()),
+            email: Some("jane@example.org".to_owned()),
+            email_verified: true,
             phone_number: phone,
             disabled,
             attributes: None,
@@ -1146,20 +1205,42 @@ mod lookup_by_phone_tests {
         BackendApi::new(Arc::new(state), oidc, signature)
     }
 
+    fn metadata_expect(user: &mut MockUserRepo, input: Vec<(&str, Value)>) {
+        let entries: Vec<(String, Value)> = input
+            .into_iter()
+            .map(|(uid, value)| (uid.to_string(), value))
+            .collect();
+        user.expect_get_metadata_fields_for_users()
+            .returning(move |_, _| {
+                Ok(entries
+                    .iter()
+                    .map(|(uid, value)| (uid.clone(), value.clone()))
+                    .collect::<HashMap<String, Value>>())
+            });
+    }
+
     #[tokio::test]
-    async fn lookup_by_phone_returns_all_candidates_with_metadata() {
+    async fn lookup_by_phone_returns_minimal_candidates_without_full_user_records() {
         let phone = "+237690000000";
         let mut user = MockUserRepo::new();
         user.expect_find_users_by_phone()
             .withf(move |p: &str| p == phone)
-            .returning(|_| {
+            .returning(move |_| {
                 Ok(vec![
                     user_row("usr-1", phone, Some(phone.to_owned()), false),
                     user_row("usr-2", phone, Some(phone.to_owned()), true),
                 ])
             });
-        user.expect_get_user_metadata()
-            .returning(|_| Ok(json!({ "kyc": { "fineractClientId": "c-1" } })));
+        metadata_expect(
+            &mut user,
+            vec![
+                (
+                    "usr-1",
+                    json!({ "fineractClientId": "c-1", "fineractCustomerCode": "CC-1" }),
+                ),
+                ("usr-2", json!({ "fineractClientId": "c-2" })),
+            ],
+        );
 
         let api = api_with(user);
         let response = lookup_users_by_phone(
@@ -1171,10 +1252,127 @@ mod lookup_by_phone_tests {
         .await
         .unwrap();
 
-        assert_eq!(response.users.len(), 2);
-        assert_eq!(response.users[0].user_id, "usr-1");
-        assert!(!response.users[0].disabled);
-        assert!(response.users[1].disabled);
+        assert_eq!(response.candidates.len(), 2);
+        assert_eq!(response.candidates[0].user_id, "usr-1");
+        assert!(!response.candidates[0].disabled);
+        assert_eq!(response.candidates[0].matched_by, PhoneMatchField::Phone);
+        assert_eq!(
+            response.candidates[0].fineract_client_id.as_deref(),
+            Some("c-1")
+        );
+        assert_eq!(
+            response.candidates[0].fineract_customer_code.as_deref(),
+            Some("CC-1")
+        );
+        assert!(response.candidates[1].disabled);
+        assert_eq!(response.candidates[1].fineract_customer_code, None);
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_response_exposes_no_unrelated_user_fields() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone().returning(move |_| {
+            Ok(vec![user_row(
+                "usr-1",
+                phone,
+                Some(phone.to_owned()),
+                false,
+            )])
+        });
+        metadata_expect(&mut user, vec![]);
+
+        let api = api_with(user);
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        for forbidden in [
+            "email",
+            "fullName",
+            "username",
+            "metadata",
+            "realm",
+            "createdAt",
+            "updatedAt",
+            "Jane Somebody",
+            "jane@example.org",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "response leaked forbidden field/value {forbidden}: {serialized}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_computes_matched_by_column() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone().returning(move |_| {
+            Ok(vec![
+                user_row("usr-phone", "someone", Some(phone.to_owned()), false),
+                user_row(
+                    "usr-username",
+                    phone,
+                    Some("+237670000001".to_owned()),
+                    false,
+                ),
+            ])
+        });
+        metadata_expect(&mut user, vec![]);
+
+        let api = api_with(user);
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.candidates[0].matched_by, PhoneMatchField::Phone);
+        assert_eq!(response.candidates[1].matched_by, PhoneMatchField::Username);
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_normalizes_numeric_fineract_identifiers() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone().returning(move |_| {
+            Ok(vec![user_row(
+                "usr-1",
+                phone,
+                Some(phone.to_owned()),
+                false,
+            )])
+        });
+        metadata_expect(
+            &mut user,
+            vec![("usr-1", json!({ "fineractClientId": 12345 }))],
+        );
+
+        let api = api_with(user);
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response.candidates[0].fineract_client_id.as_deref(),
+            Some("12345")
+        );
     }
 
     #[tokio::test]
@@ -1192,32 +1390,73 @@ mod lookup_by_phone_tests {
         .await
         .unwrap();
 
-        assert!(response.users.is_empty());
+        assert!(response.candidates.is_empty());
     }
 
     #[tokio::test]
-    async fn lookup_by_phone_rejects_blank_phone() {
-        let user = MockUserRepo::new();
+    async fn lookup_by_phone_accepts_surrounding_whitespace() {
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone()
+            .withf(|p: &str| p == "+237690000000")
+            .returning(|_| Ok(vec![]));
+
         let api = api_with(user);
-        let error = lookup_users_by_phone(
+        let response = lookup_users_by_phone(
             &api,
             LookupByPhoneRequest {
-                phone: "   ".to_owned(),
+                phone: "  +237690000000 ".to_owned(),
             },
         )
         .await
-        .unwrap_err();
+        .unwrap();
 
-        match error {
-            Error::Http {
-                error_key,
-                status_code,
-                ..
-            } => {
-                assert_eq!(status_code, 400);
-                assert_eq!(error_key, "INVALID_PHONE");
+        assert!(response.candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_rejects_non_e164_phones() {
+        for bad in [
+            "",
+            "   ",
+            "foo",
+            "123",
+            "+237abc",
+            "+237 690 000 000",
+            "237690000000",
+            "+023769000000",
+            "+1234567",
+        ] {
+            let user = MockUserRepo::new();
+            let api = api_with(user);
+            let error = lookup_users_by_phone(
+                &api,
+                LookupByPhoneRequest {
+                    phone: bad.to_owned(),
+                },
+            )
+            .await
+            .unwrap_err();
+
+            match error {
+                Error::Http {
+                    error_key,
+                    status_code,
+                    ..
+                } => {
+                    assert_eq!(status_code, 400, "input {bad:?} should be rejected");
+                    assert_eq!(error_key, "INVALID_PHONE", "input {bad:?}");
+                }
+                other => panic!("expected 400 Http error, got {:?}", other),
             }
-            other => panic!("expected 400 Http error, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn is_e164_accepts_canonical_numbers_only() {
+        assert!(is_e164("+237690000000"));
+        assert!(is_e164("+14155552671"));
+        assert!(!is_e164("+237690000000123456"));
+        assert!(!is_e164("+23769000000a"));
+        assert!(!is_e164(""));
     }
 }

@@ -342,6 +342,15 @@ pub trait UserRepo: Send + Sync {
     async fn update_full_name(&self, user_id: &str, full_name: &str) -> RepoResult<()>;
     async fn get_user_metadata(&self, user_id: &str) -> RepoResult<Value>;
 
+    /// Loads only the whitelisted metadata fields (by `name`) for a set of
+    /// users in a single query. Used by least-privilege directory lookups so
+    /// callers never aggregate arbitrary user metadata.
+    async fn get_metadata_fields_for_users(
+        &self,
+        user_ids: Vec<String>,
+        names: Vec<String>,
+    ) -> RepoResult<std::collections::HashMap<String, Value>>;
+
     async fn update_metadata(
         &self,
         user_id: &str,

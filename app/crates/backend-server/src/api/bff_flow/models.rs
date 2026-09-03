@@ -60,10 +60,32 @@ pub struct LookupByPhoneRequest {
     pub phone: String,
 }
 
+/// Which column of the account matched the submitted phone number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PhoneMatchField {
+    Phone,
+    Username,
+}
+
+/// Minimal recovery-resolution candidate. This endpoint exists solely so the
+/// tokenization BFF can apply its own uniqueness/enable-state rules for phone
+/// recovery; it deliberately exposes only the fields the resolver needs and
+/// never the full user record or arbitrary metadata.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LookupByPhoneCandidate {
+    pub user_id: String,
+    pub disabled: bool,
+    pub matched_by: PhoneMatchField,
+    pub fineract_client_id: Option<String>,
+    pub fineract_customer_code: Option<String>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LookupByPhoneResponse {
-    pub users: Vec<UserResponse>,
+    pub candidates: Vec<LookupByPhoneCandidate>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
