@@ -307,8 +307,10 @@ kc:
 bff:
   enabled: true
   base_path: "/bff"
-  recovery_lookup_allowed_service_subs:
-    - "azamra-tokenization-bff"
+  recovery_lookup_service_client_id: "azamra-tokenization-bff"
+  recovery_lookup_audience: "user-storage"
+  recovery_lookup_required_scope: "recovery:phone-lookup"
+  recovery_lookup_realm: "azamra"
 staff:
   enabled: true
   base_path: "/staff"
@@ -360,6 +362,9 @@ cuss:
 pub fn create_fake_jwt(user_id: &str) -> backend_auth::JwtToken {
     let claims = backend_auth::Claims {
         sub: user_id.to_owned(),
+        azp: None,
+        aud: None,
+        scope: None,
         name: None,
         iss: "http://localhost/test".to_owned(),
         exp: usize::MAX,

@@ -348,8 +348,8 @@ components:
           type: string
           minLength: 1
           description: >
-            Authoritative realm to search within. The lookup is realm-scoped
-            to prevent cross-realm candidate leakage.
+            Recovery realm requested by the BFF. It must exactly match the server-configured
+            recovery realm; other realms are rejected before repository access.
       required: [ phone, realm ]
 
     LookupByPhoneResponse:

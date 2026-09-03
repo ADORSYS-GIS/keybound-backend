@@ -1,4 +1,7 @@
-use crate::api::{BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_SUB_HEADER, BFF_AUTH_USER_ID_HEADER};
+use crate::api::{
+    BFF_AUTH_AUDIENCES_HEADER, BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_SCOPES_HEADER,
+    BFF_AUTH_SERVICE_CLIENT_ID_HEADER, BFF_AUTH_USER_ID_HEADER,
+};
 use crate::auth_signature::{
     canonicalize_device_auth_payload, validate_public_key_match, validate_timestamp,
     validate_user_id_hint, verify_signature,
@@ -37,10 +40,11 @@ pub async fn require_bff_auth(
         Err(_) => return Error::unauthorized("Invalid request body").into_response(),
     };
 
-    let (user_id, device_id, subject) = match authenticate(&state, &parts.headers).await {
-        Ok(claims) => claims,
-        Err(error) => return error.into_response(),
-    };
+    let (user_id, device_id, service_client_id, audiences, scopes) =
+        match authenticate(&state, &parts.headers).await {
+            Ok(claims) => claims,
+            Err(error) => return error.into_response(),
+        };
 
     let user_header = match HeaderValue::from_str(&user_id) {
         Ok(value) => value,
@@ -58,13 +62,38 @@ pub async fn require_bff_auth(
         .headers
         .insert(BFF_AUTH_DEVICE_ID_HEADER, device_header);
 
-    parts.headers.remove(BFF_AUTH_SUB_HEADER);
-    if let Some(subject) = subject {
-        let subject_header = match HeaderValue::from_str(&subject) {
+    for header in [
+        BFF_AUTH_SERVICE_CLIENT_ID_HEADER,
+        BFF_AUTH_AUDIENCES_HEADER,
+        BFF_AUTH_SCOPES_HEADER,
+    ] {
+        parts.headers.remove(header);
+    }
+    if let Some(client_id) = service_client_id {
+        let value = match HeaderValue::from_str(&client_id) {
             Ok(value) => value,
-            Err(_) => return Error::unauthorized("Invalid authenticated subject").into_response(),
+            Err(_) => {
+                return Error::unauthorized("Invalid authenticated client id").into_response();
+            }
         };
-        parts.headers.insert(BFF_AUTH_SUB_HEADER, subject_header);
+        parts
+            .headers
+            .insert(BFF_AUTH_SERVICE_CLIENT_ID_HEADER, value);
+    }
+    for (header, values) in [
+        (BFF_AUTH_AUDIENCES_HEADER, audiences),
+        (BFF_AUTH_SCOPES_HEADER, scopes),
+    ] {
+        if !values.is_empty() {
+            let value = match HeaderValue::from_str(&values.join(" ")) {
+                Ok(value) => value,
+                Err(_) => {
+                    return Error::unauthorized("Invalid authenticated token claims")
+                        .into_response();
+                }
+            };
+            parts.headers.insert(header, value);
+        }
     }
 
     let req = Request::from_parts(parts, Body::from(body_bytes));
@@ -74,7 +103,7 @@ pub async fn require_bff_auth(
 async fn authenticate(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<(String, String, Option<String>), Error> {
+) -> Result<(String, String, Option<String>, Vec<String>, Vec<String>), Error> {
     if let Some(token) = extract_bearer_token(headers) {
         return authenticate_bearer(state, &token).await;
     }
@@ -98,10 +127,12 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 async fn authenticate_bearer(
     state: &Arc<AppState>,
     token: &str,
-) -> Result<(String, String, Option<String>), Error> {
+) -> Result<(String, String, Option<String>, Vec<String>, Vec<String>), Error> {
     let jwt = JwtToken::verify(token, &state.oidc_state).await?;
     let user_id = jwt.user_id().to_owned();
-    let subject = jwt.subject().to_owned();
+    let service_client_id = jwt.authorized_party().map(ToOwned::to_owned);
+    let audiences = jwt.audiences();
+    let scopes = jwt.scopes();
     let device_id = "bff".to_owned();
 
     debug!(
@@ -109,13 +140,13 @@ async fn authenticate_bearer(
         "Bearer token authentication successful"
     );
 
-    Ok((user_id, device_id, Some(subject)))
+    Ok((user_id, device_id, service_client_id, audiences, scopes))
 }
 
 async fn authenticate_signature(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<(String, String, Option<String>), Error> {
+) -> Result<(String, String, Option<String>, Vec<String>, Vec<String>), Error> {
     let device_id = header_value(headers, HEADER_DEVICE_ID)
         .ok_or_else(|| Error::unauthorized("Missing x-auth-device-id"))?;
     let signature = header_value(headers, HEADER_SIGNATURE)
@@ -188,7 +219,7 @@ async fn authenticate_signature(
         "Signature authentication successful"
     );
 
-    Ok((device.user_id, device.device_id, None))
+    Ok((device.user_id, device.device_id, None, vec![], vec![]))
 }
 
 fn header_value(headers: &HeaderMap, key: &str) -> Option<String> {
@@ -196,4 +227,135 @@ fn header_value(headers: &HeaderMap, key: &str) -> Option<String> {
         .get(key)
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{api::BackendApi, test_utils::TestAppStateBuilder};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use serde::Serialize;
+    use std::time::Duration;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    #[derive(Serialize)]
+    struct ServiceClaims<'a> {
+        sub: &'a str,
+        azp: Option<&'a str>,
+        aud: &'a str,
+        scope: &'a str,
+        iss: &'a str,
+        exp: usize,
+    }
+
+    async fn signed_service_token(
+        azp: Option<&str>,
+        aud: &str,
+        scope: &str,
+    ) -> (Arc<AppState>, String) {
+        let secret = b"recovery-service-auth-test-secret";
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/jwks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "keys": [{"kty": "oct", "kid": "service-key", "k": URL_SAFE_NO_PAD.encode(secret), "alg": "HS256", "use": "sig"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let mut state = TestAppStateBuilder::new().build();
+        state.oidc_state = Arc::new(backend_auth::OidcState::new(
+            "https://issuer.example".to_owned(),
+            Some(format!("{}/jwks", server.uri())),
+            None,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+            backend_auth::HttpClient::new_with_defaults().unwrap(),
+        ));
+        let state = Arc::new(state);
+        let mut header = Header::new(Algorithm::HS256);
+        header.kid = Some("service-key".to_owned());
+        let token = encode(
+            &header,
+            &ServiceClaims {
+                sub: "service-account-azamra-tokenization-bff",
+                azp,
+                aud,
+                scope,
+                iss: "https://issuer.example",
+                exp: usize::MAX,
+            },
+            &EncodingKey::from_secret(secret),
+        )
+        .unwrap();
+        (state, token)
+    }
+
+    #[tokio::test]
+    async fn signed_bearer_claims_enforce_service_contract() {
+        for (azp, aud, scope, allowed) in [
+            (
+                Some("azamra-tokenization-bff"),
+                "user-storage",
+                "recovery:phone-lookup",
+                true,
+            ),
+            (
+                Some("reporting-service"),
+                "user-storage",
+                "recovery:phone-lookup",
+                false,
+            ),
+            (
+                Some("azamra-tokenization-bff"),
+                "other-api",
+                "recovery:phone-lookup",
+                false,
+            ),
+            (
+                Some("azamra-tokenization-bff"),
+                "user-storage",
+                "profile:read",
+                false,
+            ),
+            (None, "user-storage", "recovery:phone-lookup", false),
+        ] {
+            let (state, token) = signed_service_token(azp, aud, scope).await;
+            let (_, _, client_id, audiences, scopes) =
+                authenticate_bearer(&state, &token).await.unwrap();
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                crate::api::BFF_AUTH_USER_ID_HEADER,
+                "service-account".parse().unwrap(),
+            );
+            headers.insert(
+                crate::api::BFF_AUTH_DEVICE_ID_HEADER,
+                "bff".parse().unwrap(),
+            );
+            if let Some(client_id) = client_id {
+                headers.insert(
+                    crate::api::BFF_AUTH_SERVICE_CLIENT_ID_HEADER,
+                    client_id.parse().unwrap(),
+                );
+            }
+            headers.insert(
+                crate::api::BFF_AUTH_AUDIENCES_HEADER,
+                audiences.join(" ").parse().unwrap(),
+            );
+            headers.insert(
+                crate::api::BFF_AUTH_SCOPES_HEADER,
+                scopes.join(" ").parse().unwrap(),
+            );
+            let api = BackendApi::new(
+                state.clone(),
+                state.oidc_state.clone(),
+                state.signature_state.clone(),
+            );
+            assert_eq!(api.require_service_caller(&headers).is_ok(), allowed);
+        }
+    }
 }

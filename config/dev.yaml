@@ -197,8 +197,10 @@ bff:
   # Base path for BFF API routes (e.g., /bff).
   base-path: /bff
   # Service identities allowed to access the recovery phone lookup endpoint.
-  recovery-lookup-allowed-service-subs:
-    - "azamra-tokenization-bff"
+  recovery-lookup-service-client-id: "azamra-tokenization-bff"
+  recovery-lookup-audience: "user-storage"
+  recovery-lookup-required-scope: "recovery:phone-lookup"
+  recovery-lookup-realm: "azamra"
 
 # Staff/Admin API Configuration
 # Administrative interface for internal tools.

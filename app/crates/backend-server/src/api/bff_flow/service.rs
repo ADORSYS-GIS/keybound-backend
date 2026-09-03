@@ -1083,6 +1083,13 @@ pub async fn lookup_users_by_phone(
     api: &BackendApi,
     body: LookupByPhoneRequest,
 ) -> Result<LookupByPhoneResponse, Error> {
+    if body.realm != api.state.config.bff.recovery_lookup_realm {
+        return Err(Error::forbidden(
+            "RECOVERY_REALM_REJECTED",
+            "Requested realm is not authorized for recovery lookup",
+        ));
+    }
+
     let phone = body.phone.trim();
     if !is_e164(phone) {
         return Err(Error::bad_request(
@@ -1188,7 +1195,7 @@ mod lookup_by_phone_tests {
     fn user_row(user_id: &str, username: &str, phone: Option<String>, disabled: bool) -> UserRow {
         UserRow {
             user_id: user_id.to_owned(),
-            realm: "fineract".to_owned(),
+            realm: "azamra".to_owned(),
             username: username.to_owned(),
             full_name: Some("Jane Somebody".to_owned()),
             email: Some("jane@example.org".to_owned()),
@@ -1250,7 +1257,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1291,7 +1298,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1338,7 +1345,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1370,7 +1377,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1393,7 +1400,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: "+237699999999".to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1414,7 +1421,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: "  +237690000000 ".to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1442,7 +1449,7 @@ mod lookup_by_phone_tests {
                 &api,
                 LookupByPhoneRequest {
                     phone: bad.to_owned(),
-                    realm: "fineract".to_owned(),
+                    realm: "azamra".to_owned(),
                 },
             )
             .await
@@ -1487,7 +1494,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1506,7 +1513,7 @@ mod lookup_by_phone_tests {
         let mut user = MockUserRepo::new();
         user.expect_find_users_by_phone()
             .returning(|realm, _| match realm.as_deref() {
-                Some("fineract") => Ok(vec![user_row(
+                Some("azamra") => Ok(vec![user_row(
                     "usr-fineract",
                     phone,
                     Some(phone.to_owned()),
@@ -1528,7 +1535,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "fineract".to_owned(),
+                realm: "azamra".to_owned(),
             },
         )
         .await
@@ -1539,24 +1546,12 @@ mod lookup_by_phone_tests {
     }
 
     #[tokio::test]
-    async fn lookup_by_phone_returns_empty_for_unknown_realm() {
+    async fn lookup_by_phone_rejects_non_configured_realm_before_repository_access() {
         let phone = "+237690000000";
-        let mut user = MockUserRepo::new();
-        user.expect_find_users_by_phone()
-            .returning(|realm, _| match realm.as_deref() {
-                Some("fineract") => Ok(vec![user_row(
-                    "usr-fineract",
-                    phone,
-                    Some(phone.to_owned()),
-                    false,
-                )]),
-                _ => Ok(vec![]),
-            });
-        metadata_expect(&mut user, vec![]);
-
+        let user = MockUserRepo::new();
         let api = api_with(user);
 
-        let response = lookup_users_by_phone(
+        let error = lookup_users_by_phone(
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
@@ -1564,8 +1559,18 @@ mod lookup_by_phone_tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap_err();
 
-        assert!(response.candidates.is_empty());
+        match error {
+            Error::Http {
+                error_key,
+                status_code,
+                ..
+            } => {
+                assert_eq!(status_code, 403);
+                assert_eq!(error_key, "RECOVERY_REALM_REJECTED");
+            }
+            other => panic!("expected 403 Http error, got {other:?}"),
+        }
     }
 }

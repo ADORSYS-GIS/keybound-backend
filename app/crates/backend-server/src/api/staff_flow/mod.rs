@@ -560,6 +560,9 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
     if !api.state.config.staff.enabled {
         return Ok(JwtToken::new(backend_auth::Claims {
             sub: "usr_auth_disabled".to_owned(),
+            azp: None,
+            aud: None,
+            scope: None,
             name: Some("auth-disabled".to_owned()),
             iss: api.state.config.oauth2.issuer.clone(),
             exp: usize::MAX,
