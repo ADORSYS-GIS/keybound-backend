@@ -58,6 +58,7 @@ backend-repository = { workspace = true }
 backend-model = { workspace = true }
 backend-migrate = { workspace = true }
 axum = { workspace = true }
+uuid = { workspace = true }
 axum-extra = { workspace = true, features = ["cookie"] }
 axum-server = { workspace = true }
 async-trait = { workspace = true }

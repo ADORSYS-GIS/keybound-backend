@@ -227,6 +227,17 @@ mock! {
             req: &backend_model::kc::EnrollmentBindRequest,
         ) -> RepoResult<String>;
         async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64>;
+        async fn find_recovery_idempotency(
+            &self,
+            idempotency_key: &str,
+        ) -> RepoResult<Option<backend_model::db::RecoveryIdempotencyRow>>;
+        async fn bind_recovery_device(
+            &self,
+            idempotency_key: &str,
+            recovery_case_id: &str,
+            request_hash: &str,
+            req: &backend_model::kc::RecoveryBindRequest,
+        ) -> RepoResult<String>;
     }
 }
 

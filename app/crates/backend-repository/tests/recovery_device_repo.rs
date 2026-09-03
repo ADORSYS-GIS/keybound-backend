@@ -1,0 +1,634 @@
+use anyhow::Result;
+use backend_migrate::connect_postgres_and_migrate;
+use backend_model::db;
+use backend_model::kc::{KcAnyMap, RecoveryBindRequest};
+use backend_model::schema::{app_user, device, recovery_idempotency};
+use backend_repository::{DeviceRepo, DeviceRepository};
+use chrono::Utc;
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
+use diesel_async::pooled_connection::deadpool::Pool;
+use gen_oas_server_kc::types::Object;
+use serde_json::json;
+
+type DbPool = Pool<diesel_async::AsyncPgConnection>;
+
+fn build_public_jwk() -> KcAnyMap {
+    let mut map = KcAnyMap::new();
+    map.insert("kty".to_string(), Object(json!("EC")));
+    map.insert("crv".to_string(), Object(json!("P-256")));
+    map.insert("x".to_string(), Object(json!("x-val")));
+    map.insert("y".to_string(), Object(json!("y-val")));
+    map
+}
+
+fn build_other_public_jwk() -> KcAnyMap {
+    let mut map = KcAnyMap::new();
+    map.insert("kty".to_string(), Object(json!("EC")));
+    map.insert("crv".to_string(), Object(json!("P-256")));
+    map.insert("x".to_string(), Object(json!("x-other")));
+    map.insert("y".to_string(), Object(json!("y-other")));
+    map
+}
+
+fn canonical_jwk(map: &KcAnyMap) -> String {
+    let mut sorted: std::collections::BTreeMap<String, serde_json::Value> =
+        std::collections::BTreeMap::new();
+    for (k, v) in map {
+        sorted.insert(k.clone(), v.0.clone());
+    }
+    serde_json::to_string(&sorted).expect("jwk serialization")
+}
+
+async fn seed_user(pool: &DbPool, user_id: &str, username: &str) -> Result<()> {
+    let mut conn = pool.get().await?;
+    diesel::insert_into(app_user::table)
+        .values((
+            app_user::user_id.eq(user_id),
+            app_user::realm.eq("test"),
+            app_user::username.eq(username),
+            app_user::disabled.eq(false),
+            app_user::email_verified.eq(true),
+            app_user::created_at.eq(Utc::now()),
+            app_user::updated_at.eq(Utc::now()),
+        ))
+        .execute(&mut conn)
+        .await?;
+    Ok(())
+}
+
+async fn insert_device_row(
+    pool: &DbPool,
+    user_id: &str,
+    device_id: &str,
+    jkt: &str,
+    public_jwk: &KcAnyMap,
+    status: &str,
+) -> Result<String> {
+    let mut conn = pool.get().await?;
+    let public_jwk_str = canonical_jwk(public_jwk);
+    let record_id = backend_model::kc::device_record_id(device_id, &public_jwk_str);
+    let row = db::DeviceRow {
+        device_id: device_id.to_string(),
+        user_id: user_id.to_string(),
+        jkt: jkt.to_string(),
+        public_jwk: public_jwk_str,
+        device_record_id: record_id.clone(),
+        status: status.to_string(),
+        label: None,
+        created_at: Utc::now(),
+        last_seen_at: Some(Utc::now()),
+    };
+    diesel::insert_into(device::table)
+        .values(&row)
+        .execute(&mut conn)
+        .await?;
+    Ok(record_id)
+}
+
+async fn cleanup(
+    pool: &DbPool,
+    idempotency_keys: &[&str],
+    device_ids: &[&str],
+    user_id: &str,
+) -> Result<()> {
+    let mut conn = pool.get().await?;
+    for k in idempotency_keys {
+        diesel::delete(
+            recovery_idempotency::table.filter(recovery_idempotency::idempotency_key.eq(k)),
+        )
+        .execute(&mut conn)
+        .await?;
+    }
+    for d in device_ids {
+        diesel::delete(device::table.filter(device::device_id.eq(d)))
+            .execute(&mut conn)
+            .await?;
+    }
+    diesel::delete(app_user::table.filter(app_user::user_id.eq(user_id)))
+        .execute(&mut conn)
+        .await?;
+    Ok(())
+}
+
+fn expect_conflict<T: std::fmt::Debug>(
+    res: &std::result::Result<T, backend_core::Error>,
+    expected_key: &str,
+) -> Result<()> {
+    match res {
+        Err(backend_core::Error::Http {
+            status_code,
+            error_key,
+            ..
+        }) => {
+            assert_eq!(*status_code, 409, "expected HTTP 409 conflict");
+            assert_eq!(
+                *error_key, expected_key,
+                "expected error key {expected_key}"
+            );
+            Ok(())
+        }
+        other => Err(anyhow::anyhow!(
+            "expected HTTP 409 {expected_key}, got {:?}",
+            other
+        )),
+    }
+}
+
+#[tokio::test]
+async fn recovery_device_bind_flow() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_id = backend_id::device_id()?;
+    let jkt = "test-recovery-jkt".to_string();
+    let idempotency_key = "550e8400-e29b-41d4-a716-446655440000".to_string();
+    let recovery_case_id = "rc_test_123".to_string();
+    let request_hash = "hash_123456789".to_string();
+    let binding_op_id = "op_test_123".to_string();
+
+    // 1. Seed user in app_user
+    {
+        let mut conn = pool.get().await?;
+        diesel::insert_into(app_user::table)
+            .values((
+                app_user::user_id.eq(&user_id),
+                app_user::realm.eq("test"),
+                app_user::username.eq("test-recovery-user"),
+                app_user::disabled.eq(false),
+                app_user::email_verified.eq(true),
+                app_user::created_at.eq(Utc::now()),
+                app_user::updated_at.eq(Utc::now()),
+            ))
+            .execute(&mut conn)
+            .await?;
+    }
+
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_id.clone(),
+        jkt: jkt.clone(),
+        public_jwk: build_public_jwk(),
+        binding_operation_id: binding_op_id.clone(),
+    };
+
+    // 2. Perform recovery bind
+    let record_id = repo
+        .bind_recovery_device(&idempotency_key, &recovery_case_id, &request_hash, &req)
+        .await?;
+
+    assert!(!record_id.is_empty());
+
+    // 3. Verify idempotency record query
+    let stored_idempotency = repo
+        .find_recovery_idempotency(&idempotency_key)
+        .await?
+        .expect("idempotency record should exist");
+
+    assert_eq!(stored_idempotency.request_hash, request_hash);
+    assert_eq!(stored_idempotency.bound_user_id, user_id);
+    assert_eq!(stored_idempotency.device_id, device_id);
+    assert_eq!(stored_idempotency.binding_operation_id, binding_op_id);
+    assert_eq!(stored_idempotency.device_record_id, record_id);
+
+    // 4. Cleanup test data
+    {
+        let mut conn = pool.get().await?;
+        diesel::delete(
+            recovery_idempotency::table
+                .filter(recovery_idempotency::idempotency_key.eq(&idempotency_key)),
+        )
+        .execute(&mut conn)
+        .await?;
+        diesel::delete(device::table.filter(device::device_id.eq(&device_id)))
+            .execute(&mut conn)
+            .await?;
+        diesel::delete(app_user::table.filter(app_user::user_id.eq(&user_id)))
+            .execute(&mut conn)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_same_key_same_payload_is_idempotent() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_id = backend_id::device_id()?;
+    let jkt = "test-concurrent-jkt-same".to_string();
+    let idempotency_key = "550e8400-e29b-41d4-a716-446655440001".to_string();
+    let recovery_case_id = "rc_concurrent_same_001".to_string();
+    let request_hash = "hash_concurrent_same_001".to_string();
+    let binding_op_id = "op_concurrent_same_001".to_string();
+
+    // 1. Seed user in app_user
+    {
+        let mut conn = pool.get().await?;
+        diesel::insert_into(app_user::table)
+            .values((
+                app_user::user_id.eq(&user_id),
+                app_user::realm.eq("test"),
+                app_user::username.eq("test-concurrent-same-user"),
+                app_user::disabled.eq(false),
+                app_user::email_verified.eq(true),
+                app_user::created_at.eq(Utc::now()),
+                app_user::updated_at.eq(Utc::now()),
+            ))
+            .execute(&mut conn)
+            .await?;
+    }
+
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_id.clone(),
+        jkt: jkt.clone(),
+        public_jwk: build_public_jwk(),
+        binding_operation_id: binding_op_id.clone(),
+    };
+
+    // 2. Fire two identical recovery binds concurrently
+    let (res_a, res_b) = tokio::join!(
+        repo.bind_recovery_device(&idempotency_key, &recovery_case_id, &request_hash, &req),
+        repo.bind_recovery_device(&idempotency_key, &recovery_case_id, &request_hash, &req),
+    );
+
+    let record_id_a = res_a?;
+    let record_id_b = res_b?;
+
+    assert!(!record_id_a.is_empty());
+    assert_eq!(record_id_a, record_id_b);
+
+    // 3. Verify a single idempotency record exists with the winning device_record_id
+    let stored_idempotency = repo
+        .find_recovery_idempotency(&idempotency_key)
+        .await?
+        .expect("idempotency record should exist");
+    assert_eq!(stored_idempotency.device_record_id, record_id_a);
+
+    // 4. Cleanup test data
+    {
+        let mut conn = pool.get().await?;
+        diesel::delete(
+            recovery_idempotency::table
+                .filter(recovery_idempotency::idempotency_key.eq(&idempotency_key)),
+        )
+        .execute(&mut conn)
+        .await?;
+        diesel::delete(device::table.filter(device::device_id.eq(&device_id)))
+            .execute(&mut conn)
+            .await?;
+        diesel::delete(app_user::table.filter(app_user::user_id.eq(&user_id)))
+            .execute(&mut conn)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_same_key_different_payload_conflicts() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_id = backend_id::device_id()?;
+    let jkt = "test-concurrent-jkt-diff".to_string();
+    let idempotency_key = "550e8400-e29b-41d4-a716-446655440002".to_string();
+    let recovery_case_id = "rc_concurrent_diff_002".to_string();
+    let request_hash_a = "hash_concurrent_diff_a".to_string();
+    let request_hash_b = "hash_concurrent_diff_b".to_string();
+    let binding_op_id = "op_concurrent_diff_002".to_string();
+
+    // 1. Seed user in app_user
+    {
+        let mut conn = pool.get().await?;
+        diesel::insert_into(app_user::table)
+            .values((
+                app_user::user_id.eq(&user_id),
+                app_user::realm.eq("test"),
+                app_user::username.eq("test-concurrent-diff-user"),
+                app_user::disabled.eq(false),
+                app_user::email_verified.eq(true),
+                app_user::created_at.eq(Utc::now()),
+                app_user::updated_at.eq(Utc::now()),
+            ))
+            .execute(&mut conn)
+            .await?;
+    }
+
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_id.clone(),
+        jkt: jkt.clone(),
+        public_jwk: build_public_jwk(),
+        binding_operation_id: binding_op_id.clone(),
+    };
+
+    // 2. Fire two recovery binds concurrently with the same key but different payloads
+    let (res_a, res_b) = tokio::join!(
+        repo.bind_recovery_device(&idempotency_key, &recovery_case_id, &request_hash_a, &req),
+        repo.bind_recovery_device(&idempotency_key, &recovery_case_id, &request_hash_b, &req),
+    );
+
+    let (ok_res, err_res) = match (&res_a, &res_b) {
+        (Ok(id), Err(err)) | (Err(err), Ok(id)) => (id, err),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "expected exactly one success and one conflict, got {:?} and {:?}",
+                res_a,
+                res_b
+            ));
+        }
+    };
+
+    assert!(!ok_res.is_empty());
+    match err_res {
+        backend_core::Error::Http {
+            status_code,
+            error_key,
+            ..
+        } => {
+            assert_eq!(*status_code, 409);
+            assert_eq!(*error_key, "IDEMPOTENCY_CONFLICT");
+        }
+        other => {
+            return Err(anyhow::anyhow!(
+                "expected HTTP 409 IDEMPOTENCY_CONFLICT, got {:?}",
+                other
+            ));
+        }
+    }
+
+    // 3. Cleanup test data
+    {
+        let mut conn = pool.get().await?;
+        diesel::delete(
+            recovery_idempotency::table
+                .filter(recovery_idempotency::idempotency_key.eq(&idempotency_key)),
+        )
+        .execute(&mut conn)
+        .await?;
+        diesel::delete(device::table.filter(device::device_id.eq(&device_id)))
+            .execute(&mut conn)
+            .await?;
+        diesel::delete(app_user::table.filter(app_user::user_id.eq(&user_id)))
+            .execute(&mut conn)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn same_user_same_device_id_different_jkt_is_rejected() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_id = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440010";
+    let seed_jkt = "jkt-old-J1".to_string();
+
+    seed_user(&pool, &user_id, "recovery-collision-same-device").await?;
+    // Same user already owns device D bound to old key J1 / public JWK A.
+    let existing_record_id = insert_device_row(
+        &pool,
+        &user_id,
+        &device_id,
+        &seed_jkt,
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+
+    // Approved recovery requests the exact same device D but a NEW key J2 / public JWK B.
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_id.clone(),
+        jkt: "jkt-new-J2".to_string(),
+        public_jwk: build_other_public_jwk(),
+        binding_operation_id: "op_collision_same_device_1".to_string(),
+    };
+    let res = repo
+        .bind_recovery_device(idem_key, "rc_col_same_dev_1", "hash_col_same_dev_1", &req)
+        .await;
+    expect_conflict(&res, "DEVICE_CREDENTIAL_MISMATCH")?;
+
+    // No false success: no idempotency row is recorded and the stored device is unchanged.
+    assert!(repo.find_recovery_idempotency(idem_key).await?.is_none());
+    let mut conn = pool.get().await?;
+    let stored = device::table
+        .filter(device::device_id.eq(&device_id))
+        .first::<db::DeviceRow>(&mut conn)
+        .await
+        .optional()?
+        .expect("device row should still exist");
+    assert_eq!(stored.jkt, seed_jkt);
+    assert_eq!(stored.status, "ACTIVE");
+    assert_eq!(stored.device_record_id, existing_record_id);
+
+    cleanup(&pool, &[idem_key], &[&device_id], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn same_user_same_jkt_different_device_id_is_rejected() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_1 = backend_id::device_id()?.to_string();
+    let device_2 = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440011";
+    let shared_jkt = "jkt-shared-J".to_string();
+
+    seed_user(&pool, &user_id, "recovery-collision-same-jkt").await?;
+    // Same user already owns key J bound to device D1 / public JWK A.
+    insert_device_row(
+        &pool,
+        &user_id,
+        &device_1,
+        &shared_jkt,
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+
+    // Approved recovery requests a different device D2 reusing the same JKT J with a new public JWK B.
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_2.clone(),
+        jkt: shared_jkt.clone(),
+        public_jwk: build_other_public_jwk(),
+        binding_operation_id: "op_collision_same_jkt_2".to_string(),
+    };
+    let res = repo
+        .bind_recovery_device(idem_key, "rc_col_same_jkt_2", "hash_col_same_jkt_2", &req)
+        .await;
+    expect_conflict(&res, "DEVICE_CREDENTIAL_MISMATCH")?;
+
+    assert!(repo.find_recovery_idempotency(idem_key).await?.is_none());
+
+    cleanup(&pool, &[idem_key], &[&device_1, &device_2], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn exact_existing_credential_in_revoked_state_is_rejected() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_id = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440012";
+    let jkt = "jkt-exact-revoked".to_string();
+
+    seed_user(&pool, &user_id, "recovery-revoked-exact").await?;
+    // Exact approved credential already exists but is REVOKED.
+    insert_device_row(
+        &pool,
+        &user_id,
+        &device_id,
+        &jkt,
+        &build_public_jwk(),
+        "REVOKED",
+    )
+    .await?;
+
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_id.clone(),
+        jkt: jkt.clone(),
+        public_jwk: build_public_jwk(),
+        binding_operation_id: "op_revoked_exact_3".to_string(),
+    };
+    let res = repo
+        .bind_recovery_device(idem_key, "rc_revoked_exact_3", "hash_revoked_exact_3", &req)
+        .await;
+    expect_conflict(&res, "DEVICE_NOT_ACTIVE")?;
+
+    assert!(repo.find_recovery_idempotency(idem_key).await?.is_none());
+
+    cleanup(&pool, &[idem_key], &[&device_id], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn exact_existing_active_credential_is_idempotent() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping recovery device bind test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let device_id = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440013";
+    let jkt = "jkt-exact-active".to_string();
+
+    seed_user(&pool, &user_id, "recovery-active-exact").await?;
+    // Exact approved credential already exists and is ACTIVE (legitimate idempotent case).
+    let existing_record_id = insert_device_row(
+        &pool,
+        &user_id,
+        &device_id,
+        &jkt,
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+
+    let req = RecoveryBindRequest {
+        realm: "test".to_string(),
+        target_user_id: user_id.clone(),
+        approval_revision: 5,
+        device_id: device_id.clone(),
+        jkt: jkt.clone(),
+        public_jwk: build_public_jwk(),
+        binding_operation_id: "op_active_exact_4".to_string(),
+    };
+    let bound = repo
+        .bind_recovery_device(idem_key, "rc_active_exact_4", "hash_active_exact_4", &req)
+        .await?;
+
+    // Idempotent replay of the exact active credential returns the persisted record id.
+    assert_eq!(bound, existing_record_id);
+
+    let idem = repo
+        .find_recovery_idempotency(idem_key)
+        .await?
+        .expect("idempotency row should be written for the exact active credential");
+    assert_eq!(idem.device_record_id, existing_record_id);
+
+    cleanup(&pool, &[idem_key], &[&device_id], &user_id).await?;
+    Ok(())
+}

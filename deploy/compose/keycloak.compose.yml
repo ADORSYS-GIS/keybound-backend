@@ -20,6 +20,62 @@ services:
       - ../../.docker/keycloak-healthcheck:/src:ro
       - downloaded_data:/data
 
+  # Strict runtime provisioning of the keybound Keycloak provider. This stack
+  # expects the keybound SPI (recovery/device-key) provider, so this service
+  # FAILS CLOSED: if the required provider JARs cannot be obtained from the last
+  # released keybound version, the whole environment fails loudly rather than
+  # starting an apparently-healthy Keycloak without the provider. Codegen does
+  # NOT depend on this (see download-core-tools in tools.compose.yml).
+  download-keycloak-plugins:
+    image: alpine/curl
+    environment:
+      KEYCLOAK_PLUGIN_VERSION: "0.2.6"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -ex;
+        mkdir -p /data/kc-plugins
+        apk add --no-cache jq
+
+        gh_download() {
+          output="$$1"
+          asset_name="$$2"
+          asset_id=$$(echo "$$RELEASE_META" | jq -r --arg name "$$asset_name" '.assets[] | select(.name == $$name) | .id')
+          if [ -z "$$asset_id" ] || [ "$$asset_id" = "null" ]; then
+            echo "ERROR: Asset '$$asset_name' not found in release v$$KEYCLOAK_PLUGIN_VERSION"
+            exit 1
+          fi
+          curl -fL \
+            -H "Authorization: Bearer $$GITHUB_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            --retry 8 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 300 \
+            -o "$$output" \
+            "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/assets/$$asset_id"
+        }
+
+        echo "Fetching release metadata for v$$KEYCLOAK_PLUGIN_VERSION...";
+        RELEASE_META=$$(curl -fsSL \
+          -H "Authorization: Bearer $$GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/skyengpro/keycloak-spi-registry/releases/tags/v$$KEYCLOAK_PLUGIN_VERSION")
+
+        echo "Download keybound runtime plugin (required, fail-closed)...";
+        gh_download /data/kc-plugins/keycloak-keybound-all.jar "keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        gh_download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
+        echo "Downloaded keybound runtime plugin (required)";
+
+    volumes:
+      - downloaded_data:/data
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.2
     ports:
@@ -69,6 +125,8 @@ services:
       - downloaded_data:/downloaded
     depends_on:
       download-core-tools:
+        condition: service_completed_successfully
+      download-keycloak-plugins:
         condition: service_completed_successfully
       keycloak-healthcheck-builder:
         condition: service_completed_successfully
