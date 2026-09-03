@@ -62,7 +62,7 @@ services:
       - -c
       - |
         set -e
-        cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers
+        cp /downloaded/kc-plugins/*.jar /opt/keycloak/providers 2>/dev/null || echo "WARN: no keybound plugin JARs in /downloaded/kc-plugins; starting Keycloak without the keybound provider"
         /opt/keycloak/bin/kc.sh start-dev --import-realm --log-level="WARN,com.ssegning.keycloak:debug"
     volumes:
       - ../../.docker/keycloak-config/:/opt/keycloak/data/import/:ro
