@@ -540,7 +540,11 @@ impl DeviceRepo for DeviceRepository {
                     ));
                 }
 
-                // 2. Enforce exactly one policy application per recovery case
+                // 2. Enforce exactly one policy application per recovery case.
+                //    A retry for the same case must be bound to the EXACT finalized
+                //    tuple (request hash includes approval revision + allowlist), so
+                //    a changed revision/allowlist is a conflict, never an idempotent
+                //    success.
                 let case_applied = op_dsl::old_device_policy_idempotency
                     .filter(op_dsl::recovery_case_id.eq(recovery_case_id))
                     .first::<db::OldDevicePolicyIdempotencyRow>(conn)
@@ -548,7 +552,11 @@ impl DeviceRepo for DeviceRepository {
                     .optional()
                     .map_err(Into::<Error>::into)?;
                 if let Some(existing) = case_applied {
-                    if existing.policy == policy && existing.target_user_id == target_user_id {
+                    if existing.request_hash == request_hash
+                        && existing.recovery_case_id == recovery_case_id
+                        && existing.target_user_id == target_user_id
+                        && existing.policy == policy
+                    {
                         return Ok(OldDevicePolicyOutcome {
                             already_applied: true,
                             affected_device_ids: deserialize_affected(existing.affected_device_ids),
@@ -556,7 +564,7 @@ impl DeviceRepo for DeviceRepository {
                     }
                     return Err(Error::conflict(
                         "POLICY_ALREADY_APPLIED",
-                        "Old-device policy already applied for this recovery case",
+                        "Old-device policy already applied for this recovery case with a different payload",
                     ));
                 }
 
@@ -603,7 +611,11 @@ impl DeviceRepo for DeviceRepository {
                     affected.push(device.device_record_id);
                 }
 
-                // 6. Record idempotency
+                // 6. Record idempotency. Two concurrent finalizations can both observe
+                //    no case-level row, mutate device statuses, then race on the unique
+                //    recovery_case_id. Whichever loses the insert must reload and
+                //    validate the winning row rather than trust locally-computed state,
+                //    so registry state always matches the stored idempotency record.
                 let affected_json = serde_json::to_value(&affected).map_err(|e| {
                     Error::Server(format!("Failed to serialize affected device ids: {e}"))
                 })?;
@@ -622,6 +634,32 @@ impl DeviceRepo for DeviceRepository {
                     .execute(conn)
                     .await
                     .map_err(Into::<Error>::into)?;
+
+                // Reload the winning row. If a concurrent finalization claimed the case
+                // with a different payload, the device mutations we just applied are not
+                // authoritative — fail closed instead of reporting success.
+                let winner = op_dsl::old_device_policy_idempotency
+                    .filter(op_dsl::recovery_case_id.eq(recovery_case_id))
+                    .first::<db::OldDevicePolicyIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+                if let Some(winner) = winner {
+                    if winner.request_hash == request_hash
+                        && winner.recovery_case_id == recovery_case_id
+                        && winner.target_user_id == target_user_id
+                        && winner.policy == policy
+                    {
+                        return Ok(OldDevicePolicyOutcome {
+                            already_applied: false,
+                            affected_device_ids: deserialize_affected(winner.affected_device_ids),
+                        });
+                    }
+                    return Err(Error::conflict(
+                        "POLICY_ALREADY_APPLIED",
+                        "Concurrent finalization applied a different policy for this recovery case",
+                    ));
+                }
 
                 Ok(OldDevicePolicyOutcome {
                     already_applied: false,

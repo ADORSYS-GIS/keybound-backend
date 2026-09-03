@@ -841,3 +841,96 @@ async fn old_device_policy_rejects_modified_payload_on_idempotency_reuse() -> Re
     cleanup(&pool, &[idem_key], &[&old1, &new_dev], &user_id).await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn concurrent_old_device_policy_applies_one_and_conflicts_the_other() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping old-device policy test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let old1 = backend_id::device_id()?.to_string();
+    let new_dev = backend_id::device_id()?.to_string();
+    let idem_a = "550e8400-e29b-41d4-a716-446655440025";
+    let idem_b = "550e8400-e29b-41d4-a716-446655440026";
+
+    seed_user(&pool, &user_id, "recovery-concurrent-policy").await?;
+    insert_device_row(&pool, &user_id, &old1, "jkt-cc-old1", &build_public_jwk(), "ACTIVE").await?;
+    insert_device_row(&pool, &user_id, &new_dev, "jkt-cc-new", &build_other_public_jwk(), "ACTIVE").await?;
+
+    let expect_new = vec![new_dev.clone()];
+
+    let res_a = repo.apply_old_device_policy(
+        idem_a,
+        "rc_concurrent_policy",
+        "hash_concurrent_a",
+        &user_id,
+        "REVOKE_ALL_PREVIOUS",
+        &expect_new,
+    );
+    let res_b = repo.apply_old_device_policy(
+        idem_b,
+        "rc_concurrent_policy",
+        "hash_concurrent_b",
+        &user_id,
+        "QUARANTINE_ALL_PREVIOUS",
+        &expect_new,
+    );
+
+    let (ra, rb) = tokio::join!(res_a, res_b);
+
+    // Exactly one finalization must win; the losing transaction must conflict on
+    // the case-level row rather than return its locally-computed success.
+    let mut ok_count = 0;
+    let mut conflict_count = 0;
+    for res in [ra, rb] {
+        match res {
+            Ok(outcome) => {
+                assert!(!outcome.already_applied);
+                ok_count += 1;
+            }
+            Err(backend_core::Error::Http {
+                status_code: 409,
+                error_key,
+                ..
+            }) => {
+                assert_eq!(error_key, "POLICY_ALREADY_APPLIED");
+                conflict_count += 1;
+            }
+            Err(other) => return Err(anyhow::anyhow!("unexpected error: {:?}", other)),
+        }
+    }
+    assert_eq!(ok_count, 1, "exactly one concurrent finalization must win");
+    assert_eq!(conflict_count, 1, "the losing finalization must conflict");
+
+    // Registry state must be consistent with the persisted (winning) idempotency
+    // record: the newly bound device stays ACTIVE, superseded devices are not.
+    let mut conn = pool.get().await?;
+    let new_status: Option<String> = device::table
+        .filter(device::device_id.eq(&new_dev))
+        .select(device::status)
+        .first::<String>(&mut conn)
+        .await
+        .ok();
+    assert_eq!(new_status.as_deref(), Some("ACTIVE"));
+
+    let old_status: String = device::table
+        .filter(device::device_id.eq(&old1))
+        .select(device::status)
+        .first::<String>(&mut conn)
+        .await?;
+    assert!(
+        old_status == "REVOKED" || old_status == "QUARANTINED",
+        "superseded device must be REVOKED or QUARANTINED, got {old_status}"
+    );
+
+    cleanup(&pool, &[idem_a, idem_b], &[&old1, &new_dev], &user_id).await?;
+    Ok(())
+}

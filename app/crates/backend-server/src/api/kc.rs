@@ -423,7 +423,14 @@ impl Recovery<Error> for BackendApi {
             )));
         };
 
-        let domain_req = backend_model::kc::OldDevicePolicyRequest::from(body.clone());
+        // 2b. The device that remains ACTIVE must be derived from the authoritative
+        //     recovery-bind record (the exact newly bound device), never trusted from
+        //     the caller. A malicious/incorrect except_device_ids must not be able to
+        //     preserve an old device or revoke the newly bound one. We use this
+        //     authoritative value for both the canonical request hash and the exemption.
+        let mut domain_req = backend_model::kc::OldDevicePolicyRequest::from(body.clone());
+        let authoritative_except = vec![bind_record.device_id.clone()];
+        domain_req.except_device_ids = authoritative_except;
         let req_hash = compute_old_device_policy_hash(&path_params.recovery_case_id, &domain_req);
 
         // 3. Apply the authoritative policy (idempotent)
