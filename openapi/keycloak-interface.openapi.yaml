@@ -605,7 +605,7 @@ components:
 
     DeviceRecordStatus:
       type: string
-      enum: [ ACTIVE, REVOKED, SUSPENDED ]
+      enum: [ ACTIVE, REVOKED, SUSPENDED, QUARANTINED ]
 
     DeviceRecord:
       type: object
