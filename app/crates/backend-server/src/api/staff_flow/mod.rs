@@ -600,7 +600,7 @@ async fn resolve_user_ids_for_filters(
     let mut user_ids: Vec<String> = api
         .state
         .user
-        .find_users_by_phone(&phone_number)
+        .find_users_by_phone(None, &phone_number)
         .await?
         .into_iter()
         .map(|user| user.user_id)

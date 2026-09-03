@@ -118,6 +118,16 @@ impl Error {
         }
     }
 
+    /// Creates a forbidden (403) HTTP error with a specific error key.
+    pub fn forbidden(error_key: &'static str, message: impl Into<String>) -> Self {
+        Self::Http {
+            error_key,
+            status_code: 403,
+            message: message.into(),
+            context: None,
+        }
+    }
+
     /// Creates a bad request (400) HTTP error with a specific error key.
     pub fn bad_request(error_key: &'static str, message: impl Into<String>) -> Self {
         Self::Http {

@@ -39,13 +39,13 @@ pub async fn get_user(
     request_body = LookupByPhoneRequest,
     responses((status = 200, body = LookupByPhoneResponse))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api, headers, body))]
 pub async fn lookup_user_by_phone(
     State(api): State<BackendApi>,
     headers: HeaderMap,
     Json(body): Json<LookupByPhoneRequest>,
 ) -> Result<Json<LookupByPhoneResponse>, Error> {
-    service::require_authenticated_caller(&api, &headers).await?;
+    let _caller = service::require_service_caller(&api, &headers).await?;
     let response = service::lookup_users_by_phone(&api, body).await?;
     Ok(Json(response))
 }

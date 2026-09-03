@@ -344,7 +344,13 @@ components:
           minLength: 1
           pattern: '^\+[1-9]\d{7,14}$'
           description: E.164 phone number to resolve.
-      required: [ phone ]
+        realm:
+          type: string
+          minLength: 1
+          description: >
+            Authoritative realm to search within. The lookup is realm-scoped
+            to prevent cross-realm candidate leakage.
+      required: [ phone, realm ]
 
     LookupByPhoneResponse:
       type: object

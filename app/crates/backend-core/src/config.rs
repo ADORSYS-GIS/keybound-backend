@@ -340,6 +340,10 @@ pub struct BffAuth {
     pub enabled: bool,
     #[serde(alias = "base-path")]
     pub base_path: String,
+    /// Service identities (JWT `sub` claims) allowed to access the recovery
+    /// phone lookup endpoint. An empty list disables the lookup entirely.
+    #[serde(default)]
+    pub recovery_lookup_allowed_service_subs: Vec<String>,
 }
 
 /// Staff API surface authentication configuration.

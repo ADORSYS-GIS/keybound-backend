@@ -58,6 +58,7 @@ pub struct CompletedKycResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct LookupByPhoneRequest {
     pub phone: String,
+    pub realm: String,
 }
 
 /// Which column of the account matched the submitted phone number.

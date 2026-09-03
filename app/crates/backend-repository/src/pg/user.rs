@@ -16,6 +16,16 @@ pub struct UserRepository {
 
 const USER_METADATA_DATA_TYPE: &str = "metadata";
 
+fn mask_phone(phone: &str) -> String {
+    match phone.strip_prefix('+') {
+        Some(digits) if digits.len() >= 4 => {
+            let last4 = &digits[digits.len() - 4..];
+            format!("+***{}", last4)
+        }
+        _ => "***".to_owned(),
+    }
+}
+
 impl UserRepository {
     pub fn new(pool: Pool<AsyncPgConnection>) -> Self {
         Self { pool }
@@ -307,13 +317,13 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, realm_val, phone))]
     async fn resolve_user_by_phone(
         &self,
         realm_val: &str,
         phone: &str,
     ) -> RepoResult<Option<db::UserRow>> {
-        debug!("Resolving user by phone: {} in realm: {}", phone, realm_val);
+        debug!(phone = %mask_phone(phone), realm = %realm_val, "Resolving user by phone");
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
@@ -327,28 +337,40 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
-    #[instrument(skip(self))]
-    async fn find_users_by_phone(&self, phone: &str) -> RepoResult<Vec<db::UserRow>> {
-        debug!("Finding users by phone: {}", phone);
+    #[instrument(skip(self, realm_val, phone))]
+    async fn find_users_by_phone(
+        &self,
+        realm_val: Option<String>,
+        phone: &str,
+    ) -> RepoResult<Vec<db::UserRow>> {
+        debug!(phone = %mask_phone(phone), "Finding users by phone");
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
 
-        app_user
+        let mut query = app_user
             .filter(phone_number.eq(phone).or(username.eq(phone)))
+            .into_boxed();
+
+        if let Some(ref r) = realm_val {
+            debug!(realm = %r, "Filtering by realm");
+            query = query.filter(realm.eq(r));
+        }
+
+        query
             .order(created_at.desc())
             .load::<db::UserRow>(&mut conn)
             .await
             .map_err(Into::into)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, realm_val, phone))]
     async fn resolve_or_create_user_by_phone(
         &self,
         realm_val: &str,
         phone: &str,
     ) -> RepoResult<(db::UserRow, bool)> {
-        debug!("Resolving or creating user by phone: {}", phone);
+        debug!(phone = %mask_phone(phone), "Resolving or creating user by phone");
         if let Some(user) = self.resolve_user_by_phone(realm_val, phone).await? {
             return Ok((user, false));
         }
@@ -439,11 +461,12 @@ impl UserRepo for UserRepository {
             .map_err(Into::into)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, phone))]
     async fn update_phone_number(&self, user_id_val: &str, phone: &str) -> RepoResult<()> {
         debug!(
-            "Updating user phone number: user_id={}, phone={}",
-            user_id_val, phone
+            user_id = %user_id_val,
+            phone = %mask_phone(phone),
+            "Updating user phone number"
         );
         use backend_model::schema::app_user::dsl::*;
 
@@ -648,5 +671,25 @@ impl UserRepo for UserRepository {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_phone_redacts_full_number() {
+        assert_eq!(mask_phone("+237690000000"), "+***0000");
+        assert_eq!(mask_phone("+14155552671"), "+***2671");
+        assert_eq!(mask_phone("+49170123456"), "+***3456");
+    }
+
+    #[test]
+    fn mask_phone_handles_short_numbers() {
+        assert_eq!(mask_phone("+1234"), "+***1234");
+        assert_eq!(mask_phone("+123"), "***");
+        assert_eq!(mask_phone(""), "***");
+        assert_eq!(mask_phone("237690000000"), "***");
     }
 }

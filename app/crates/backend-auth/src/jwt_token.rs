@@ -33,7 +33,12 @@ impl JwtToken {
         JwtToken { claims }
     }
 
-    /// Returns the user ID from the token's subject claim.
+    /// Returns the original subject claim without user-ID normalization.
+    pub fn subject(&self) -> &str {
+        &self.claims.sub
+    }
+
+    /// Returns the normalized application user ID.
     pub fn user_id(&self) -> &str {
         normalize_user_id(&self.claims.sub)
     }
@@ -110,5 +115,6 @@ mod tests {
         });
 
         assert_eq!(token.user_id(), "usr_001");
+        assert_eq!(token.subject(), "f:backend-user-storage:usr_001");
     }
 }

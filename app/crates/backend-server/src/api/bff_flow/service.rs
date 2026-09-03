@@ -3,7 +3,7 @@ use super::models::{
     LookupByPhoneCandidate, LookupByPhoneRequest, LookupByPhoneResponse, PhoneMatchField,
     SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
-use crate::api::BackendApi;
+use crate::api::{BackendApi, BffSignatureClaims};
 use crate::flows::registry::{actor_label, waiting_status};
 use crate::flows::runtime::{merge_json_value, merged_json, resolve_transition, step_services};
 use axum::http::HeaderMap;
@@ -1078,7 +1078,7 @@ fn metadata_scalar_to_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
-#[instrument(skip(api))]
+#[instrument(skip(api, body), fields(phone = "***"))]
 pub async fn lookup_users_by_phone(
     api: &BackendApi,
     body: LookupByPhoneRequest,
@@ -1091,7 +1091,11 @@ pub async fn lookup_users_by_phone(
         ));
     }
 
-    let rows = api.state.user.find_users_by_phone(phone).await?;
+    let rows = api
+        .state
+        .user
+        .find_users_by_phone(Some(body.realm.clone()), phone)
+        .await?;
     if rows.is_empty() {
         return Ok(LookupByPhoneResponse { candidates: vec![] });
     }
@@ -1135,12 +1139,11 @@ pub async fn lookup_users_by_phone(
     Ok(LookupByPhoneResponse { candidates })
 }
 
-pub async fn require_authenticated_caller(
+pub async fn require_service_caller(
     api: &BackendApi,
     headers: &HeaderMap,
-) -> Result<(), Error> {
-    api.require_bff_claims(headers)?;
-    Ok(())
+) -> Result<BffSignatureClaims, Error> {
+    api.require_service_caller(headers)
 }
 
 #[instrument(skip(api))]
@@ -1224,8 +1227,8 @@ mod lookup_by_phone_tests {
         let phone = "+237690000000";
         let mut user = MockUserRepo::new();
         user.expect_find_users_by_phone()
-            .withf(move |p: &str| p == phone)
-            .returning(move |_| {
+            .withf(move |_realm: &Option<String>, p: &str| p == phone)
+            .returning(move |_, _| {
                 Ok(vec![
                     user_row("usr-1", phone, Some(phone.to_owned()), false),
                     user_row("usr-2", phone, Some(phone.to_owned()), true),
@@ -1247,6 +1250,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1272,7 +1276,7 @@ mod lookup_by_phone_tests {
     async fn lookup_by_phone_response_exposes_no_unrelated_user_fields() {
         let phone = "+237690000000";
         let mut user = MockUserRepo::new();
-        user.expect_find_users_by_phone().returning(move |_| {
+        user.expect_find_users_by_phone().returning(move |_, _| {
             Ok(vec![user_row(
                 "usr-1",
                 phone,
@@ -1287,6 +1291,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1315,7 +1320,7 @@ mod lookup_by_phone_tests {
     async fn lookup_by_phone_computes_matched_by_column() {
         let phone = "+237690000000";
         let mut user = MockUserRepo::new();
-        user.expect_find_users_by_phone().returning(move |_| {
+        user.expect_find_users_by_phone().returning(move |_, _| {
             Ok(vec![
                 user_row("usr-phone", "someone", Some(phone.to_owned()), false),
                 user_row(
@@ -1333,6 +1338,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1346,7 +1352,7 @@ mod lookup_by_phone_tests {
     async fn lookup_by_phone_normalizes_numeric_fineract_identifiers() {
         let phone = "+237690000000";
         let mut user = MockUserRepo::new();
-        user.expect_find_users_by_phone().returning(move |_| {
+        user.expect_find_users_by_phone().returning(move |_, _| {
             Ok(vec![user_row(
                 "usr-1",
                 phone,
@@ -1364,6 +1370,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1378,13 +1385,15 @@ mod lookup_by_phone_tests {
     #[tokio::test]
     async fn lookup_by_phone_returns_empty_list_when_no_candidates() {
         let mut user = MockUserRepo::new();
-        user.expect_find_users_by_phone().returning(|_| Ok(vec![]));
+        user.expect_find_users_by_phone()
+            .returning(|_, _| Ok(vec![]));
 
         let api = api_with(user);
         let response = lookup_users_by_phone(
             &api,
             LookupByPhoneRequest {
                 phone: "+237699999999".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1397,14 +1406,15 @@ mod lookup_by_phone_tests {
     async fn lookup_by_phone_accepts_surrounding_whitespace() {
         let mut user = MockUserRepo::new();
         user.expect_find_users_by_phone()
-            .withf(|p: &str| p == "+237690000000")
-            .returning(|_| Ok(vec![]));
+            .withf(|_realm: &Option<String>, p: &str| p == "+237690000000")
+            .returning(|_, _| Ok(vec![]));
 
         let api = api_with(user);
         let response = lookup_users_by_phone(
             &api,
             LookupByPhoneRequest {
                 phone: "  +237690000000 ".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1432,6 +1442,7 @@ mod lookup_by_phone_tests {
                 &api,
                 LookupByPhoneRequest {
                     phone: bad.to_owned(),
+                    realm: "fineract".to_owned(),
                 },
             )
             .await
@@ -1458,5 +1469,103 @@ mod lookup_by_phone_tests {
         assert!(!is_e164("+237690000000123456"));
         assert!(!is_e164("+23769000000a"));
         assert!(!is_e164(""));
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_response_never_contains_raw_phone() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone()
+            .withf(move |_realm: &Option<String>, p: &str| p == phone)
+            .returning(move |_, _| Ok(vec![]));
+        user.expect_get_metadata_fields_for_users()
+            .returning(|_, _| Ok(HashMap::new()));
+
+        let api = api_with(user);
+
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+                realm: "fineract".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(
+            !serialized.contains("237690000000"),
+            "response body leaked raw phone: {serialized}"
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_returns_only_matching_realm_candidates() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone()
+            .returning(|realm, _| match realm.as_deref() {
+                Some("fineract") => Ok(vec![user_row(
+                    "usr-fineract",
+                    phone,
+                    Some(phone.to_owned()),
+                    false,
+                )]),
+                Some("keycloak") => Ok(vec![user_row(
+                    "usr-keycloak",
+                    phone,
+                    Some(phone.to_owned()),
+                    false,
+                )]),
+                _ => Ok(vec![]),
+            });
+        metadata_expect(&mut user, vec![]);
+
+        let api = api_with(user);
+
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+                realm: "fineract".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.candidates.len(), 1);
+        assert_eq!(response.candidates[0].user_id, "usr-fineract");
+    }
+
+    #[tokio::test]
+    async fn lookup_by_phone_returns_empty_for_unknown_realm() {
+        let phone = "+237690000000";
+        let mut user = MockUserRepo::new();
+        user.expect_find_users_by_phone()
+            .returning(|realm, _| match realm.as_deref() {
+                Some("fineract") => Ok(vec![user_row(
+                    "usr-fineract",
+                    phone,
+                    Some(phone.to_owned()),
+                    false,
+                )]),
+                _ => Ok(vec![]),
+            });
+        metadata_expect(&mut user, vec![]);
+
+        let api = api_with(user);
+
+        let response = lookup_users_by_phone(
+            &api,
+            LookupByPhoneRequest {
+                phone: phone.to_owned(),
+                realm: "nonexistent".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(response.candidates.is_empty());
     }
 }

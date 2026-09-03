@@ -1,4 +1,4 @@
-use crate::api::{BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_USER_ID_HEADER};
+use crate::api::{BFF_AUTH_DEVICE_ID_HEADER, BFF_AUTH_SUB_HEADER, BFF_AUTH_USER_ID_HEADER};
 use crate::auth_signature::{
     canonicalize_device_auth_payload, validate_public_key_match, validate_timestamp,
     validate_user_id_hint, verify_signature,
@@ -37,7 +37,7 @@ pub async fn require_bff_auth(
         Err(_) => return Error::unauthorized("Invalid request body").into_response(),
     };
 
-    let (user_id, device_id) = match authenticate(&state, &parts.headers).await {
+    let (user_id, device_id, subject) = match authenticate(&state, &parts.headers).await {
         Ok(claims) => claims,
         Err(error) => return error.into_response(),
     };
@@ -58,6 +58,15 @@ pub async fn require_bff_auth(
         .headers
         .insert(BFF_AUTH_DEVICE_ID_HEADER, device_header);
 
+    parts.headers.remove(BFF_AUTH_SUB_HEADER);
+    if let Some(subject) = subject {
+        let subject_header = match HeaderValue::from_str(&subject) {
+            Ok(value) => value,
+            Err(_) => return Error::unauthorized("Invalid authenticated subject").into_response(),
+        };
+        parts.headers.insert(BFF_AUTH_SUB_HEADER, subject_header);
+    }
+
     let req = Request::from_parts(parts, Body::from(body_bytes));
     next.run(req).await
 }
@@ -65,7 +74,7 @@ pub async fn require_bff_auth(
 async fn authenticate(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<(String, String), Error> {
+) -> Result<(String, String, Option<String>), Error> {
     if let Some(token) = extract_bearer_token(headers) {
         return authenticate_bearer(state, &token).await;
     }
@@ -89,9 +98,10 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 async fn authenticate_bearer(
     state: &Arc<AppState>,
     token: &str,
-) -> Result<(String, String), Error> {
+) -> Result<(String, String, Option<String>), Error> {
     let jwt = JwtToken::verify(token, &state.oidc_state).await?;
     let user_id = jwt.user_id().to_owned();
+    let subject = jwt.subject().to_owned();
     let device_id = "bff".to_owned();
 
     debug!(
@@ -99,13 +109,13 @@ async fn authenticate_bearer(
         "Bearer token authentication successful"
     );
 
-    Ok((user_id, device_id))
+    Ok((user_id, device_id, Some(subject)))
 }
 
 async fn authenticate_signature(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<(String, String), Error> {
+) -> Result<(String, String, Option<String>), Error> {
     let device_id = header_value(headers, HEADER_DEVICE_ID)
         .ok_or_else(|| Error::unauthorized("Missing x-auth-device-id"))?;
     let signature = header_value(headers, HEADER_SIGNATURE)
@@ -178,7 +188,7 @@ async fn authenticate_signature(
         "Signature authentication successful"
     );
 
-    Ok((device.user_id, device.device_id))
+    Ok((device.user_id, device.device_id, None))
 }
 
 fn header_value(headers: &HeaderMap, key: &str) -> Option<String> {

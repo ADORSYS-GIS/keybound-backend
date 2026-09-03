@@ -65,6 +65,8 @@ kc:
 bff:
   enabled: true
   base-path: ""
+  recovery-lookup-allowed-service-subs:
+    - "azamra-tokenization-bff"
 
 staff:
   enabled: true

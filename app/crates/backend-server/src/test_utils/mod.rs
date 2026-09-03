@@ -170,6 +170,7 @@ mock! {
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
         async fn find_users_by_phone(
             &self,
+            realm: Option<String>,
             phone: &str,
         ) -> RepoResult<Vec<backend_model::db::UserRow>>;
         async fn resolve_or_create_user_by_phone(
@@ -306,6 +307,8 @@ kc:
 bff:
   enabled: true
   base_path: "/bff"
+  recovery_lookup_allowed_service_subs:
+    - "azamra-tokenization-bff"
 staff:
   enabled: true
   base_path: "/staff"
