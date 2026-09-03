@@ -2,7 +2,7 @@ use anyhow::Result;
 use backend_migrate::connect_postgres_and_migrate;
 use backend_model::db;
 use backend_model::kc::{KcAnyMap, RecoveryBindRequest};
-use backend_model::schema::{app_user, device, recovery_idempotency};
+use backend_model::schema::{app_user, device, old_device_policy_idempotency, recovery_idempotency};
 use backend_repository::{DeviceRepo, DeviceRepository};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -96,6 +96,12 @@ async fn cleanup(
     for k in idempotency_keys {
         diesel::delete(
             recovery_idempotency::table.filter(recovery_idempotency::idempotency_key.eq(k)),
+        )
+        .execute(&mut conn)
+        .await?;
+        diesel::delete(
+            old_device_policy_idempotency::table
+                .filter(old_device_policy_idempotency::idempotency_key.eq(k)),
         )
         .execute(&mut conn)
         .await?;
@@ -630,5 +636,208 @@ async fn exact_existing_active_credential_is_idempotent() -> Result<()> {
     assert_eq!(idem.device_record_id, existing_record_id);
 
     cleanup(&pool, &[idem_key], &[&device_id], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn revoke_all_previous_revokes_old_devices_but_keeps_new() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping old-device policy test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let old1 = backend_id::device_id()?.to_string();
+    let old2 = backend_id::device_id()?.to_string();
+    let new_dev = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440021";
+
+    seed_user(&pool, &user_id, "recovery-revoke-all").await?;
+    let old1_record = insert_device_row(&pool, &user_id, &old1, "jkt-old1", &build_public_jwk(), "ACTIVE").await?;
+    let old2_record = insert_device_row(&pool, &user_id, &old2, "jkt-old2", &build_other_public_jwk(), "ACTIVE").await?;
+    let new_record = insert_device_row(&pool, &user_id, &new_dev, "jkt-new", &build_public_jwk(), "ACTIVE").await?;
+
+    let outcome = repo
+        .apply_old_device_policy(
+            idem_key,
+            "rc_revoke_all",
+            "hash_revoke_all",
+            &user_id,
+            "REVOKE_ALL_PREVIOUS",
+            &[new_dev.clone()],
+        )
+        .await?;
+
+    assert!(!outcome.already_applied);
+    assert!(outcome.affected_device_ids.contains(&old1_record));
+    assert!(outcome.affected_device_ids.contains(&old2_record));
+    assert!(!outcome.affected_device_ids.contains(&new_record));
+
+    // Old devices are REVOKED, the new device stays ACTIVE.
+    let mut conn = pool.get().await?;
+    let statuses: Vec<String> = device::table
+        .filter(device::user_id.eq(&user_id))
+        .select(device::status)
+        .load::<String>(&mut conn)
+        .await?;
+    assert_eq!(statuses.iter().filter(|s| s.as_str() == "REVOKED").count(), 2);
+    assert_eq!(statuses.iter().filter(|s| s.as_str() == "ACTIVE").count(), 1);
+
+    cleanup(&pool, &[idem_key], &[&old1, &old2, &new_dev], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn quarantine_all_previous_sets_quarantined_status() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping old-device policy test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let old1 = backend_id::device_id()?.to_string();
+    let new_dev = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440022";
+
+    seed_user(&pool, &user_id, "recovery-quarantine").await?;
+    let old1_record = insert_device_row(&pool, &user_id, &old1, "jkt-q-old1", &build_public_jwk(), "ACTIVE").await?;
+    insert_device_row(&pool, &user_id, &new_dev, "jkt-q-new", &build_other_public_jwk(), "ACTIVE").await?;
+
+    let outcome = repo
+        .apply_old_device_policy(
+            idem_key,
+            "rc_quarantine",
+            "hash_quarantine",
+            &user_id,
+            "QUARANTINE_ALL_PREVIOUS",
+            &[new_dev.clone()],
+        )
+        .await?;
+
+    assert!(outcome.affected_device_ids.contains(&old1_record));
+
+    let mut conn = pool.get().await?;
+    let old_status: String = device::table
+        .filter(device::device_id.eq(&old1))
+        .select(device::status)
+        .first::<String>(&mut conn)
+        .await?;
+    assert_eq!(old_status, "QUARANTINED");
+
+    cleanup(&pool, &[idem_key], &[&old1, &new_dev], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn old_device_policy_is_idempotent_on_retry() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping old-device policy test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let old1 = backend_id::device_id()?.to_string();
+    let new_dev = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440023";
+
+    seed_user(&pool, &user_id, "recovery-idem-policy").await?;
+    let old1_record = insert_device_row(&pool, &user_id, &old1, "jkt-i-old1", &build_public_jwk(), "ACTIVE").await?;
+    insert_device_row(&pool, &user_id, &new_dev, "jkt-i-new", &build_other_public_jwk(), "ACTIVE").await?;
+
+    let first = repo
+        .apply_old_device_policy(
+            idem_key,
+            "rc_idem_policy",
+            "hash_idem_policy",
+            &user_id,
+            "REVOKE_ALL_PREVIOUS",
+            &[new_dev.clone()],
+        )
+        .await?;
+    assert!(!first.already_applied);
+
+    // Retry with the same idempotency key and identical payload returns the same result.
+    let retry = repo
+        .apply_old_device_policy(
+            idem_key,
+            "rc_idem_policy",
+            "hash_idem_policy",
+            &user_id,
+            "REVOKE_ALL_PREVIOUS",
+            &[new_dev.clone()],
+        )
+        .await?;
+    assert!(retry.already_applied);
+    assert_eq!(retry.affected_device_ids, first.affected_device_ids);
+    assert!(retry.affected_device_ids.contains(&old1_record));
+
+    cleanup(&pool, &[idem_key], &[&old1, &new_dev], &user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn old_device_policy_rejects_modified_payload_on_idempotency_reuse() -> Result<()> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("Skipping old-device policy test because DATABASE_URL is not set");
+            return Ok(());
+        }
+    };
+
+    let pool = connect_postgres_and_migrate(&database_url).await?;
+    let repo = DeviceRepository::new(pool.clone());
+
+    let user_id = backend_id::user_id()?.to_string();
+    let old1 = backend_id::device_id()?.to_string();
+    let new_dev = backend_id::device_id()?.to_string();
+    let idem_key = "550e8400-e29b-41d4-a716-446655440024";
+
+    seed_user(&pool, &user_id, "recovery-conflict-policy").await?;
+    insert_device_row(&pool, &user_id, &old1, "jkt-c-old1", &build_public_jwk(), "ACTIVE").await?;
+    insert_device_row(&pool, &user_id, &new_dev, "jkt-c-new", &build_other_public_jwk(), "ACTIVE").await?;
+
+    repo.apply_old_device_policy(
+        idem_key,
+        "rc_conflict_policy",
+        "hash_conflict_policy",
+        &user_id,
+        "REVOKE_ALL_PREVIOUS",
+        &[new_dev.clone()],
+    )
+    .await?;
+
+    // Reusing the same idempotency key with a different policy must conflict.
+    let res = repo
+        .apply_old_device_policy(
+            idem_key,
+            "rc_conflict_policy",
+            "hash_conflict_policy",
+            &user_id,
+            "QUARANTINE_ALL_PREVIOUS",
+            &[new_dev.clone()],
+        )
+        .await;
+    expect_conflict(&res, "IDEMPOTENCY_CONFLICT")?;
+
+    cleanup(&pool, &[idem_key], &[&old1, &new_dev], &user_id).await?;
     Ok(())
 }

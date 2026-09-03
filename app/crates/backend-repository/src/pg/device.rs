@@ -469,4 +469,177 @@ impl DeviceRepo for DeviceRepository {
         })
         .await
     }
+
+    async fn find_old_device_policy_idempotency(
+        &self,
+        idempotency_key: &str,
+    ) -> RepoResult<Option<db::OldDevicePolicyIdempotencyRow>> {
+        use backend_model::schema::old_device_policy_idempotency::dsl as op_dsl;
+        let mut conn = self.get_conn().await?;
+        op_dsl::old_device_policy_idempotency
+            .filter(op_dsl::idempotency_key.eq(idempotency_key))
+            .first::<db::OldDevicePolicyIdempotencyRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::<Error>::into)
+    }
+
+    async fn find_recovery_bind_by_case(
+        &self,
+        recovery_case_id: &str,
+    ) -> RepoResult<Option<db::RecoveryIdempotencyRow>> {
+        use backend_model::schema::recovery_idempotency::dsl as recip_dsl;
+        let mut conn = self.get_conn().await?;
+        recip_dsl::recovery_idempotency
+            .filter(recip_dsl::recovery_case_id.eq(recovery_case_id))
+            .first::<db::RecoveryIdempotencyRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::<Error>::into)
+    }
+
+    async fn apply_old_device_policy(
+        &self,
+        idempotency_key: &str,
+        recovery_case_id: &str,
+        request_hash: &str,
+        target_user_id: &str,
+        policy: &str,
+        except_device_ids: &[String],
+    ) -> RepoResult<OldDevicePolicyOutcome> {
+        use backend_model::schema::app_user::dsl as user_dsl;
+        use backend_model::schema::device::dsl as device_dsl;
+        use backend_model::schema::old_device_policy_idempotency::dsl as op_dsl;
+
+        let mut conn = self.get_conn().await?;
+
+        conn.transaction::<_, Error, _>(|conn| {
+            Box::pin(async move {
+                // 1. Idempotency check by key
+                let existing = op_dsl::old_device_policy_idempotency
+                    .filter(op_dsl::idempotency_key.eq(idempotency_key))
+                    .first::<db::OldDevicePolicyIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(existing) = existing {
+                    if existing.request_hash == request_hash
+                        && existing.recovery_case_id == recovery_case_id
+                        && existing.target_user_id == target_user_id
+                        && existing.policy == policy
+                    {
+                        return Ok(OldDevicePolicyOutcome {
+                            already_applied: true,
+                            affected_device_ids: deserialize_affected(existing.affected_device_ids),
+                        });
+                    }
+                    return Err(Error::conflict(
+                        "IDEMPOTENCY_CONFLICT",
+                        "Idempotency key reused with modified payload",
+                    ));
+                }
+
+                // 2. Enforce exactly one policy application per recovery case
+                let case_applied = op_dsl::old_device_policy_idempotency
+                    .filter(op_dsl::recovery_case_id.eq(recovery_case_id))
+                    .first::<db::OldDevicePolicyIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+                if let Some(existing) = case_applied {
+                    if existing.policy == policy && existing.target_user_id == target_user_id {
+                        return Ok(OldDevicePolicyOutcome {
+                            already_applied: true,
+                            affected_device_ids: deserialize_affected(existing.affected_device_ids),
+                        });
+                    }
+                    return Err(Error::conflict(
+                        "POLICY_ALREADY_APPLIED",
+                        "Old-device policy already applied for this recovery case",
+                    ));
+                }
+
+                // 3. Verify target user exists
+                let user_count = user_dsl::app_user
+                    .filter(user_dsl::user_id.eq(target_user_id))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+                if user_count == 0 {
+                    return Err(Error::bad_request(
+                        "USER_NOT_FOUND",
+                        "Target user does not exist",
+                    ));
+                }
+
+                // 4. List all devices for the target user
+                let devices = device_dsl::device
+                    .filter(device_dsl::user_id.eq(target_user_id))
+                    .select(db::DeviceRow::as_select())
+                    .load::<db::DeviceRow>(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+
+                // 5. Apply policy: revoke/quarantine every device except the newly bound one(s)
+                let mut affected = Vec::new();
+                for device in devices {
+                    if except_device_ids.iter().any(|id| id == &device.device_id) {
+                        continue;
+                    }
+                    let new_status = match policy {
+                        "QUARANTINE_ALL_PREVIOUS" => "QUARANTINED",
+                        _ => "REVOKED",
+                    };
+                    if device.status != new_status {
+                        diesel::update(device_dsl::device)
+                            .filter(device_dsl::device_record_id.eq(&device.device_record_id))
+                            .set(device_dsl::status.eq(new_status))
+                            .execute(conn)
+                            .await
+                            .map_err(Into::<Error>::into)?;
+                    }
+                    affected.push(device.device_record_id);
+                }
+
+                // 6. Record idempotency
+                let affected_json = serde_json::to_value(&affected).map_err(|e| {
+                    Error::Server(format!("Failed to serialize affected device ids: {e}"))
+                })?;
+                let row = db::OldDevicePolicyIdempotencyRow {
+                    idempotency_key: idempotency_key.to_string(),
+                    recovery_case_id: recovery_case_id.to_string(),
+                    request_hash: request_hash.to_string(),
+                    target_user_id: target_user_id.to_string(),
+                    policy: policy.to_string(),
+                    affected_device_ids: affected_json,
+                    created_at: chrono::Utc::now(),
+                };
+                diesel::insert_into(op_dsl::old_device_policy_idempotency)
+                    .values(&row)
+                    .on_conflict_do_nothing()
+                    .execute(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+
+                Ok(OldDevicePolicyOutcome {
+                    already_applied: false,
+                    affected_device_ids: affected,
+                })
+            })
+        })
+        .await
+    }
+}
+
+fn deserialize_affected(value: serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
 }

@@ -290,6 +290,44 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /v1/recoveries/{recovery_case_id}/old-devices/policy:
+    post:
+      tags: [ recovery ]
+      summary: Apply authoritative old-device revocation/quarantine policy after a successful recovery bind
+      operationId: oldDevicesPolicy
+      security:
+        - KCSignature: [ ]
+      parameters:
+        - name: recovery_case_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OldDevicePolicyRequest'
+      responses:
+        '200':
+          description: Policy applied (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OldDevicePolicyResponse'
+        '409':
+          description: Conflict / policy already applied / authorization failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 
 components:
   securitySchemes:
@@ -388,6 +426,45 @@ components:
           additionalProperties: true
         binding_operation_id:
           type: string
+
+    OldDevicePolicy:
+      type: string
+      enum: [ REVOKE_ALL_PREVIOUS, QUARANTINE_ALL_PREVIOUS, KEEP_APPROVED_ALLOWLIST_ONLY ]
+
+    OldDevicePolicyRequest:
+      type: object
+      required: [ realm, approval_revision, policy ]
+      properties:
+        realm:
+          type: string
+        approval_revision:
+          type: integer
+          format: int64
+        policy:
+          $ref: '#/components/schemas/OldDevicePolicy'
+        except_device_ids:
+          type: array
+          items:
+            type: string
+          description: Device ids to keep active (the newly bound device). Defaults to empty.
+        reason:
+          type: string
+          description: Optional human-readable reason for audit.
+
+    OldDevicePolicyResponse:
+      type: object
+      required: [ status, policy, affected_device_ids ]
+      properties:
+        status:
+          type: string
+          enum: [ APPLIED, ALREADY_APPLIED ]
+        policy:
+          $ref: '#/components/schemas/OldDevicePolicy'
+        affected_device_ids:
+          type: array
+          items:
+            type: string
+          description: Device record ids that were revoked or quarantined.
 
     EnrollmentBindResponseStatus:
       type: string
