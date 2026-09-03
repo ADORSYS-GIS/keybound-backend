@@ -137,6 +137,19 @@ pub struct EnrollmentBindRequest {
 }
 
 #[derive(Debug, Clone, o2o)]
+#[from_owned(gen_oas_server_kc::models::RecoveryBindRequest)]
+pub struct RecoveryBindRequest {
+    pub realm: String,
+    pub target_user_id: String,
+    pub approval_revision: i64,
+    pub device_id: String,
+    pub jkt: String,
+    #[map(public_jwk)]
+    pub public_jwk: KcAnyMap,
+    pub binding_operation_id: String,
+}
+
+#[derive(Debug, Clone, o2o)]
 #[owned_into(gen_oas_server_kc::models::UserRecord)]
 pub struct UserRecordDto {
     pub user_id: String,

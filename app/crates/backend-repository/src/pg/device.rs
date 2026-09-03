@@ -3,9 +3,9 @@ use backend_core::{Error, async_trait};
 use backend_model::{db, kc as kc_map};
 use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use diesel_async::AsyncPgConnection;
-use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+
 use tracing::{debug, instrument};
 
 #[derive(Clone)]
@@ -243,5 +243,230 @@ impl DeviceRepo for DeviceRepository {
             .get_result::<i64>(&mut conn)
             .await
             .map_err(Into::<Error>::into)
+    }
+
+    async fn find_recovery_idempotency(
+        &self,
+        idempotency_key_val: &str,
+    ) -> RepoResult<Option<db::RecoveryIdempotencyRow>> {
+        use backend_model::schema::recovery_idempotency::dsl::*;
+
+        let mut conn = self.get_conn().await?;
+
+        recovery_idempotency
+            .filter(idempotency_key.eq(idempotency_key_val))
+            .first::<db::RecoveryIdempotencyRow>(&mut conn)
+            .await
+            .optional()
+            .map_err(Into::<Error>::into)
+    }
+
+    #[instrument(skip(self))]
+    async fn bind_recovery_device(
+        &self,
+        idempotency_key_val: &str,
+        recovery_case_id_val: &str,
+        request_hash_val: &str,
+        req: &kc_map::RecoveryBindRequest,
+    ) -> RepoResult<String> {
+        debug!(
+            "Binding recovery device: {} to target_user: {} in realm: {}",
+            req.device_id, req.target_user_id, req.realm
+        );
+        use backend_model::schema::app_user::dsl as user_dsl;
+        use backend_model::schema::device::dsl as device_dsl;
+        use backend_model::schema::recovery_idempotency::dsl as recip_dsl;
+
+        let mut conn = self.get_conn().await?;
+
+        conn.transaction::<_, Error, _>(|conn| {
+            Box::pin(async move {
+                // 1. Check existing idempotency by idempotency_key OR binding_operation_id
+                let existing_op = recip_dsl::recovery_idempotency
+                    .filter(
+                        recip_dsl::idempotency_key
+                            .eq(idempotency_key_val)
+                            .or(recip_dsl::binding_operation_id.eq(&req.binding_operation_id)),
+                    )
+                    .first::<db::RecoveryIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(existing) = existing_op {
+                    if existing.request_hash == request_hash_val
+                        && existing.recovery_case_id == recovery_case_id_val
+                    {
+                        return Ok(existing.device_record_id);
+                    } else {
+                        return Err(Error::conflict(
+                            "IDEMPOTENCY_CONFLICT",
+                            "Idempotency key or operation ID reused with modified payload",
+                        ));
+                    }
+                }
+
+                // 2. Verify target user exists AND matches specified realm
+                let user_count = user_dsl::app_user
+                    .filter(user_dsl::user_id.eq(&req.target_user_id))
+                    .filter(user_dsl::realm.eq(&req.realm))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+
+                if user_count == 0 {
+                    return Err(Error::bad_request(
+                        "USER_NOT_FOUND",
+                        "Target user does not exist in the specified realm",
+                    ));
+                }
+
+                // 3. Canonicalize JWK
+                let mut sorted_jwk: std::collections::BTreeMap<String, serde_json::Value> =
+                    std::collections::BTreeMap::new();
+                for (k, v) in &req.public_jwk {
+                    sorted_jwk.insert(k.clone(), v.0.clone());
+                }
+                let public_jwk_str = serde_json::to_string(&sorted_jwk).map_err(|e| {
+                    Error::Server(format!(
+                        "Failed to serialize public_jwk for recovery device bind: {e}"
+                    ))
+                })?;
+
+                let record_id = backend_model::kc::device_record_id(&req.device_id, &public_jwk_str);
+                let now = chrono::Utc::now();
+
+                // 4. Check for conflicting device binding with another user
+                let conflicting = device_dsl::device
+                    .filter(
+                        device_dsl::device_id
+                            .eq(&req.device_id)
+                            .or(device_dsl::jkt.eq(&req.jkt)),
+                    )
+                    .select(db::DeviceRow::as_select())
+                    .first::<db::DeviceRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(existing) = conflicting
+                    && existing.user_id != req.target_user_id
+                {
+                    return Err(Error::conflict(
+                        "DEVICE_ALREADY_BOUND",
+                        "Device already bound to a different user",
+                    ));
+                }
+
+                // 5. Insert or verify device binding
+                let new_device = db::DeviceRow {
+                    device_id: req.device_id.clone(),
+                    user_id: req.target_user_id.clone(),
+                    jkt: req.jkt.clone(),
+                    public_jwk: public_jwk_str.clone(),
+                    device_record_id: record_id.clone(),
+                    status: "ACTIVE".to_string(),
+                    label: None,
+                    created_at: now,
+                    last_seen_at: Some(now),
+                };
+
+                diesel::insert_into(device_dsl::device)
+                    .values(&new_device)
+                    .on_conflict_do_nothing()
+                    .execute(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+
+                let winner = device_dsl::device
+                    .filter(
+                        device_dsl::device_id
+                            .eq(&req.device_id)
+                            .or(device_dsl::jkt.eq(&req.jkt)),
+                    )
+                    .select(db::DeviceRow::as_select())
+                    .first::<db::DeviceRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(winner) = winner {
+                    if winner.user_id != req.target_user_id {
+                        return Err(Error::conflict(
+                            "DEVICE_ALREADY_BOUND",
+                            "Device already bound to a different user",
+                        ));
+                    }
+                    // Idempotent success must prove the EXACT approved credential is durably
+                    // present in an active state. A same-user row that merely collides on
+                    // device_id or jkt (different key / public JWK / record id) or that sits in
+                    // a revoked/incompatible state must never be reported as a successful
+                    // recovery bind, so we do not write the recovery-idempotency success row.
+                    let exact_credential = winner.device_id == req.device_id
+                        && winner.jkt == req.jkt
+                        && winner.public_jwk == public_jwk_str
+                        && winner.device_record_id == record_id;
+                    if !exact_credential {
+                        return Err(Error::conflict(
+                            "DEVICE_CREDENTIAL_MISMATCH",
+                            "A device row collides on device id or JKT but does not match the approved recovery credential",
+                        ));
+                    }
+                    if winner.status != "ACTIVE" {
+                        return Err(Error::conflict(
+                            "DEVICE_NOT_ACTIVE",
+                            "The approved recovery credential exists but is not in an active state",
+                        ));
+                    }
+                }
+
+                // 6. Insert idempotency record
+                let new_idempotency = db::RecoveryIdempotencyRow {
+                    idempotency_key: idempotency_key_val.to_string(),
+                    recovery_case_id: recovery_case_id_val.to_string(),
+                    request_hash: request_hash_val.to_string(),
+                    bound_user_id: req.target_user_id.clone(),
+                    device_id: req.device_id.clone(),
+                    binding_operation_id: req.binding_operation_id.clone(),
+                    device_record_id: record_id.clone(),
+                    created_at: now,
+                };
+
+                diesel::insert_into(recip_dsl::recovery_idempotency)
+                    .values(&new_idempotency)
+                    .on_conflict_do_nothing()
+                    .execute(conn)
+                    .await
+                    .map_err(Into::<Error>::into)?;
+
+                let winner = recip_dsl::recovery_idempotency
+                    .filter(
+                        recip_dsl::idempotency_key
+                            .eq(idempotency_key_val)
+                            .or(recip_dsl::binding_operation_id.eq(&req.binding_operation_id)),
+                    )
+                    .first::<db::RecoveryIdempotencyRow>(conn)
+                    .await
+                    .optional()
+                    .map_err(Into::<Error>::into)?;
+
+                if let Some(winner) = winner {
+                    if winner.request_hash == request_hash_val
+                        && winner.recovery_case_id == recovery_case_id_val
+                    {
+                        return Ok(winner.device_record_id);
+                    } else {
+                        return Err(Error::conflict(
+                            "IDEMPOTENCY_CONFLICT",
+                            "Idempotency key or operation ID reused with modified payload",
+                        ));
+                    }
+                }
+
+                Ok(record_id)
+            })
+        })
+        .await
     }
 }

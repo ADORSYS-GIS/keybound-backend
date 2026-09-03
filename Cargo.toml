@@ -67,6 +67,7 @@ async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 dotenvy = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 cuid = { version = "1" }
 regex = "1"
 urlencoding = "2.1.3"
