@@ -9,7 +9,8 @@ use crate::api::BackendApi;
 
 use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, FlowDetailResponse, FlowResponse,
-    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    LookupByPhoneRequest, LookupByPhoneResponse, SessionDetailResponse, SessionResponse,
+    StepResponse, SubmitStepRequest, UserResponse,
 };
 use super::service;
 
@@ -29,6 +30,24 @@ pub async fn get_user(
     let caller_id = service::require_user_id(&api, &headers).await?;
     let user = service::get_user(&api, user_id, caller_id).await?;
     Ok(Json(user))
+}
+
+#[utoipa::path(
+    post,
+    path = "/users/lookup-by-phone",
+    tag = "users",
+    request_body = LookupByPhoneRequest,
+    responses((status = 200, body = LookupByPhoneResponse))
+)]
+#[instrument(skip(api, headers, body))]
+pub async fn lookup_user_by_phone(
+    State(api): State<BackendApi>,
+    headers: HeaderMap,
+    Json(body): Json<LookupByPhoneRequest>,
+) -> Result<Json<LookupByPhoneResponse>, Error> {
+    let _caller = service::require_service_caller(&api, &headers).await?;
+    let response = service::lookup_users_by_phone(&api, body).await?;
+    Ok(Json(response))
 }
 
 #[utoipa::path(

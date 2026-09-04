@@ -318,8 +318,11 @@ pub trait UserRepo: Send + Sync {
         phone: &str,
     ) -> RepoResult<Option<backend_model::db::UserRow>>;
 
-    async fn find_users_by_phone(&self, phone: &str)
-    -> RepoResult<Vec<backend_model::db::UserRow>>;
+    async fn find_users_by_phone(
+        &self,
+        realm: Option<String>,
+        phone: &str,
+    ) -> RepoResult<Vec<backend_model::db::UserRow>>;
 
     async fn resolve_or_create_user_by_phone(
         &self,
@@ -341,6 +344,15 @@ pub trait UserRepo: Send + Sync {
     async fn update_phone_number(&self, user_id: &str, phone_number: &str) -> RepoResult<()>;
     async fn update_full_name(&self, user_id: &str, full_name: &str) -> RepoResult<()>;
     async fn get_user_metadata(&self, user_id: &str) -> RepoResult<Value>;
+
+    /// Loads only the whitelisted metadata fields (by `name`) for a set of
+    /// users in a single query. Used by least-privilege directory lookups so
+    /// callers never aggregate arbitrary user metadata.
+    async fn get_metadata_fields_for_users(
+        &self,
+        user_ids: Vec<String>,
+        names: Vec<String>,
+    ) -> RepoResult<std::collections::HashMap<String, Value>>;
 
     async fn update_metadata(
         &self,

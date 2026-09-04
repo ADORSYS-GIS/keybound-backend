@@ -65,6 +65,10 @@ kc:
 bff:
   enabled: false
   base-path: /bff
+  recovery-lookup-service-client-id: "azamra-tokenization-bff"
+  recovery-lookup-audience: "user-storage"
+  recovery-lookup-required-scope: "recovery:phone-lookup"
+  recovery-lookup-realm: "azamra"
 
 staff:
   enabled: false

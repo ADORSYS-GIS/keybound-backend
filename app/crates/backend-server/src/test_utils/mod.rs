@@ -170,6 +170,7 @@ mock! {
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
         async fn find_users_by_phone(
             &self,
+            realm: Option<String>,
             phone: &str,
         ) -> RepoResult<Vec<backend_model::db::UserRow>>;
         async fn resolve_or_create_user_by_phone(
@@ -189,6 +190,12 @@ mock! {
         async fn update_phone_number(&self, user_id: &str, phone_number: &str) -> RepoResult<()>;
         async fn update_full_name(&self, user_id: &str, full_name: &str) -> RepoResult<()>;
         async fn get_user_metadata(&self, user_id: &str) -> RepoResult<serde_json::Value>;
+
+        async fn get_metadata_fields_for_users(
+            &self,
+            user_ids: Vec<String>,
+            names: Vec<String>,
+        ) -> RepoResult<std::collections::HashMap<String, serde_json::Value>>;
 
         async fn update_metadata(&self, user_id: &str, metadata_patch: serde_json::Value, eager_patch: Option<serde_json::Value>) -> RepoResult<()>;
     }
@@ -311,6 +318,10 @@ kc:
 bff:
   enabled: true
   base_path: "/bff"
+  recovery_lookup_service_client_id: "azamra-tokenization-bff"
+  recovery_lookup_audience: "user-storage"
+  recovery_lookup_required_scope: "recovery:phone-lookup"
+  recovery_lookup_realm: "azamra"
 staff:
   enabled: true
   base_path: "/staff"
@@ -362,6 +373,9 @@ cuss:
 pub fn create_fake_jwt(user_id: &str) -> backend_auth::JwtToken {
     let claims = backend_auth::Claims {
         sub: user_id.to_owned(),
+        azp: None,
+        aud: None,
+        scope: None,
         name: None,
         iss: "http://localhost/test".to_owned(),
         exp: usize::MAX,

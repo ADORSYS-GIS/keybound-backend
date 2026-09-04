@@ -560,6 +560,9 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
     if !api.state.config.staff.enabled {
         return Ok(JwtToken::new(backend_auth::Claims {
             sub: "usr_auth_disabled".to_owned(),
+            azp: None,
+            aud: None,
+            scope: None,
             name: Some("auth-disabled".to_owned()),
             iss: api.state.config.oauth2.issuer.clone(),
             exp: usize::MAX,
@@ -600,7 +603,7 @@ async fn resolve_user_ids_for_filters(
     let mut user_ids: Vec<String> = api
         .state
         .user
-        .find_users_by_phone(&phone_number)
+        .find_users_by_phone(None, &phone_number)
         .await?
         .into_iter()
         .map(|user| user.user_id)

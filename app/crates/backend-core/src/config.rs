@@ -340,6 +340,14 @@ pub struct BffAuth {
     pub enabled: bool,
     #[serde(alias = "base-path")]
     pub base_path: String,
+    #[serde(default)]
+    pub recovery_lookup_service_client_id: String,
+    #[serde(default)]
+    pub recovery_lookup_audience: String,
+    #[serde(default)]
+    pub recovery_lookup_required_scope: String,
+    #[serde(default)]
+    pub recovery_lookup_realm: String,
 }
 
 /// Staff API surface authentication configuration.

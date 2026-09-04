@@ -33,7 +33,34 @@ impl JwtToken {
         JwtToken { claims }
     }
 
-    /// Returns the user ID from the token's subject claim.
+    /// Returns the original subject claim without user-ID normalization.
+    pub fn subject(&self) -> &str {
+        &self.claims.sub
+    }
+
+    pub fn authorized_party(&self) -> Option<&str> {
+        self.claims.azp.as_deref()
+    }
+
+    pub fn audiences(&self) -> Vec<String> {
+        self.claims
+            .aud
+            .as_ref()
+            .map(|aud| aud.values())
+            .unwrap_or_default()
+    }
+
+    pub fn scopes(&self) -> Vec<String> {
+        self.claims
+            .scope
+            .as_deref()
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    /// Returns the normalized application user ID.
     pub fn user_id(&self) -> &str {
         normalize_user_id(&self.claims.sub)
     }
@@ -103,6 +130,9 @@ mod tests {
     fn jwt_token_user_id_returns_normalized_subject() {
         let token = JwtToken::new(Claims {
             sub: "f:backend-user-storage:usr_001".to_owned(),
+            azp: None,
+            aud: None,
+            scope: None,
             name: None,
             iss: "https://issuer.example".to_owned(),
             exp: usize::MAX,
@@ -110,5 +140,6 @@ mod tests {
         });
 
         assert_eq!(token.user_id(), "usr_001");
+        assert_eq!(token.subject(), "f:backend-user-storage:usr_001");
     }
 }
