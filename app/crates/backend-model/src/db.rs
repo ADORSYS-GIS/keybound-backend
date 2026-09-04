@@ -153,6 +153,19 @@ pub struct RecoveryIdempotencyRow {
     pub created_at: DateTime<Utc>,
 }
 
+/// Old-device policy application idempotency record.
+/// Primary key: idempotency_key (client-supplied UUID).
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::old_device_policy_idempotency)]
+pub struct OldDevicePolicyIdempotencyRow {
+    pub idempotency_key: String,
+    pub recovery_case_id: String,
+    pub request_hash: String,
+    pub target_user_id: String,
+    pub policy: String,
+    pub affected_device_ids: Value,
+    pub created_at: DateTime<Utc>,
+}
 
 /// State machine instance - represents a single KYC flow execution.
 impl diesel::associations::HasTable for UserRow {

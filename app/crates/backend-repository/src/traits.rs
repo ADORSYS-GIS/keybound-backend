@@ -393,6 +393,11 @@ pub trait DeviceRepo: Send + Sync {
         idempotency_key: &str,
     ) -> RepoResult<Option<backend_model::db::RecoveryIdempotencyRow>>;
 
+    async fn find_recovery_bind_by_case(
+        &self,
+        recovery_case_id: &str,
+    ) -> RepoResult<Option<backend_model::db::RecoveryIdempotencyRow>>;
+
     async fn bind_recovery_device(
         &self,
         idempotency_key: &str,
@@ -400,4 +405,32 @@ pub trait DeviceRepo: Send + Sync {
         request_hash: &str,
         req: &backend_model::kc::RecoveryBindRequest,
     ) -> RepoResult<String>;
+
+    async fn find_old_device_policy_idempotency(
+        &self,
+        idempotency_key: &str,
+    ) -> RepoResult<Option<backend_model::db::OldDevicePolicyIdempotencyRow>>;
+
+    /// Applies the authoritative old-device policy for a recovery case.
+    ///
+    /// The target user is derived from the authoritative recovery bind record
+    /// (never from caller-supplied identity). Returns the affected device
+    /// record ids in the order they were updated, and whether the policy was
+    /// already applied on a prior call (idempotent retry).
+    async fn apply_old_device_policy(
+        &self,
+        idempotency_key: &str,
+        recovery_case_id: &str,
+        request_hash: &str,
+        target_user_id: &str,
+        policy: &str,
+        except_device_ids: &[String],
+    ) -> RepoResult<OldDevicePolicyOutcome>;
+}
+
+/// Result of applying an old-device policy for a recovery case.
+#[derive(Debug, Clone)]
+pub struct OldDevicePolicyOutcome {
+    pub already_applied: bool,
+    pub affected_device_ids: Vec<String>,
 }

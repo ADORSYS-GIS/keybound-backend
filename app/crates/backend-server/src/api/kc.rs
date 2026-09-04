@@ -5,7 +5,9 @@ use backend_core::Error;
 use backend_model::kc::{DeviceRecordDto, UserRecordDto, UserSearch, UserUpsert};
 use gen_oas_server_kc::apis::devices::{Devices, LookupDeviceResponse};
 use gen_oas_server_kc::apis::enrollment::{Enrollment, EnrollmentBindResponse};
-use gen_oas_server_kc::apis::recovery::{GetRecoveryCaseResponse, Recovery, RecoveryBindResponse};
+use gen_oas_server_kc::apis::recovery::{
+    GetRecoveryCaseResponse, OldDevicesPolicyResponse, Recovery, RecoveryBindResponse,
+};
 use gen_oas_server_kc::apis::users::{
     CreateUserResponse, DeleteUserResponse, GetUserResponse, SearchUsersResponse,
     UpdateUserResponse, Users,
@@ -247,6 +249,33 @@ fn compute_recovery_bind_hash(recovery_case_id: &str, body: &models::RecoveryBin
     hex::encode(hasher.finalize())
 }
 
+fn compute_old_device_policy_hash(
+    recovery_case_id: &str,
+    body: &backend_model::kc::OldDevicePolicyRequest,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(recovery_case_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.realm.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.approval_revision.to_string().as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.policy.as_bytes());
+    hasher.update(b"|");
+    let mut except = body.except_device_ids.clone();
+    except.sort();
+    for id in &except {
+        hasher.update(id.as_bytes());
+        hasher.update(b",");
+    }
+    if let Some(reason) = &body.reason {
+        hasher.update(b"|");
+        hasher.update(reason.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
 #[backend_core::async_trait]
 impl Recovery<Error> for BackendApi {
     type Claims = SignatureContext;
@@ -359,6 +388,96 @@ impl Recovery<Error> for BackendApi {
             Err(err) => Err(err),
         }
     }
+
+    async fn old_devices_policy(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        _claims: &Self::Claims,
+        header_params: &models::OldDevicesPolicyHeaderParams,
+        path_params: &models::OldDevicesPolicyPathParams,
+        body: &models::OldDevicePolicyRequest,
+    ) -> Result<OldDevicesPolicyResponse, Error> {
+        // 1. Validate Idempotency-Key is a valid UUID
+        if uuid::Uuid::parse_str(&header_params.idempotency_key).is_err() {
+            return Ok(OldDevicesPolicyResponse::Status400_BadRequest(kc_error(
+                "BAD_REQUEST",
+                "Idempotency-Key header must be a valid UUID string",
+            )));
+        }
+
+        // 2. Derive the authoritative target user from the recovery bind record.
+        //    The device to revoke/quarantine must come from server state, never
+        //    from caller-supplied identity.
+        let bind_record = self
+            .state
+            .device
+            .find_recovery_bind_by_case(&path_params.recovery_case_id)
+            .await?;
+
+        let Some(bind_record) = bind_record else {
+            return Ok(OldDevicesPolicyResponse::Status400_BadRequest(kc_error(
+                "RECOVERY_CASE_NOT_BOUND",
+                "Recovery case has no completed device binding",
+            )));
+        };
+
+        // 2b. The device that remains ACTIVE must be derived from the authoritative
+        //     recovery-bind record (the exact newly bound device), never trusted from
+        //     the caller. A malicious/incorrect except_device_ids must not be able to
+        //     preserve an old device or revoke the newly bound one. We use this
+        //     authoritative value for both the canonical request hash and the exemption.
+        let mut domain_req = backend_model::kc::OldDevicePolicyRequest::from(body.clone());
+        let authoritative_except = vec![bind_record.device_id.clone()];
+        domain_req.except_device_ids = authoritative_except;
+        let req_hash = compute_old_device_policy_hash(&path_params.recovery_case_id, &domain_req);
+
+        // 3. Apply the authoritative policy (idempotent)
+        let outcome = self
+            .state
+            .device
+            .apply_old_device_policy(
+                &header_params.idempotency_key,
+                &path_params.recovery_case_id,
+                &req_hash,
+                &bind_record.bound_user_id,
+                &domain_req.policy,
+                &domain_req.except_device_ids,
+            )
+            .await;
+
+        match outcome {
+            Ok(outcome) => Ok(OldDevicesPolicyResponse::Status200_PolicyApplied(
+                models::OldDevicePolicyResponse {
+                    status: if outcome.already_applied {
+                        "ALREADY_APPLIED".to_string()
+                    } else {
+                        "APPLIED".to_string()
+                    },
+                    policy: body.policy,
+                    affected_device_ids: outcome.affected_device_ids,
+                },
+            )),
+            Err(Error::Http {
+                status_code: 409,
+                error_key,
+                message,
+                ..
+            }) => Ok(OldDevicesPolicyResponse::Status409_Conflict(kc_error(
+                error_key, &message,
+            ))),
+            Err(Error::Http {
+                status_code: 400,
+                error_key,
+                message,
+                ..
+            }) => Ok(OldDevicesPolicyResponse::Status400_BadRequest(kc_error(
+                error_key, &message,
+            ))),
+            Err(err) => Err(err),
+        }
+    }
 }
 
 
@@ -419,6 +538,67 @@ mod tests {
         // Modified recovery_case_id should also produce different hash
         let hash_diff_case = compute_recovery_bind_hash("case_999", &req1);
         assert_ne!(hash1, hash_diff_case);
+    }
+
+    #[test]
+    fn test_compute_old_device_policy_hash_determinism() {
+        let req1 = backend_model::kc::OldDevicePolicyRequest {
+            realm: "azamra".to_string(),
+            approval_revision: 5,
+            policy: "REVOKE_ALL_PREVIOUS".to_string(),
+            except_device_ids: vec!["dvc_new".to_string()],
+            reason: Some("LOST_OR_STOLEN".to_string()),
+        };
+        let req2 = backend_model::kc::OldDevicePolicyRequest {
+            realm: "azamra".to_string(),
+            approval_revision: 5,
+            policy: "REVOKE_ALL_PREVIOUS".to_string(),
+            except_device_ids: vec!["dvc_new".to_string()],
+            reason: Some("LOST_OR_STOLEN".to_string()),
+        };
+
+        let hash1 = compute_old_device_policy_hash("case_123", &req1);
+        let hash2 = compute_old_device_policy_hash("case_123", &req2);
+        assert_eq!(hash1, hash2);
+
+        // except_device_ids ordering must not change the hash
+        let req_reordered = backend_model::kc::OldDevicePolicyRequest {
+            realm: "azamra".to_string(),
+            approval_revision: 5,
+            policy: "REVOKE_ALL_PREVIOUS".to_string(),
+            except_device_ids: vec!["dvc_b".to_string(), "dvc_a".to_string()],
+            reason: Some("LOST_OR_STOLEN".to_string()),
+        };
+        let req_sorted = backend_model::kc::OldDevicePolicyRequest {
+            realm: "azamra".to_string(),
+            approval_revision: 5,
+            policy: "REVOKE_ALL_PREVIOUS".to_string(),
+            except_device_ids: vec!["dvc_a".to_string(), "dvc_b".to_string()],
+            reason: Some("LOST_OR_STOLEN".to_string()),
+        };
+        assert_eq!(
+            compute_old_device_policy_hash("case_123", &req_reordered),
+            compute_old_device_policy_hash("case_123", &req_sorted)
+        );
+
+        // Different policy must produce a different hash
+        let req_diff_policy = backend_model::kc::OldDevicePolicyRequest {
+            realm: "azamra".to_string(),
+            approval_revision: 5,
+            policy: "QUARANTINE_ALL_PREVIOUS".to_string(),
+            except_device_ids: vec!["dvc_new".to_string()],
+            reason: Some("LOST_OR_STOLEN".to_string()),
+        };
+        assert_ne!(
+            hash1,
+            compute_old_device_policy_hash("case_123", &req_diff_policy)
+        );
+
+        // Different recovery_case_id must produce a different hash
+        assert_ne!(
+            hash1,
+            compute_old_device_policy_hash("case_999", &req1)
+        );
     }
 }
 

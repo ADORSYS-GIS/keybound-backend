@@ -126,7 +126,7 @@ incremental = false
 strip = true
 
 [workspace.package]
-version = "0.2.8"
+version = "0.2.9"
 edition = "2024"
 license = "MIT"
 publish = false

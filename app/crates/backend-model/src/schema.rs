@@ -147,6 +147,19 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    /// Old-device policy application idempotency records
+    old_device_policy_idempotency (idempotency_key) {
+        idempotency_key -> Text,
+        recovery_case_id -> Text,
+        request_hash -> Text,
+        target_user_id -> Text,
+        policy -> Text,
+        affected_device_ids -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
 
 // Foreign key relationships
 diesel::joinable!(app_user_data -> app_user (user_id));
@@ -165,4 +178,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     flow_step,
     signing_key,
     recovery_idempotency,
+    old_device_policy_idempotency,
 );

@@ -8,8 +8,8 @@ use backend_core::async_trait;
 use backend_core::{Config, Error};
 use backend_repository::{
     DeviceRepo, FlowInstanceCreateInput, FlowRepo, FlowSessionCreateInput, FlowSessionFilter,
-    FlowStepCreateInput, FlowStepPatch, RepoResult, SigningKeyCreateInput, UserDataUpsertInput,
-    UserRepo,
+    FlowStepCreateInput, FlowStepPatch, OldDevicePolicyOutcome, RepoResult, SigningKeyCreateInput,
+    UserDataUpsertInput, UserRepo,
 };
 use bytes::Bytes;
 use mockall::mock;
@@ -238,6 +238,23 @@ mock! {
             request_hash: &str,
             req: &backend_model::kc::RecoveryBindRequest,
         ) -> RepoResult<String>;
+        async fn find_recovery_bind_by_case(
+            &self,
+            recovery_case_id: &str,
+        ) -> RepoResult<Option<backend_model::db::RecoveryIdempotencyRow>>;
+        async fn find_old_device_policy_idempotency(
+            &self,
+            idempotency_key: &str,
+        ) -> RepoResult<Option<backend_model::db::OldDevicePolicyIdempotencyRow>>;
+        async fn apply_old_device_policy(
+            &self,
+            idempotency_key: &str,
+            recovery_case_id: &str,
+            request_hash: &str,
+            target_user_id: &str,
+            policy: &str,
+            except_device_ids: &[String],
+        ) -> RepoResult<OldDevicePolicyOutcome>;
     }
 }
 
