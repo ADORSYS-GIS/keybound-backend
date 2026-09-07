@@ -149,6 +149,38 @@ pub struct RecoveryBindRequest {
     pub binding_operation_id: String,
 }
 
+/// Old-device policy application request for a recovery case.
+#[derive(Debug, Clone)]
+pub struct OldDevicePolicyRequest {
+    pub realm: String,
+    pub approval_revision: i64,
+    pub policy: String,
+    pub except_device_ids: Vec<String>,
+    pub reason: Option<String>,
+}
+
+impl From<gen_oas_server_kc::models::OldDevicePolicyRequest> for OldDevicePolicyRequest {
+    fn from(req: gen_oas_server_kc::models::OldDevicePolicyRequest) -> Self {
+        Self {
+            realm: req.realm,
+            approval_revision: req.approval_revision,
+            policy: match req.policy {
+                gen_oas_server_kc::models::OldDevicePolicy::RevokeAllPrevious => {
+                    "REVOKE_ALL_PREVIOUS".to_string()
+                }
+                gen_oas_server_kc::models::OldDevicePolicy::QuarantineAllPrevious => {
+                    "QUARANTINE_ALL_PREVIOUS".to_string()
+                }
+                gen_oas_server_kc::models::OldDevicePolicy::KeepApprovedAllowlistOnly => {
+                    "KEEP_APPROVED_ALLOWLIST_ONLY".to_string()
+                }
+            },
+            except_device_ids: req.except_device_ids.unwrap_or_default(),
+            reason: req.reason,
+        }
+    }
+}
+
 #[derive(Debug, Clone, o2o)]
 #[owned_into(gen_oas_server_kc::models::UserRecord)]
 pub struct UserRecordDto {
