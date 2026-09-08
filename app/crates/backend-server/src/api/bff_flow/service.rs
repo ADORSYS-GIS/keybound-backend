@@ -1,7 +1,9 @@
 use super::models::{
-    AddFlowRequest, CompletedKycResponse, CreateSessionRequest, FlowDetailResponse, FlowResponse,
-    LookupByPhoneCandidate, LookupByPhoneRequest, LookupByPhoneResponse, PhoneMatchField,
-    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    AddFlowRequest, CompletedKycResponse, CreateSessionRequest, EnrollmentBindResponse,
+    EnrollmentBindStatus, FlowDetailResponse, FlowResponse, LookupByPhoneCandidate,
+    LookupByPhoneRequest, LookupByPhoneResponse, OldDevicePolicyRequest, OldDevicePolicyResponse,
+    OldDevicePolicyStatus, PhoneMatchField, RecoveryBindRequest, SessionDetailResponse,
+    SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use crate::api::{BackendApi, BffSignatureClaims};
 use crate::flows::registry::{actor_label, waiting_status};
@@ -1153,6 +1155,247 @@ pub async fn require_service_caller(
     api.require_service_caller(headers)
 }
 
+fn compute_recovery_bind_hash(recovery_case_id: &str, body: &RecoveryBindRequest) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(recovery_case_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.realm.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.target_user_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.approval_revision.to_string().as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.device_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.jkt.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.binding_operation_id.as_bytes());
+    hasher.update(b"|");
+
+    let mut sorted_jwk: std::collections::BTreeMap<String, serde_json::Value> =
+        std::collections::BTreeMap::new();
+    match &body.public_jwk {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                sorted_jwk.insert(k.clone(), v.clone());
+            }
+        }
+        other => {
+            sorted_jwk.insert("value".to_string(), other.clone());
+        }
+    }
+    if let Ok(jwk_json) = serde_json::to_string(&sorted_jwk) {
+        hasher.update(jwk_json.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+fn compute_old_device_policy_hash(
+    recovery_case_id: &str,
+    body: &backend_model::kc::OldDevicePolicyRequest,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(recovery_case_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.realm.as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.approval_revision.to_string().as_bytes());
+    hasher.update(b"|");
+    hasher.update(body.policy.as_bytes());
+    hasher.update(b"|");
+    let mut except = body.except_device_ids.clone();
+    except.sort();
+    for id in &except {
+        hasher.update(id.as_bytes());
+        hasher.update(b",");
+    }
+    if let Some(reason) = &body.reason {
+        hasher.update(b"|");
+        hasher.update(reason.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+fn domain_recovery_bind_req(body: &RecoveryBindRequest) -> backend_model::kc::RecoveryBindRequest {
+    let mut public_jwk: std::collections::HashMap<String, gen_oas_server_kc::types::Object> =
+        std::collections::HashMap::new();
+    match &body.public_jwk {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                public_jwk.insert(k.clone(), gen_oas_server_kc::types::Object(v.clone()));
+            }
+        }
+        other => {
+            public_jwk.insert(
+                "value".to_string(),
+                gen_oas_server_kc::types::Object(other.clone()),
+            );
+        }
+    }
+    backend_model::kc::RecoveryBindRequest {
+        realm: body.realm.clone(),
+        target_user_id: body.target_user_id.clone(),
+        approval_revision: body.approval_revision,
+        device_id: body.device_id.clone(),
+        jkt: body.jkt.clone(),
+        public_jwk,
+        binding_operation_id: body.binding_operation_id.clone(),
+    }
+}
+
+#[instrument(skip(api))]
+pub async fn recovery_bind(
+    api: &BackendApi,
+    recovery_case_id: String,
+    idempotency_key: String,
+    body: RecoveryBindRequest,
+) -> Result<EnrollmentBindResponse, Error> {
+    if uuid::Uuid::parse_str(&idempotency_key).is_err() {
+        return Err(Error::bad_request(
+            "BAD_REQUEST",
+            "Idempotency-Key header must be a valid UUID string",
+        ));
+    }
+    if body.target_user_id.trim().is_empty() {
+        return Err(Error::bad_request(
+            "BAD_REQUEST",
+            "target_user_id is required",
+        ));
+    }
+
+    let req_hash = compute_recovery_bind_hash(&recovery_case_id, &body);
+
+    let existing = api
+        .state
+        .device
+        .find_recovery_idempotency(&idempotency_key)
+        .await?;
+    if let Some(existing) = existing {
+        if existing.request_hash == req_hash && existing.recovery_case_id == recovery_case_id {
+            return Ok(EnrollmentBindResponse {
+                status: EnrollmentBindStatus::AlreadyBound,
+                device_record_id: Some(existing.device_record_id),
+                bound_user_id: existing.bound_user_id,
+            });
+        }
+        return Err(Error::conflict(
+            "CONFLICT",
+            "Idempotency-Key reused with modified payload or path case ID",
+        ));
+    }
+
+    let domain_req = domain_recovery_bind_req(&body);
+    let bind_res = api
+        .state
+        .device
+        .bind_recovery_device(&idempotency_key, &recovery_case_id, &req_hash, &domain_req)
+        .await;
+
+    match bind_res {
+        Ok(record_id) => Ok(EnrollmentBindResponse {
+            status: EnrollmentBindStatus::Bound,
+            device_record_id: Some(record_id),
+            bound_user_id: body.target_user_id.clone(),
+        }),
+        Err(Error::Http {
+            status_code: 409,
+            error_key,
+            message,
+            ..
+        }) => Err(Error::conflict(error_key, &message)),
+        Err(Error::Http {
+            status_code: 400,
+            error_key,
+            message,
+            ..
+        }) => Err(Error::bad_request(error_key, &message)),
+        Err(err) => Err(err),
+    }
+}
+
+#[instrument(skip(api))]
+pub async fn old_devices_policy(
+    api: &BackendApi,
+    recovery_case_id: String,
+    idempotency_key: String,
+    body: OldDevicePolicyRequest,
+) -> Result<OldDevicePolicyResponse, Error> {
+    if uuid::Uuid::parse_str(&idempotency_key).is_err() {
+        return Err(Error::bad_request(
+            "BAD_REQUEST",
+            "Idempotency-Key header must be a valid UUID string",
+        ));
+    }
+
+    let bind_record = api
+        .state
+        .device
+        .find_recovery_bind_by_case(&recovery_case_id)
+        .await?;
+
+    let Some(bind_record) = bind_record else {
+        return Err(Error::bad_request(
+            "RECOVERY_CASE_NOT_BOUND",
+            "Recovery case has no completed device binding",
+        ));
+    };
+
+    // The device that remains ACTIVE must be derived from the authoritative
+    // recovery-bind record (the exact newly bound device), never trusted from
+    // the caller. A malicious/incorrect except_device_ids must not be able to
+    // preserve an old device or revoke the newly bound one. We use this
+    // authoritative value for both the canonical request hash and the exemption.
+    let authoritative_except = vec![bind_record.device_id.clone()];
+    let domain_req = backend_model::kc::OldDevicePolicyRequest {
+        realm: body.realm.clone(),
+        approval_revision: body.approval_revision,
+        policy: body.policy.as_str().to_string(),
+        except_device_ids: authoritative_except,
+        reason: body.reason.clone(),
+    };
+    let req_hash = compute_old_device_policy_hash(&recovery_case_id, &domain_req);
+
+    let outcome = api
+        .state
+        .device
+        .apply_old_device_policy(
+            &idempotency_key,
+            &recovery_case_id,
+            &req_hash,
+            &bind_record.bound_user_id,
+            &domain_req.policy,
+            &domain_req.except_device_ids,
+        )
+        .await;
+
+    match outcome {
+        Ok(outcome) => Ok(OldDevicePolicyResponse {
+            status: if outcome.already_applied {
+                OldDevicePolicyStatus::AlreadyApplied
+            } else {
+                OldDevicePolicyStatus::Applied
+            },
+            policy: body.policy,
+            affected_device_ids: outcome.affected_device_ids,
+        }),
+        Err(Error::Http {
+            status_code: 409,
+            error_key,
+            message,
+            ..
+        }) => Err(Error::conflict(error_key, &message)),
+        Err(Error::Http {
+            status_code: 400,
+            error_key,
+            message,
+            ..
+        }) => Err(Error::bad_request(error_key, &message)),
+        Err(err) => Err(err),
+    }
+}
+
 #[instrument(skip(api))]
 pub async fn get_completed_kyc(
     api: &BackendApi,
@@ -1257,7 +1500,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1298,7 +1541,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1345,7 +1588,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1377,7 +1620,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1400,7 +1643,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: "+237699999999".to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1421,7 +1664,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: "  +237690000000 ".to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1449,7 +1692,7 @@ mod lookup_by_phone_tests {
                 &api,
                 LookupByPhoneRequest {
                     phone: bad.to_owned(),
-                    realm: "azamra".to_owned(),
+                    realm: "fineract".to_owned(),
                 },
             )
             .await
@@ -1494,7 +1737,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await
@@ -1513,7 +1756,7 @@ mod lookup_by_phone_tests {
         let mut user = MockUserRepo::new();
         user.expect_find_users_by_phone()
             .returning(|realm, _| match realm.as_deref() {
-                Some("azamra") => Ok(vec![user_row(
+                Some("fineract") => Ok(vec![user_row(
                     "usr-fineract",
                     phone,
                     Some(phone.to_owned()),
@@ -1535,7 +1778,7 @@ mod lookup_by_phone_tests {
             &api,
             LookupByPhoneRequest {
                 phone: phone.to_owned(),
-                realm: "azamra".to_owned(),
+                realm: "fineract".to_owned(),
             },
         )
         .await

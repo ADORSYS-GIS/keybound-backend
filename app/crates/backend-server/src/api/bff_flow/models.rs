@@ -61,6 +61,82 @@ pub struct LookupByPhoneRequest {
     pub realm: String,
 }
 
+/// Body for finalizing a recovery device bind on the BFF surface.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct RecoveryBindRequest {
+    pub realm: String,
+    pub target_user_id: String,
+    pub approval_revision: i64,
+    pub device_id: String,
+    pub jkt: String,
+    pub public_jwk: Value,
+    pub binding_operation_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EnrollmentBindStatus {
+    Bound,
+    AlreadyBound,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct EnrollmentBindResponse {
+    pub status: EnrollmentBindStatus,
+    pub bound_user_id: String,
+    #[serde(default)]
+    pub device_record_id: Option<String>,
+}
+
+/// Old-device policy to apply after a recovery bind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OldDevicePolicy {
+    RevokeAllPrevious,
+    QuarantineAllPrevious,
+    KeepApprovedAllowlistOnly,
+}
+
+impl OldDevicePolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OldDevicePolicy::RevokeAllPrevious => "REVOKE_ALL_PREVIOUS",
+            OldDevicePolicy::QuarantineAllPrevious => "QUARANTINE_ALL_PREVIOUS",
+            OldDevicePolicy::KeepApprovedAllowlistOnly => "KEEP_APPROVED_ALLOWLIST_ONLY",
+        }
+    }
+}
+
+/// Body for applying the old-device policy for a recovery case on the BFF surface.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct OldDevicePolicyRequest {
+    pub realm: String,
+    pub approval_revision: i64,
+    pub policy: OldDevicePolicy,
+    #[serde(default)]
+    pub except_device_ids: Vec<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OldDevicePolicyStatus {
+    Applied,
+    AlreadyApplied,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct OldDevicePolicyResponse {
+    pub status: OldDevicePolicyStatus,
+    pub policy: OldDevicePolicy,
+    pub affected_device_ids: Vec<String>,
+}
+
 /// Which column of the account matched the submitted phone number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "lowercase")]

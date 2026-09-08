@@ -335,10 +335,10 @@ kc:
 bff:
   enabled: true
   base_path: "/bff"
-  recovery_lookup_service_client_id: "azamra-tokenization-bff"
+  recovery_lookup_service_client_id: "azamra-bff"
   recovery_lookup_audience: "user-storage"
   recovery_lookup_required_scope: "recovery:phone-lookup"
-  recovery_lookup_realm: "azamra"
+  recovery_lookup_realm: "fineract"
 staff:
   enabled: true
   base_path: "/staff"

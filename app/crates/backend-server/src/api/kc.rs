@@ -220,7 +220,10 @@ impl Enrollment<Error> for BackendApi {
     }
 }
 
-fn compute_recovery_bind_hash(recovery_case_id: &str, body: &models::RecoveryBindRequest) -> String {
+fn compute_recovery_bind_hash(
+    recovery_case_id: &str,
+    body: &models::RecoveryBindRequest,
+) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(recovery_case_id.as_bytes());
@@ -480,7 +483,6 @@ impl Recovery<Error> for BackendApi {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,10 +597,6 @@ mod tests {
         );
 
         // Different recovery_case_id must produce a different hash
-        assert_ne!(
-            hash1,
-            compute_old_device_policy_hash("case_999", &req1)
-        );
+        assert_ne!(hash1, compute_old_device_policy_hash("case_999", &req1));
     }
 }
-

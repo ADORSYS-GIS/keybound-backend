@@ -27,6 +27,8 @@ pub use models::*;
         handlers::list_flow_steps,
         handlers::get_step,
         handlers::submit_step,
+        handlers::recovery_bind,
+        handlers::old_devices_policy,
     ),
     components(schemas(
         UserResponse,
@@ -43,6 +45,13 @@ pub use models::*;
         FlowResponse,
         FlowDetailResponse,
         StepResponse,
+        RecoveryBindRequest,
+        EnrollmentBindStatus,
+        EnrollmentBindResponse,
+        OldDevicePolicy,
+        OldDevicePolicyRequest,
+        OldDevicePolicyStatus,
+        OldDevicePolicyResponse,
     )),
     // Security requirement for all endpoints - empty scopes means no specific permissions needed
     security(
@@ -53,6 +62,7 @@ pub use models::*;
         (name = "sessions", description = "Session management endpoints"),
         (name = "flows", description = "Flow execution endpoints"),
         (name = "steps", description = "Step submission endpoints"),
+        (name = "recoveries", description = "Recovery finalization endpoints"),
     )
 )]
 pub struct BffFlowOpenApi;
@@ -64,6 +74,14 @@ pub fn router(api: BackendApi) -> Router {
             post(handlers::lookup_user_by_phone),
         )
         .route("/users/{user_id}", get(handlers::get_user))
+        .route(
+            "/v1/recoveries/{recovery_case_id}/device-bindings",
+            post(handlers::recovery_bind),
+        )
+        .route(
+            "/v1/recoveries/{recovery_case_id}/old-devices/policy",
+            post(handlers::old_devices_policy),
+        )
         .route(
             "/users/{user_id}/completed-kyc",
             get(handlers::get_completed_kyc),

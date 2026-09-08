@@ -282,7 +282,7 @@ mod tests {
         let token = encode(
             &header,
             &ServiceClaims {
-                sub: "service-account-azamra-tokenization-bff",
+                sub: "service-account-azamra-bff",
                 azp,
                 aud,
                 scope,
@@ -299,7 +299,7 @@ mod tests {
     async fn signed_bearer_claims_enforce_service_contract() {
         for (azp, aud, scope, allowed) in [
             (
-                Some("azamra-tokenization-bff"),
+                Some("azamra-bff"),
                 "user-storage",
                 "recovery:phone-lookup",
                 true,
@@ -311,17 +311,12 @@ mod tests {
                 false,
             ),
             (
-                Some("azamra-tokenization-bff"),
+                Some("azamra-bff"),
                 "other-api",
                 "recovery:phone-lookup",
                 false,
             ),
-            (
-                Some("azamra-tokenization-bff"),
-                "user-storage",
-                "profile:read",
-                false,
-            ),
+            (Some("azamra-bff"), "user-storage", "profile:read", false),
             (None, "user-storage", "recovery:phone-lookup", false),
         ] {
             let (state, token) = signed_service_token(azp, aud, scope).await;

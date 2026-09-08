@@ -8,9 +8,10 @@ use tracing::instrument;
 use crate::api::BackendApi;
 
 use super::models::{
-    AddFlowRequest, CompletedKycResponse, CreateSessionRequest, FlowDetailResponse, FlowResponse,
-    LookupByPhoneRequest, LookupByPhoneResponse, SessionDetailResponse, SessionResponse,
-    StepResponse, SubmitStepRequest, UserResponse,
+    AddFlowRequest, CompletedKycResponse, CreateSessionRequest, EnrollmentBindResponse,
+    FlowDetailResponse, FlowResponse, LookupByPhoneRequest, LookupByPhoneResponse,
+    OldDevicePolicyRequest, OldDevicePolicyResponse, RecoveryBindRequest, SessionDetailResponse,
+    SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use super::service;
 
@@ -47,6 +48,65 @@ pub async fn lookup_user_by_phone(
 ) -> Result<Json<LookupByPhoneResponse>, Error> {
     let _caller = service::require_service_caller(&api, &headers).await?;
     let response = service::lookup_users_by_phone(&api, body).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/recoveries/{recoveryCaseId}/device-bindings",
+    tag = "recoveries",
+    params(
+        ("recoveryCaseId" = String, Path),
+        ("Idempotency-Key" = String, Header),
+    ),
+    request_body = RecoveryBindRequest,
+    responses((status = 200, body = EnrollmentBindResponse))
+)]
+#[instrument(skip(api, headers, body))]
+pub async fn recovery_bind(
+    State(api): State<BackendApi>,
+    Path(recovery_case_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<RecoveryBindRequest>,
+) -> Result<Json<EnrollmentBindResponse>, Error> {
+    service::require_service_caller(&api, &headers).await?;
+    let idempotency_key = headers
+        .get("Idempotency-Key")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| Error::bad_request("BAD_REQUEST", "Idempotency-Key header is required"))?
+        .to_string();
+    let response = service::recovery_bind(&api, recovery_case_id, idempotency_key, body).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/recoveries/{recoveryCaseId}/old-devices/policy",
+    tag = "recoveries",
+    params(
+        ("recoveryCaseId" = String, Path),
+        ("Idempotency-Key" = String, Header),
+    ),
+    request_body = OldDevicePolicyRequest,
+    responses((status = 200, body = OldDevicePolicyResponse))
+)]
+#[instrument(skip(api, headers, body))]
+pub async fn old_devices_policy(
+    State(api): State<BackendApi>,
+    Path(recovery_case_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<OldDevicePolicyRequest>,
+) -> Result<Json<OldDevicePolicyResponse>, Error> {
+    service::require_service_caller(&api, &headers).await?;
+    let idempotency_key = headers
+        .get("Idempotency-Key")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| Error::bad_request("BAD_REQUEST", "Idempotency-Key header is required"))?
+        .to_string();
+    let response =
+        service::old_devices_policy(&api, recovery_case_id, idempotency_key, body).await?;
     Ok(Json(response))
 }
 

@@ -234,15 +234,12 @@ mod service_auth_tests {
         let api = api_with_service_contract();
         let claims = api
             .require_service_caller(&authenticated_headers(
-                Some("azamra-tokenization-bff"),
+                Some("azamra-bff"),
                 "user-storage",
                 "recovery:phone-lookup",
             ))
             .unwrap();
-        assert_eq!(
-            claims.service_client_id.as_deref(),
-            Some("azamra-tokenization-bff")
-        );
+        assert_eq!(claims.service_client_id.as_deref(), Some("azamra-bff"));
     }
 
     #[test]
@@ -254,7 +251,7 @@ mod service_auth_tests {
         let api = BackendApi::new(Arc::new(state), oidc_state, signature_state);
         let error = api
             .require_service_caller(&authenticated_headers(
-                Some("azamra-tokenization-bff"),
+                Some("azamra-bff"),
                 "user-storage",
                 "recovery:phone-lookup",
             ))
