@@ -340,13 +340,13 @@ pub struct BffAuth {
     pub enabled: bool,
     #[serde(alias = "base-path")]
     pub base_path: String,
-    #[serde(default)]
+    #[serde(default, alias = "recovery-lookup-service-client-id")]
     pub recovery_lookup_service_client_id: String,
-    #[serde(default)]
+    #[serde(default, alias = "recovery-lookup-audience")]
     pub recovery_lookup_audience: String,
-    #[serde(default)]
+    #[serde(default, alias = "recovery-lookup-required-scope")]
     pub recovery_lookup_required_scope: String,
-    #[serde(default)]
+    #[serde(default, alias = "recovery-lookup-realm")]
     pub recovery_lookup_realm: String,
 }
 
@@ -501,5 +501,22 @@ mod tests {
         unsafe { env::set_var("TEST_VAR_WITH_DEFAULT", "http://override:9000") };
         let content = "endpoint: ${TEST_VAR_WITH_DEFAULT:-http://minio:9000}";
         assert_eq!(envsubst(content), content);
+    }
+
+    #[test]
+    fn bff_recovery_lookup_kebab_case_keys_deserialize() {
+        let yaml = r#"
+enabled: true
+base-path: /bff
+recovery-lookup-service-client-id: azamra-bff
+recovery-lookup-audience: user-storage
+recovery-lookup-required-scope: "recovery:phone-lookup"
+recovery-lookup-realm: fineract
+"#;
+        let bff: super::BffAuth = serde_yaml::from_str(yaml).expect("should deserialize kebab-case keys");
+        assert_eq!(bff.recovery_lookup_service_client_id, "azamra-bff");
+        assert_eq!(bff.recovery_lookup_audience, "user-storage");
+        assert_eq!(bff.recovery_lookup_required_scope, "recovery:phone-lookup");
+        assert_eq!(bff.recovery_lookup_realm, "fineract");
     }
 }
