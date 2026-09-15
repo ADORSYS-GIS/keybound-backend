@@ -167,6 +167,44 @@ pub struct OldDevicePolicyIdempotencyRow {
     pub created_at: DateTime<Utc>,
 }
 
+/// Account-recovery case aggregate row.
+/// Primary key: id (prefixed like rc_*).
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, AsChangeset)]
+#[diesel(table_name = crate::schema::recovery_case)]
+#[diesel(treat_none_as_null = false)]
+pub struct RecoveryCaseRow {
+    pub id: String,
+    pub human_id: String,
+    pub session_id: Option<String>,
+    pub device_id: Option<String>,
+    pub jkt: Option<String>,
+    pub device_public_jwk: Option<Value>,
+    pub requested_phone_hash: String,
+    pub requested_phone_masked: String,
+    pub reason: Option<String>,
+    pub status: String,
+    pub phone_relation: Option<String>,
+    pub matched_user_id: Option<String>,
+    pub otp_hash: Option<String>,
+    pub otp_expires_at: Option<DateTime<Utc>>,
+    pub otp_attempts: i32,
+    pub otp_resend_at: Option<DateTime<Utc>>,
+    pub review_decision: Option<String>,
+    pub review_reason: Option<String>,
+    pub review_checklist: Option<Value>,
+    pub review_expected_version: Option<i64>,
+    pub approval_revision: Option<i64>,
+    pub evidence: Value,
+    pub old_devices: Value,
+    pub risk_flags: Value,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub review_expires_at: Option<DateTime<Utc>>,
+    pub approved_expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub version: i64,
+}
+
 /// State machine instance - represents a single KYC flow execution.
 impl diesel::associations::HasTable for UserRow {
     type Table = crate::schema::app_user::table;
@@ -237,6 +275,22 @@ impl diesel::associations::HasTable for RecoveryIdempotencyRow {
 
     fn table() -> Self::Table {
         crate::schema::recovery_idempotency::table
+    }
+}
+
+impl diesel::associations::HasTable for OldDevicePolicyIdempotencyRow {
+    type Table = crate::schema::old_device_policy_idempotency::table;
+
+    fn table() -> Self::Table {
+        crate::schema::old_device_policy_idempotency::table
+    }
+}
+
+impl diesel::associations::HasTable for RecoveryCaseRow {
+    type Table = crate::schema::recovery_case::table;
+
+    fn table() -> Self::Table {
+        crate::schema::recovery_case::table
     }
 }
 
@@ -313,5 +367,13 @@ impl<'a> diesel::Identifiable for &'a RecoveryIdempotencyRow {
 
     fn id(self) -> Self::Id {
         self.idempotency_key.as_str()
+    }
+}
+
+impl<'a> diesel::Identifiable for &'a RecoveryCaseRow {
+    type Id = &'a str;
+
+    fn id(self) -> Self::Id {
+        self.id.as_str()
     }
 }

@@ -134,6 +134,42 @@ diesel::table! {
 }
 
 diesel::table! {
+    /// Account-recovery case aggregate owned by user-storage
+    recovery_case (id) {
+        id -> Text,
+        human_id -> Text,
+        session_id -> Nullable<Text>,
+        device_id -> Nullable<Text>,
+        jkt -> Nullable<Text>,
+        device_public_jwk -> Nullable<Jsonb>,
+        requested_phone_hash -> Text,
+        requested_phone_masked -> Text,
+        reason -> Nullable<Text>,
+        status -> Text,
+        phone_relation -> Nullable<Text>,
+        matched_user_id -> Nullable<Text>,
+        otp_hash -> Nullable<Text>,
+        otp_expires_at -> Nullable<Timestamptz>,
+        otp_attempts -> Int4,
+        otp_resend_at -> Nullable<Timestamptz>,
+        review_decision -> Nullable<Text>,
+        review_reason -> Nullable<Text>,
+        review_checklist -> Nullable<Jsonb>,
+        review_expected_version -> Nullable<Int8>,
+        approval_revision -> Nullable<Int8>,
+        evidence -> Jsonb,
+        old_devices -> Jsonb,
+        risk_flags -> Jsonb,
+        expires_at -> Nullable<Timestamptz>,
+        review_expires_at -> Nullable<Timestamptz>,
+        approved_expires_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        version -> Int8,
+    }
+}
+
+diesel::table! {
     /// Recovery device binding idempotency records
     recovery_idempotency (idempotency_key) {
         idempotency_key -> Text,
@@ -160,13 +196,13 @@ diesel::table! {
     }
 }
 
-
 // Foreign key relationships
 diesel::joinable!(app_user_data -> app_user (user_id));
 diesel::joinable!(device -> app_user (user_id));
 diesel::joinable!(flow_instance -> flow_session (session_id));
 diesel::joinable!(flow_session -> app_user (user_id));
 diesel::joinable!(flow_step -> flow_instance (flow_id));
+diesel::joinable!(recovery_case -> flow_session (session_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     app_deposit_recipients,
@@ -176,7 +212,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     flow_instance,
     flow_session,
     flow_step,
-    signing_key,
+    recovery_case,
     recovery_idempotency,
     old_device_policy_idempotency,
 );

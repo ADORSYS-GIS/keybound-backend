@@ -19,6 +19,7 @@ pub struct StepServices {
     pub storage: Option<Arc<dyn StorageService>>,
     pub user_lookup: Option<Arc<dyn UserLookupService>>,
     pub user_contact: Option<Arc<dyn UserContactService>>,
+    pub recovery_device: Option<Arc<dyn RecoveryDeviceService>>,
     pub config: Option<HashMap<String, Value>>,
 }
 
@@ -52,12 +53,62 @@ pub struct UserRecord {
 #[async_trait::async_trait]
 pub trait UserLookupService: Send + Sync + std::fmt::Debug {
     async fn get_user(&self, user_id: &str) -> Result<Option<UserRecord>, String>;
+
+    /// Enumeration-safe lookup of users by phone within an optional realm.
+    /// Default implementation returns no matches so existing implementors are
+    /// unaffected; recovery resolution overrides this.
+    async fn find_users_by_phone(
+        &self,
+        _realm: Option<String>,
+        _phone: &str,
+    ) -> Result<Vec<UserRecord>, String> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait::async_trait]
 pub trait UserContactService: Send + Sync + std::fmt::Debug {
     async fn update_phone_number(&self, user_id: &str, phone_number: &str) -> Result<(), String>;
     async fn update_full_name(&self, user_id: &str, full_name: &str) -> Result<(), String>;
+}
+
+/// Request to bind a device as part of an approved recovery case.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RecoveryDeviceBindRequest {
+    pub realm: String,
+    pub target_user_id: String,
+    pub approval_revision: i64,
+    pub device_id: String,
+    pub jkt: String,
+    pub public_jwk: Value,
+    pub binding_operation_id: String,
+}
+
+/// Outcome of a recovery device bind.
+#[derive(Debug, Clone)]
+pub struct RecoveryDeviceBindOutcome {
+    pub device_record_id: String,
+    pub bound_user_id: String,
+}
+
+/// Service used by recovery flow completion steps to bind the new device and
+/// apply the old-device policy through the authoritative device repository.
+#[async_trait::async_trait]
+pub trait RecoveryDeviceService: Send + Sync + std::fmt::Debug {
+    async fn bind_recovery_device(
+        &self,
+        recovery_case_id: &str,
+        req: RecoveryDeviceBindRequest,
+    ) -> Result<RecoveryDeviceBindOutcome, String>;
+
+    async fn apply_old_device_policy(
+        &self,
+        recovery_case_id: &str,
+        realm: String,
+        approval_revision: i64,
+        policy: String,
+        except_device_ids: Vec<String>,
+    ) -> Result<Vec<String>, String>;
 }
 
 impl StepContext {

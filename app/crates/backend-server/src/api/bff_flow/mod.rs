@@ -16,6 +16,7 @@ pub use models::*;
 #[openapi(
     paths(
         handlers::get_user,
+        handlers::get_recovery_case,
         handlers::lookup_user_by_phone,
         handlers::get_completed_kyc,
         handlers::list_sessions,
@@ -46,6 +47,7 @@ pub use models::*;
         FlowDetailResponse,
         StepResponse,
         RecoveryBindRequest,
+        RecoveryCaseResponse,
         EnrollmentBindStatus,
         EnrollmentBindResponse,
         OldDevicePolicy,
@@ -74,6 +76,10 @@ pub fn router(api: BackendApi) -> Router {
             post(handlers::lookup_user_by_phone),
         )
         .route("/users/{user_id}", get(handlers::get_user))
+        .route(
+            "/v1/recoveries/{recovery_case_id}",
+            get(handlers::get_recovery_case),
+        )
         .route(
             "/v1/recoveries/{recovery_case_id}/device-bindings",
             post(handlers::recovery_bind),

@@ -408,7 +408,10 @@ async fn submit_admin_step(
         input: body.input.clone(),
         session_context: session.context.clone(),
         flow_context: flow.context.clone(),
-        services: crate::flows::runtime::step_services(api.state.user.clone()),
+        services: crate::flows::runtime::step_services_with_device(
+            api.state.user.clone(),
+            api.state.device.clone(),
+        ),
     };
 
     let verify_outcome = step_definition

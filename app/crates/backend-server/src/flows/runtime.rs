@@ -1,4 +1,7 @@
-use backend_flow_sdk::{Flow, StepServices, UserContactService, UserLookupService, UserRecord};
+use backend_flow_sdk::{
+    Flow, RecoveryDeviceBindRequest, RecoveryDeviceService, StepServices, UserContactService,
+    UserLookupService, UserRecord,
+};
 use backend_repository::UserRepo;
 use serde_json::Value;
 use std::sync::Arc;
@@ -87,11 +90,122 @@ impl UserContactService for RepoUserContact {
     }
 }
 
-pub fn step_services(user_repo: Arc<dyn UserRepo>) -> StepServices {
+pub fn step_services_with_device(
+    user_repo: Arc<dyn UserRepo>,
+    device_repo: Arc<dyn backend_repository::DeviceRepo>,
+) -> StepServices {
     StepServices {
         user_lookup: Some(Arc::new(RepoUserLookup::new(user_repo.clone()))),
-        user_contact: Some(Arc::new(RepoUserContact::new(user_repo))),
+        user_contact: Some(Arc::new(RepoUserContact::new(user_repo.clone()))),
+        recovery_device: Some(Arc::new(RepoRecoveryDevice::new(device_repo))),
         ..Default::default()
+    }
+}
+
+pub struct RepoRecoveryDevice {
+    device_repo: Arc<dyn backend_repository::DeviceRepo>,
+}
+
+impl RepoRecoveryDevice {
+    pub fn new(device_repo: Arc<dyn backend_repository::DeviceRepo>) -> Self {
+        Self { device_repo }
+    }
+}
+
+impl std::fmt::Debug for RepoRecoveryDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepoRecoveryDevice")
+            .field("device_repo", &"<DeviceRepo>")
+            .finish()
+    }
+}
+
+#[backend_core::async_trait]
+impl RecoveryDeviceService for RepoRecoveryDevice {
+    async fn bind_recovery_device(
+        &self,
+        recovery_case_id: &str,
+        req: RecoveryDeviceBindRequest,
+    ) -> Result<backend_flow_sdk::RecoveryDeviceBindOutcome, String> {
+        let domain_req = backend_model::kc::RecoveryBindRequest {
+            realm: req.realm,
+            target_user_id: req.target_user_id.clone(),
+            approval_revision: req.approval_revision,
+            device_id: req.device_id,
+            jkt: req.jkt,
+            public_jwk: req
+                .public_jwk
+                .as_object()
+                .map(|map| {
+                    map.iter()
+                        .map(|(k, v)| (k.clone(), gen_oas_server_kc::types::Object(v.clone())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            binding_operation_id: req.binding_operation_id,
+        };
+
+        let idempotency_key = backend_id::flow_step_id().map_err(|e| e.to_string())?;
+        let request_hash = recovery_case_id.to_string();
+
+        let record_id = self
+            .device_repo
+            .bind_recovery_device(
+                &idempotency_key,
+                recovery_case_id,
+                &request_hash,
+                &domain_req,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+
+        Ok(backend_flow_sdk::RecoveryDeviceBindOutcome {
+            device_record_id: record_id,
+            bound_user_id: req.target_user_id,
+        })
+    }
+
+    async fn apply_old_device_policy(
+        &self,
+        recovery_case_id: &str,
+        realm: String,
+        approval_revision: i64,
+        policy: String,
+        except_device_ids: Vec<String>,
+    ) -> Result<Vec<String>, String> {
+        let bind_record = self
+            .device_repo
+            .find_recovery_bind_by_case(recovery_case_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "RECOVERY_CASE_NOT_BOUND".to_string())?;
+
+        let authoritative_except = vec![bind_record.device_id.clone()];
+        let domain_req = backend_model::kc::OldDevicePolicyRequest {
+            realm,
+            approval_revision,
+            policy,
+            except_device_ids: authoritative_except,
+            reason: None,
+        };
+
+        let idempotency_key = backend_id::flow_step_id().map_err(|e| e.to_string())?;
+        let request_hash = recovery_case_id.to_string();
+
+        let outcome = self
+            .device_repo
+            .apply_old_device_policy(
+                &idempotency_key,
+                recovery_case_id,
+                &request_hash,
+                &bind_record.bound_user_id,
+                &domain_req.policy,
+                &domain_req.except_device_ids,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+
+        Ok(outcome.affected_device_ids)
     }
 }
 

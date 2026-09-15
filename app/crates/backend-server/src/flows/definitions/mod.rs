@@ -1,3 +1,4 @@
+pub mod account_recovery;
 pub mod account_update;
 pub mod address_proof;
 pub mod admin_user_management;

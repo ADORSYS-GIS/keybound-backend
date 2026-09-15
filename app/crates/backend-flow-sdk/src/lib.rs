@@ -21,8 +21,9 @@ pub use actions::{
 };
 pub use actor::Actor;
 pub use context::{
-    StepContext, StepServices, StorageService, UploadUrlResult, UserContactService,
-    UserLookupService, UserRecord,
+    RecoveryDeviceBindOutcome, RecoveryDeviceBindRequest, RecoveryDeviceService, StepContext,
+    StepServices, StorageService, UploadUrlResult, UserContactService, UserLookupService,
+    UserRecord,
 };
 pub use error::FlowError;
 pub use export::{ExportFormat, export_registry};

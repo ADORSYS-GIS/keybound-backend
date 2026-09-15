@@ -1,0 +1,5 @@
+session_type: account_recovery
+human_id_prefix: rc
+
+allowed_flows:
+  - account_recovery

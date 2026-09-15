@@ -8,7 +8,8 @@ use backend_core::async_trait;
 use backend_core::{Config, Error};
 use backend_repository::{
     DeviceRepo, FlowInstanceCreateInput, FlowRepo, FlowSessionCreateInput, FlowSessionFilter,
-    FlowStepCreateInput, FlowStepPatch, OldDevicePolicyOutcome, RepoResult, SigningKeyCreateInput,
+    FlowStepCreateInput, FlowStepPatch, OldDevicePolicyOutcome, RecoveryCaseCreateInput,
+    RecoveryCaseFilter, RecoveryCaseRepo, RecoveryCaseUpdate, RepoResult, SigningKeyCreateInput,
     UserDataUpsertInput, UserRepo,
 };
 use bytes::Bytes;
@@ -265,11 +266,49 @@ mock! {
     }
 }
 
+mock! {
+    pub RecoveryCaseRepo {}
+    #[async_trait]
+    impl RecoveryCaseRepo for RecoveryCaseRepo {
+        async fn create_case(
+            &self,
+            input: RecoveryCaseCreateInput,
+        ) -> RepoResult<backend_model::db::RecoveryCaseRow>;
+        async fn get_case_by_id(
+            &self,
+            case_id: &str,
+        ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+        async fn get_case_by_human_id(
+            &self,
+            human_id: &str,
+        ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+        async fn get_case_by_session_id(
+            &self,
+            session_id: &str,
+        ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+        async fn get_case_by_phone_hash(
+            &self,
+            phone_hash: &str,
+        ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+        async fn update_case(
+            &self,
+            case_id: &str,
+            expected_version: i64,
+            patch: &RecoveryCaseUpdate,
+        ) -> RepoResult<backend_model::db::RecoveryCaseRow>;
+        async fn list_cases(
+            &self,
+            filter: RecoveryCaseFilter,
+        ) -> RepoResult<(Vec<backend_model::db::RecoveryCaseRow>, i64)>;
+    }
+}
+
 #[derive(Default)]
 pub struct TestAppStateBuilder {
     pub flow: Option<Arc<dyn FlowRepo>>,
     pub user: Option<Arc<dyn UserRepo>>,
     pub device: Option<Arc<dyn DeviceRepo>>,
+    pub recovery_case: Option<Arc<dyn RecoveryCaseRepo>>,
     pub notification_queue: Option<Arc<dyn NotificationQueue>>,
     pub object_storage: Option<Arc<dyn ObjectStorage>>,
     pub config: Option<Config>,
@@ -292,6 +331,11 @@ impl TestAppStateBuilder {
 
     pub fn with_device(mut self, device: Arc<dyn DeviceRepo>) -> Self {
         self.device = Some(device);
+        self
+    }
+
+    pub fn with_recovery_case(mut self, recovery_case: Arc<dyn RecoveryCaseRepo>) -> Self {
+        self.recovery_case = Some(recovery_case);
         self
     }
 
@@ -373,6 +417,9 @@ cuss:
             device: self
                 .device
                 .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
+            recovery_case: self
+                .recovery_case
+                .unwrap_or_else(|| Arc::new(MockRecoveryCaseRepo::new())),
             notification_queue: self
                 .notification_queue
                 .unwrap_or_else(|| Arc::new(MockNotificationQueue::new())),

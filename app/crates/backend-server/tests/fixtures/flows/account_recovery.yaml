@@ -1,0 +1,125 @@
+flow_type: account_recovery
+human_id_prefix: rc
+feature: flow-account-recovery
+initial_step: init_recovery
+
+steps:
+  init_recovery:
+    action: WAIT
+    actor: END_USER
+    config:
+      actor: USER
+    next: resolve_existing_account
+
+  # Enumeration-safe account resolution. Matches exactly one existing account
+  # by phone; unknown/ambiguous numbers take the no_match branch (no OTP is
+  # ever sent and existence is never disclosed).
+  resolve_existing_account:
+    action: RESOLVE_EXISTING_ACCOUNT
+    actor: SYSTEM
+    config:
+      phone_source: session
+    branches:
+      matched: issue_recovery_otp
+      no_match: no_match_terminal
+    fail: FAILED
+
+  issue_recovery_otp:
+    action: ISSUE_RECOVERY_OTP
+    actor: SYSTEM
+    config:
+      length: 6
+      expiry_seconds: 1800
+      resend_cooldown_seconds: 30
+      max_attempts: 5
+    branches:
+      cooldown: issue_recovery_otp
+    next: verify_recovery_otp
+    fail: FAILED
+
+  verify_recovery_otp:
+    action: VERIFY_RECOVERY_OTP
+    actor: END_USER
+    config:
+      input_field: code
+      max_attempts: 5
+      attempts_field: otp_attempts
+    branches:
+      verified: collect_assisted_evidence
+      retry: verify_recovery_otp
+    fail: FAILED
+
+  collect_assisted_evidence:
+    action: WAIT
+    actor: END_USER
+    config:
+      actor: USER
+    next: await_admin_decision
+
+  # KYC Manager review via staff_flow (ADMIN actor).
+  await_admin_decision:
+    action: WAIT
+    actor: ADMIN
+    config:
+      actor: ADMIN
+    next: record_admin_decision
+
+  record_admin_decision:
+    action: CONDITIONAL
+    actor: SYSTEM
+    config:
+      source: flow
+      pointer: /step_output/await_admin_decision/decision
+      cases:
+        APPROVED: recovery_bind
+        REJECTED: rejected_terminal
+      default_branch: rejected_terminal
+    branches:
+      recovery_bind: recovery_bind
+      rejected_terminal: rejected_terminal
+    fail: FAILED
+
+  # Finalization: bind the new device, apply the old-device policy, then
+  # restrictions, then complete.
+  recovery_bind:
+    action: RECOVERY_BIND
+    actor: SYSTEM
+    next: revoke_or_quarantine_old_devices
+    fail: FAILED
+
+  revoke_or_quarantine_old_devices:
+    action: OLD_DEVICES_POLICY
+    actor: SYSTEM
+    config:
+      policy: REVOKE_ALL_PREVIOUS
+    next: apply_restrictions
+    fail: FAILED
+
+  apply_restrictions:
+    action: APPLY_RESTRICTIONS
+    actor: SYSTEM
+    next: complete_recovery
+    fail: FAILED
+
+  complete_recovery:
+    action: NOOP
+    actor: SYSTEM
+    next: COMPLETE
+
+  no_match_terminal:
+    action: DEBUG_LOG
+    actor: SYSTEM
+    config:
+      message: "Recovery: no safe match, steering to account creation (enumeration-safe)"
+    next: FAILED
+
+  rejected_terminal:
+    action: CLOSE_SESSION
+    actor: SYSTEM
+    config:
+      reason: REJECTED_BY_ADMIN
+    next: CLOSED
+
+  COMPLETE:
+    action: NOOP
+    actor: SYSTEM

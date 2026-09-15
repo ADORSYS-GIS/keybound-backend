@@ -10,10 +10,28 @@ use crate::api::BackendApi;
 use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, EnrollmentBindResponse,
     FlowDetailResponse, FlowResponse, LookupByPhoneRequest, LookupByPhoneResponse,
-    OldDevicePolicyRequest, OldDevicePolicyResponse, RecoveryBindRequest, SessionDetailResponse,
-    SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    OldDevicePolicyRequest, OldDevicePolicyResponse, RecoveryBindRequest, RecoveryCaseResponse,
+    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use super::service;
+
+#[utoipa::path(
+    get,
+    path = "/v1/recoveries/{recoveryCaseId}",
+    tag = "recoveries",
+    params(("recoveryCaseId" = String, Path)),
+    responses((status = 200, body = RecoveryCaseResponse))
+)]
+#[instrument(skip(api, headers))]
+pub async fn get_recovery_case(
+    State(api): State<BackendApi>,
+    Path(recovery_case_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<RecoveryCaseResponse>, Error> {
+    let _caller = service::require_service_caller(&api, &headers).await?;
+    let response = service::get_recovery_case(&api, recovery_case_id).await?;
+    Ok(Json(response))
+}
 
 #[utoipa::path(
     get,

@@ -289,12 +289,40 @@ impl Recovery<Error> for BackendApi {
         _host: &Host,
         _cookies: &CookieJar,
         _claims: &Self::Claims,
-        _path_params: &models::GetRecoveryCasePathParams,
+        path_params: &models::GetRecoveryCasePathParams,
     ) -> Result<GetRecoveryCaseResponse, Error> {
-        Ok(GetRecoveryCaseResponse::Status404_NotFound(kc_error(
-            "NOT_FOUND",
-            "Recovery case not found",
-        )))
+        let Some(row) = self
+            .state
+            .recovery_case
+            .get_case_by_id(&path_params.case_id)
+            .await?
+        else {
+            return Ok(GetRecoveryCaseResponse::Status404_NotFound(kc_error(
+                "NOT_FOUND",
+                "Recovery case not found",
+            )));
+        };
+
+        // Only safe, non-enumerating fields are exposed on the projection. The
+        // phone hash/masked value, otp hash, evidence, and risk flags are never
+        // returned. `target_user_id` is empty until an account is matched.
+        let response = models::RecoveryCaseResponse {
+            case_id: row.id.clone(),
+            status: row.status,
+            target_user_id: row.matched_user_id.unwrap_or_default(),
+            approval_revision: row.approval_revision.unwrap_or(1),
+            old_device_policy: row
+                .old_devices
+                .get("policy")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            approved_jkt: row.jkt.clone(),
+            approved_device_id: row.device_id.clone(),
+        };
+
+        Ok(GetRecoveryCaseResponse::Status200_RecoveryCaseInfo(
+            response,
+        ))
     }
 
     async fn recovery_bind(

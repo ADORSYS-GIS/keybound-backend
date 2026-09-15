@@ -446,3 +446,123 @@ pub struct OldDevicePolicyOutcome {
     pub already_applied: bool,
     pub affected_device_ids: Vec<String>,
 }
+
+/// Input for creating a recovery-case aggregate row.
+#[derive(Debug, Clone)]
+pub struct RecoveryCaseCreateInput {
+    pub id: String,
+    pub human_id: String,
+    pub session_id: Option<String>,
+    pub device_id: Option<String>,
+    pub jkt: Option<String>,
+    pub device_public_jwk: Option<Value>,
+    pub requested_phone_hash: String,
+    pub requested_phone_masked: String,
+    pub reason: Option<String>,
+    pub status: String,
+    pub phone_relation: Option<String>,
+    pub matched_user_id: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// A partial, versioned update for a recovery-case row. Any `Some` field is
+/// applied; `version` is used for optimistic concurrency: the update only
+/// applies when the stored row's `version` equals `expected_version`, and
+/// increments the stored `version` by one. A mismatch returns a conflict.
+#[derive(Debug, Clone, Default)]
+pub struct RecoveryCaseUpdate {
+    pub session_id: Option<Option<String>>,
+    pub device_id: Option<Option<String>>,
+    pub jkt: Option<Option<String>>,
+    pub device_public_jwk: Option<Option<Value>>,
+    pub reason: Option<Option<String>>,
+    pub status: Option<String>,
+    pub phone_relation: Option<Option<String>>,
+    pub matched_user_id: Option<Option<String>>,
+    pub otp_hash: Option<Option<String>>,
+    pub otp_expires_at: Option<Option<DateTime<Utc>>>,
+    pub otp_attempts: Option<i32>,
+    pub otp_resend_at: Option<Option<DateTime<Utc>>>,
+    pub review_decision: Option<Option<String>>,
+    pub review_reason: Option<Option<String>>,
+    pub review_checklist: Option<Option<Value>>,
+    pub review_expected_version: Option<Option<i64>>,
+    pub approval_revision: Option<Option<i64>>,
+    pub evidence: Option<Value>,
+    pub old_devices: Option<Value>,
+    pub risk_flags: Option<Value>,
+    pub expires_at: Option<Option<DateTime<Utc>>>,
+    pub review_expires_at: Option<Option<DateTime<Utc>>>,
+    pub approved_expires_at: Option<Option<DateTime<Utc>>>,
+}
+
+#[backend_core::async_trait]
+pub trait RecoveryCaseRepo: Send + Sync {
+    async fn create_case(
+        &self,
+        input: RecoveryCaseCreateInput,
+    ) -> RepoResult<backend_model::db::RecoveryCaseRow>;
+
+    async fn get_case_by_id(
+        &self,
+        case_id: &str,
+    ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+
+    async fn get_case_by_human_id(
+        &self,
+        human_id: &str,
+    ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+
+    async fn get_case_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+
+    async fn get_case_by_phone_hash(
+        &self,
+        phone_hash: &str,
+    ) -> RepoResult<Option<backend_model::db::RecoveryCaseRow>>;
+
+    /// Applies a versioned update. Returns `Err(Conflict)` when the stored
+    /// `version` does not match `expected_version`.
+    async fn update_case(
+        &self,
+        case_id: &str,
+        expected_version: i64,
+        patch: &RecoveryCaseUpdate,
+    ) -> RepoResult<backend_model::db::RecoveryCaseRow>;
+
+    async fn list_cases(
+        &self,
+        filter: RecoveryCaseFilter,
+    ) -> RepoResult<(Vec<backend_model::db::RecoveryCaseRow>, i64)>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryCaseFilter {
+    pub status: Option<String>,
+    pub matched_user_id: Option<String>,
+    pub page: i32,
+    pub limit: i32,
+}
+
+impl RecoveryCaseFilter {
+    pub fn normalized(self) -> Self {
+        Self {
+            status: self
+                .status
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty()),
+            matched_user_id: self
+                .matched_user_id
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty()),
+            page: self.page.max(1),
+            limit: self.limit.clamp(1, 100),
+        }
+    }
+
+    pub fn offset(&self) -> i64 {
+        i64::from((self.page - 1) * self.limit)
+    }
+}

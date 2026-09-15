@@ -2,7 +2,9 @@ use anyhow::Result;
 use backend_migrate::connect_postgres_and_migrate;
 use backend_model::db;
 use backend_model::kc::{KcAnyMap, RecoveryBindRequest};
-use backend_model::schema::{app_user, device, old_device_policy_idempotency, recovery_idempotency};
+use backend_model::schema::{
+    app_user, device, old_device_policy_idempotency, recovery_idempotency,
+};
 use backend_repository::{DeviceRepo, DeviceRepository};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -659,9 +661,33 @@ async fn revoke_all_previous_revokes_old_devices_but_keeps_new() -> Result<()> {
     let idem_key = "550e8400-e29b-41d4-a716-446655440021";
 
     seed_user(&pool, &user_id, "recovery-revoke-all").await?;
-    let old1_record = insert_device_row(&pool, &user_id, &old1, "jkt-old1", &build_public_jwk(), "ACTIVE").await?;
-    let old2_record = insert_device_row(&pool, &user_id, &old2, "jkt-old2", &build_other_public_jwk(), "ACTIVE").await?;
-    let new_record = insert_device_row(&pool, &user_id, &new_dev, "jkt-new", &build_public_jwk(), "ACTIVE").await?;
+    let old1_record = insert_device_row(
+        &pool,
+        &user_id,
+        &old1,
+        "jkt-old1",
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+    let old2_record = insert_device_row(
+        &pool,
+        &user_id,
+        &old2,
+        "jkt-old2",
+        &build_other_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+    let new_record = insert_device_row(
+        &pool,
+        &user_id,
+        &new_dev,
+        "jkt-new",
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
 
     let outcome = repo
         .apply_old_device_policy(
@@ -686,8 +712,14 @@ async fn revoke_all_previous_revokes_old_devices_but_keeps_new() -> Result<()> {
         .select(device::status)
         .load::<String>(&mut conn)
         .await?;
-    assert_eq!(statuses.iter().filter(|s| s.as_str() == "REVOKED").count(), 2);
-    assert_eq!(statuses.iter().filter(|s| s.as_str() == "ACTIVE").count(), 1);
+    assert_eq!(
+        statuses.iter().filter(|s| s.as_str() == "REVOKED").count(),
+        2
+    );
+    assert_eq!(
+        statuses.iter().filter(|s| s.as_str() == "ACTIVE").count(),
+        1
+    );
 
     cleanup(&pool, &[idem_key], &[&old1, &old2, &new_dev], &user_id).await?;
     Ok(())
@@ -712,8 +744,24 @@ async fn quarantine_all_previous_sets_quarantined_status() -> Result<()> {
     let idem_key = "550e8400-e29b-41d4-a716-446655440022";
 
     seed_user(&pool, &user_id, "recovery-quarantine").await?;
-    let old1_record = insert_device_row(&pool, &user_id, &old1, "jkt-q-old1", &build_public_jwk(), "ACTIVE").await?;
-    insert_device_row(&pool, &user_id, &new_dev, "jkt-q-new", &build_other_public_jwk(), "ACTIVE").await?;
+    let old1_record = insert_device_row(
+        &pool,
+        &user_id,
+        &old1,
+        "jkt-q-old1",
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+    insert_device_row(
+        &pool,
+        &user_id,
+        &new_dev,
+        "jkt-q-new",
+        &build_other_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
 
     let outcome = repo
         .apply_old_device_policy(
@@ -759,8 +807,24 @@ async fn old_device_policy_is_idempotent_on_retry() -> Result<()> {
     let idem_key = "550e8400-e29b-41d4-a716-446655440023";
 
     seed_user(&pool, &user_id, "recovery-idem-policy").await?;
-    let old1_record = insert_device_row(&pool, &user_id, &old1, "jkt-i-old1", &build_public_jwk(), "ACTIVE").await?;
-    insert_device_row(&pool, &user_id, &new_dev, "jkt-i-new", &build_other_public_jwk(), "ACTIVE").await?;
+    let old1_record = insert_device_row(
+        &pool,
+        &user_id,
+        &old1,
+        "jkt-i-old1",
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+    insert_device_row(
+        &pool,
+        &user_id,
+        &new_dev,
+        "jkt-i-new",
+        &build_other_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
 
     let first = repo
         .apply_old_device_policy(
@@ -812,8 +876,24 @@ async fn old_device_policy_rejects_modified_payload_on_idempotency_reuse() -> Re
     let idem_key = "550e8400-e29b-41d4-a716-446655440024";
 
     seed_user(&pool, &user_id, "recovery-conflict-policy").await?;
-    insert_device_row(&pool, &user_id, &old1, "jkt-c-old1", &build_public_jwk(), "ACTIVE").await?;
-    insert_device_row(&pool, &user_id, &new_dev, "jkt-c-new", &build_other_public_jwk(), "ACTIVE").await?;
+    insert_device_row(
+        &pool,
+        &user_id,
+        &old1,
+        "jkt-c-old1",
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+    insert_device_row(
+        &pool,
+        &user_id,
+        &new_dev,
+        "jkt-c-new",
+        &build_other_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
 
     repo.apply_old_device_policy(
         idem_key,
@@ -862,8 +942,24 @@ async fn concurrent_old_device_policy_applies_one_and_conflicts_the_other() -> R
     let idem_b = "550e8400-e29b-41d4-a716-446655440026";
 
     seed_user(&pool, &user_id, "recovery-concurrent-policy").await?;
-    insert_device_row(&pool, &user_id, &old1, "jkt-cc-old1", &build_public_jwk(), "ACTIVE").await?;
-    insert_device_row(&pool, &user_id, &new_dev, "jkt-cc-new", &build_other_public_jwk(), "ACTIVE").await?;
+    insert_device_row(
+        &pool,
+        &user_id,
+        &old1,
+        "jkt-cc-old1",
+        &build_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
+    insert_device_row(
+        &pool,
+        &user_id,
+        &new_dev,
+        "jkt-cc-new",
+        &build_other_public_jwk(),
+        "ACTIVE",
+    )
+    .await?;
 
     let expect_new = vec![new_dev.clone()];
 

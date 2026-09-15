@@ -1,4 +1,4 @@
-use super::runtime::{merge_json_value, resolve_transition, step_services};
+use super::runtime::{merge_json_value, resolve_transition, step_services_with_device};
 use crate::state::AppState;
 use backend_core::Error;
 use backend_flow_sdk::{Actor, HumanReadableId, RetryConfig, StepContext, StepOutcome};
@@ -79,7 +79,7 @@ impl FlowExecutor {
             input: step.input.clone().unwrap_or_else(|| serde_json::json!({})),
             session_context: session.context.clone(),
             flow_context: flow.context.clone(),
-            services: step_services(self.state.user.clone()),
+            services: step_services_with_device(self.state.user.clone(), self.state.device.clone()),
         };
 
         let outcome = step_def

@@ -225,6 +225,10 @@ fn register_builtin_actions(registry: &mut FlowRegistry) {
     ));
     registry.register_step(Arc::new(WebhookStep::new()));
 
+    for recovery_step in crate::flows::definitions::account_recovery::steps() {
+        registry.register_step(recovery_step);
+    }
+
     debug!(
         "Registered {} built-in actions",
         registry.step_types().len()

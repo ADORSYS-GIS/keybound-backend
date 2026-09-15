@@ -3,6 +3,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
+/// Safe, non-enumerating projection of a recovery case for the BFF facade.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryCaseResponse {
+    pub case_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub target_user_id: Option<String>,
+    pub approval_revision: i64,
+    #[serde(default)]
+    pub old_device_policy: Option<String>,
+    #[serde(default)]
+    pub approved_jkt: Option<String>,
+    #[serde(default)]
+    pub approved_device_id: Option<String>,
+    #[serde(default)]
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub updated_at: DateTime<Utc>,
+    pub version: i64,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionRequest {

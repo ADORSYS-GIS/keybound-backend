@@ -4,7 +4,8 @@ use crate::worker::{NotificationQueue, RedisNotificationQueue};
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
 use backend_repository::{
-    DeviceRepo, DeviceRepository, FlowRepo, FlowRepository, UserRepo, UserRepository,
+    DeviceRepo, DeviceRepository, FlowRepo, FlowRepository, RecoveryCaseRepo,
+    RecoveryCaseRepository, UserRepo, UserRepository,
 };
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub flow_registry: Arc<backend_flow_sdk::FlowRegistry>,
     pub user: Arc<dyn UserRepo>,
     pub device: Arc<dyn DeviceRepo>,
+    pub recovery_case: Arc<dyn RecoveryCaseRepo>,
     pub notification_queue: Arc<dyn NotificationQueue>,
     pub object_storage: Arc<dyn ObjectStorage>,
     pub config: Config,
@@ -33,6 +35,7 @@ impl std::fmt::Debug for AppState {
             .field("flow_registry", &"<FlowRegistry>")
             .field("user", &"<UserRepository>")
             .field("device", &"<DeviceRepository>")
+            .field("recovery_case", &"<RecoveryCaseRepository>")
             .field("object_storage", &"<ObjectStorage>")
             .field("config", &self.config)
             .field("oidc_state", &"<OidcState>")
@@ -116,6 +119,8 @@ impl AppState {
         );
         let user: Arc<dyn UserRepo> = Arc::new(UserRepository::new(pool.clone()));
         let device: Arc<dyn DeviceRepo> = Arc::new(DeviceRepository::new(pool.clone()));
+        let recovery_case: Arc<dyn RecoveryCaseRepo> =
+            Arc::new(RecoveryCaseRepository::new(pool.clone()));
 
         let http_client = HttpClient::new_with_defaults()?;
 
@@ -145,6 +150,7 @@ impl AppState {
             flow_registry,
             user,
             device,
+            recovery_case,
             notification_queue,
             object_storage,
             config: cfg.clone(),

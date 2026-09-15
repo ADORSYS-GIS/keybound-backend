@@ -2,12 +2,14 @@ use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, EnrollmentBindResponse,
     EnrollmentBindStatus, FlowDetailResponse, FlowResponse, LookupByPhoneCandidate,
     LookupByPhoneRequest, LookupByPhoneResponse, OldDevicePolicyRequest, OldDevicePolicyResponse,
-    OldDevicePolicyStatus, PhoneMatchField, RecoveryBindRequest, SessionDetailResponse,
-    SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    OldDevicePolicyStatus, PhoneMatchField, RecoveryBindRequest, RecoveryCaseResponse,
+    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use crate::api::{BackendApi, BffSignatureClaims};
 use crate::flows::registry::{actor_label, waiting_status};
-use crate::flows::runtime::{merge_json_value, merged_json, resolve_transition, step_services};
+use crate::flows::runtime::{
+    merge_json_value, merged_json, resolve_transition, step_services_with_device,
+};
 use axum::http::HeaderMap;
 use backend_core::Error;
 use backend_flow_sdk::{Actor, Flow, FlowError, HumanReadableId, StepContext, StepOutcome};
@@ -310,7 +312,7 @@ pub async fn submit_step(
         input: body.input.clone(),
         session_context: session.context.clone(),
         flow_context: flow.context.clone(),
-        services: step_services(api.state.user.clone()),
+        services: step_services_with_device(api.state.user.clone(), api.state.device.clone()),
     };
 
     let verify_outcome = step_definition
@@ -579,7 +581,7 @@ pub(crate) async fn create_step_chain(
             input: input_value.clone(),
             session_context: session.context.clone(),
             flow_context: flow.context.clone(),
-            services: step_services(api.state.user.clone()),
+            services: step_services_with_device(api.state.user.clone(), api.state.device.clone()),
         };
 
         match step_definition
@@ -1146,6 +1148,38 @@ pub async fn lookup_users_by_phone(
         .collect();
 
     Ok(LookupByPhoneResponse { candidates })
+}
+
+#[instrument(skip(api))]
+pub async fn get_recovery_case(
+    api: &BackendApi,
+    recovery_case_id: String,
+) -> Result<RecoveryCaseResponse, Error> {
+    let row = api
+        .state
+        .recovery_case
+        .get_case_by_id(&recovery_case_id)
+        .await?
+        .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
+
+    // Only safe, non-enumerating fields are exposed. Phone hashes, the OTP
+    // hash, evidence, and risk flags are never returned to the facade.
+    Ok(RecoveryCaseResponse {
+        case_id: row.id,
+        status: row.status,
+        target_user_id: row.matched_user_id,
+        approval_revision: row.approval_revision.unwrap_or(1),
+        old_device_policy: row
+            .old_devices
+            .get("policy")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        approved_jkt: row.jkt,
+        approved_device_id: row.device_id,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        version: row.version,
+    })
 }
 
 pub async fn require_service_caller(
