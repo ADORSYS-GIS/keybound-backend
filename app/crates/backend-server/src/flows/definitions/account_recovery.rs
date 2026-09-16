@@ -8,13 +8,28 @@ use chrono::Utc;
 use rand::RngExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// Memory-hard, iterated KDF (Argon2id) with a fixed application salt so that
+/// derived hashes stay deterministic: phone hashes must be re-derivable for
+/// case lookup (`get_case_by_phone_hash`) and OTP hashes are compared directly
+/// against a later submission. A fixed salt avoids reversible/rainbow-table
+/// SHA-256 while still producing a reproducible value within the flow.
+fn kdf_secret(secret: &str) -> String {
+    use argon2::{Algorithm, Argon2, Params, Version};
+    const SALT: &[u8] = b"azamra-recovery-kdf-v1";
+    let params = Params::new(19 * 1024, 3, 1, Some(32)).expect("valid argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut out = [0u8; 32];
+    let _ = argon2.hash_password_into(secret.as_bytes(), SALT, &mut out);
+    hex::encode(out)
+}
 
 pub fn steps() -> Vec<StepRef> {
     vec![
         Arc::new(ResolveExistingAccountStep),
-        Arc::new(IssueRecoveryOtpStep),
+        Arc::new(IssueRecoveryOtpStep::new()),
         Arc::new(VerifyRecoveryOtpStep),
         Arc::new(RecoveryBindStep),
         Arc::new(OldDevicesPolicyStep),
@@ -40,7 +55,7 @@ fn parse_config<T: serde::de::DeserializeOwned + Default>(
 }
 
 /// Enumeration-safe mask of an E.164 phone number (keeps country + last 4).
-fn mask_phone(phone: &str) -> String {
+pub(crate) fn mask_phone(phone: &str) -> String {
     let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
     if digits.len() <= 4 {
         return "+****".to_string();
@@ -50,16 +65,12 @@ fn mask_phone(phone: &str) -> String {
     format!("{}{}****{}", prefix, &head[..head.len().min(4)], tail)
 }
 
-fn hash_phone(phone: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(phone.as_bytes());
-    hex::encode(hasher.finalize())
+pub(crate) fn hash_phone(phone: &str) -> String {
+    kdf_secret(phone)
 }
 
 fn hash_otp(otp: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(otp.as_bytes());
-    hex::encode(hasher.finalize())
+    kdf_secret(otp)
 }
 
 fn is_e164(value: &str) -> bool {
@@ -73,7 +84,12 @@ fn is_e164(value: &str) -> bool {
     }
 }
 
+/// Length cap avoids `10u64.pow(length)` overflowing/panicking for large
+/// config values while keeping codes human-readable.
+const MAX_OTP_LENGTH: u8 = 12;
+
 fn generate_otp(length: u8) -> String {
+    let length = length.clamp(1, MAX_OTP_LENGTH);
     let mut rng = rand::rng();
     let max = 10u64.pow(length as u32);
     let num = rng.random_range(0..max);
@@ -247,10 +263,106 @@ impl Default for IssueOtpConfig {
     }
 }
 
-/// Issues a recovery OTP, storing only its SHA-256 hash in flow context. Enforces
-/// a resend cooldown and resets the attempts counter. The plaintext code is
-/// returned only in the step output (for the SMS/webhook sender), never persisted.
-pub struct IssueRecoveryOtpStep;
+/// Payload sent to the sms-gateway `POST {base}/otp` endpoint.
+#[derive(Debug, Clone)]
+struct OtpDeliveryRequest {
+    base_url: String,
+    msisdn: String,
+    otp: String,
+    step_id: String,
+}
+
+/// Bounded delivery of a recovery OTP to the sms-gateway HTTP endpoint.
+///
+/// The plaintext code is carried only inside the outbound request body; it is
+/// never returned in step output nor persisted anywhere.
+#[async_trait]
+trait OtpDeliverer: Send + Sync {
+    async fn deliver(&self, req: &OtpDeliveryRequest) -> Result<bool, String>;
+}
+
+/// Real delivery: POSTs `${base_url}/otp` with `msisdn`/`otp`/`step_id` and
+/// treats the OTP as sent only when the gateway returns `delivered: true`.
+struct HttpOtpDeliverer {
+    client: reqwest::Client,
+    timeout: Duration,
+}
+
+impl Default for HttpOtpDeliverer {
+    fn default() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+#[async_trait]
+impl OtpDeliverer for HttpOtpDeliverer {
+    async fn deliver(&self, req: &OtpDeliveryRequest) -> Result<bool, String> {
+        let url = format!("{}/otp", req.base_url.trim_end_matches('/'));
+        let resp = self
+            .client
+            .post(&url)
+            .timeout(self.timeout)
+            .json(&json!({
+                "msisdn": req.msisdn,
+                "otp": req.otp,
+                "step_id": req.step_id,
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("OTP_DELIVERY_FAILED: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("OTP_DELIVERY_FAILED: http_{}", status.as_u16()));
+        }
+
+        let body: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("OTP_DELIVERY_FAILED: bad_response: {e}"))?;
+        Ok(body
+            .get("delivered")
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
+    }
+}
+
+/// Issues a recovery OTP, storing only its salted KDF hash in flow context and
+/// delivering the plaintext code to the sms-gateway HTTP endpoint. The
+/// plaintext code is never returned in the step output and never persisted.
+///
+/// The deliverer is injectable so unit tests can exercise success/failure
+/// without a live sms-gateway.
+pub struct IssueRecoveryOtpStep {
+    deliverer: Arc<dyn OtpDeliverer>,
+    base_url: Option<String>,
+}
+
+impl Default for IssueRecoveryOtpStep {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IssueRecoveryOtpStep {
+    pub fn new() -> Self {
+        Self {
+            deliverer: Arc::new(HttpOtpDeliverer::default()),
+            base_url: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with(deliverer: Arc<dyn OtpDeliverer>, base_url: Option<String>) -> Self {
+        Self {
+            deliverer,
+            base_url,
+        }
+    }
+}
 
 #[async_trait]
 impl Step for IssueRecoveryOtpStep {
@@ -325,16 +437,70 @@ impl Step for IssueRecoveryOtpStep {
                     "otp_attempts": 0,
                     "otp_resend_at": now + config.resend_cooldown_seconds as i64,
                     "otp_max_attempts": config.max_attempts,
+                    "otp_issued": true,
                 }
             })),
             ..Default::default()
         };
 
+        let phone = ctx
+            .session_context
+            .get("phone_number")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+
+        if phone.is_empty() {
+            // No deliverable destination: do NOT claim the OTP was sent.
+            return Ok(StepOutcome::Failed {
+                error: "NO_DELIVERY_TARGET".to_string(),
+                retryable: false,
+            });
+        }
+
+        let base_url = self
+            .base_url
+            .clone()
+            .or_else(|| std::env::var("SMS_SINK_URL").ok().filter(|s| !s.is_empty()));
+        let Some(base_url) = base_url else {
+            // sms-gateway base URL unavailable: cannot deliver, so never
+            // report the OTP as sent.
+            return Ok(StepOutcome::Failed {
+                error: "OTP_DELIVERY_FAILED".to_string(),
+                retryable: false,
+            });
+        };
+
+        let request = OtpDeliveryRequest {
+            base_url,
+            msisdn: phone,
+            otp,
+            step_id: ctx.step_id.clone(),
+        };
+
+        let delivered = self.deliverer.deliver(&request).await;
+        let delivered = match delivered {
+            Ok(true) => true,
+            Ok(false) => {
+                // Gateway responded but did not confirm delivery.
+                return Ok(StepOutcome::Failed {
+                    error: "OTP_DELIVERY_FAILED".to_string(),
+                    retryable: true,
+                });
+            }
+            Err(e) => {
+                return Ok(StepOutcome::Failed {
+                    error: e,
+                    retryable: true,
+                });
+            }
+        };
+
         Ok(StepOutcome::Done {
             output: Some(json!({
-                "otp_sent": true,
+                "otp_sent": delivered,
+                "otp_issued": true,
                 "expires_at": expires_at,
-                "otp": otp,
             })),
             updates: Some(Box::new(updates)),
         })
@@ -533,22 +699,32 @@ impl Step for RecoveryBindStep {
             .and_then(|r| r.get("approval_revision"))
             .and_then(Value::as_i64)
             .unwrap_or(1);
+
+        // The approved device identity is loaded from the recovery context (the
+        // approved path auto-transitions here without fresh user input). We read
+        // from flow context first, then session context, then any submitted input,
+        // so a context-carried approved device never fails with "missing device_id".
         let device_id = ctx
-            .input
-            .get("device_id")
+            .flow_config("recovery")
+            .and_then(|r| r.get("device_id"))
             .and_then(Value::as_str)
+            .or_else(|| ctx.session_context.get("device_id").and_then(Value::as_str))
+            .or_else(|| ctx.input.get("device_id").and_then(Value::as_str))
             .ok_or_else(|| FlowError::InvalidDefinition("missing device_id".to_string()))?
             .to_string();
         let jkt = ctx
-            .input
-            .get("jkt")
+            .flow_config("recovery")
+            .and_then(|r| r.get("jkt"))
             .and_then(Value::as_str)
+            .or_else(|| ctx.session_context.get("jkt").and_then(Value::as_str))
+            .or_else(|| ctx.input.get("jkt").and_then(Value::as_str))
             .ok_or_else(|| FlowError::InvalidDefinition("missing jkt".to_string()))?
             .to_string();
         let public_jwk = ctx
-            .input
-            .get("public_jwk")
-            .cloned()
+            .flow_config("recovery")
+            .and_then(|r| r.get("public_jwk").cloned())
+            .or_else(|| ctx.session_context.get("public_jwk").cloned())
+            .or_else(|| ctx.input.get("public_jwk").cloned())
             .unwrap_or_else(|| json!({}));
         let binding_operation_id = ctx
             .input
@@ -680,8 +856,11 @@ impl Step for OldDevicesPolicyStep {
     }
 }
 
-/// Records money-movement restrictions after a risky recovery. Minimal for the
-/// first slice: it persists risk flags into flow context.
+/// Records money-movement restrictions after a risky recovery.
+///
+/// NOTE: This is an explicit stub — no restrictions are actually applied to any
+/// external system yet. It must NOT report a silent false-success, so it returns
+/// `applied: false` and a `STUB_NOT_IMPLEMENTED` reason, and logs a warning.
 pub struct ApplyRestrictionsStep;
 
 #[async_trait]
@@ -703,8 +882,12 @@ impl Step for ApplyRestrictionsStep {
     }
 
     async fn execute(&self, _ctx: &StepContext) -> Result<StepOutcome, FlowError> {
+        tracing::warn!("APPLY_RESTRICTIONS is a stub; no restrictions were applied");
         Ok(StepOutcome::Done {
-            output: Some(json!({ "restrictions_applied": true })),
+            output: Some(json!({
+                "restrictions_applied": false,
+                "status": "STUB_NOT_IMPLEMENTED",
+            })),
             updates: None,
         })
     }
@@ -715,6 +898,35 @@ mod tests {
     use super::*;
     use backend_flow_sdk::StepServices;
     use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    struct FakeDeliverer {
+        result: Mutex<Result<bool, String>>,
+        requests: Arc<Mutex<Vec<OtpDeliveryRequest>>>,
+    }
+
+    #[async_trait]
+    impl OtpDeliverer for FakeDeliverer {
+        async fn deliver(&self, req: &OtpDeliveryRequest) -> Result<bool, String> {
+            self.requests.lock().unwrap().push(req.clone());
+            self.result.lock().unwrap().clone()
+        }
+    }
+
+    fn step_with_deliverer(
+        result: Result<bool, String>,
+    ) -> (IssueRecoveryOtpStep, Arc<Mutex<Vec<OtpDeliveryRequest>>>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let deliverer = FakeDeliverer {
+            result: Mutex::new(result),
+            requests: requests.clone(),
+        };
+        let step = IssueRecoveryOtpStep::with(
+            Arc::new(deliverer),
+            Some("http://sms-gateway:3000".to_string()),
+        );
+        (step, requests)
+    }
 
     fn make_ctx(
         session_context: Value,
@@ -753,6 +965,10 @@ mod tests {
         json!({ "recovery": { "matched": true } })
     }
 
+    fn matched_session() -> Value {
+        json!({ "phone_number": "+237690000000", "realm": "fineract" })
+    }
+
     #[test]
     fn otp_hash_is_not_plaintext() {
         let otp = "123456";
@@ -763,30 +979,107 @@ mod tests {
         assert_ne!(h, hash_otp("654321"));
     }
 
+    #[test]
+    fn generate_otp_clamps_length() {
+        for length in [1u8, 6, 12, 64, 200] {
+            let otp = generate_otp(length);
+            assert!(otp.len() <= MAX_OTP_LENGTH as usize, "len {otp}");
+            assert!(otp.bytes().all(|b| b.is_ascii_digit()));
+        }
+    }
+
     #[tokio::test]
-    async fn issue_recovery_otp_stores_hash_not_plaintext() {
-        let step = IssueRecoveryOtpStep;
-        let ctx = make_ctx(json!({}), matched_flow(), otp_config());
+    async fn issue_recovery_otp_delivers_via_http_not_persisted_output() {
+        let (step, requests) = step_with_deliverer(Ok(true));
+        let ctx = make_ctx(matched_session(), matched_flow(), otp_config());
         let outcome = step.execute(&ctx).await.unwrap();
         match outcome {
             StepOutcome::Done { output, updates } => {
                 let output = output.unwrap();
-                let plaintext = output["otp"].as_str().unwrap().to_string();
+                assert_eq!(output["otp_sent"], true);
+                assert!(
+                    output.get("otp").is_none(),
+                    "plaintext must not be in output"
+                );
+
                 let updates = updates.unwrap();
                 let patch = updates.flow_context_patch.unwrap();
-                assert!(!patch.to_string().contains(&plaintext));
-                let stored = patch["recovery"]["otp_hash"].as_str().unwrap();
-                assert_eq!(stored, hash_otp(&plaintext));
+                assert!(patch["recovery"]["otp_hash"].as_str().is_some());
                 assert_eq!(patch["recovery"]["otp_attempts"], 0);
                 assert!(patch["recovery"]["otp_expires_at"].is_i64());
+
+                assert!(
+                    updates.notifications.is_none(),
+                    "no Redis notification should be enqueued"
+                );
+
+                let reqs = requests.lock().unwrap();
+                assert_eq!(reqs.len(), 1, "exactly one HTTP delivery");
+                let req = &reqs[0];
+                assert_eq!(req.msisdn, "+237690000000");
+                assert_eq!(req.step_id, "step");
+                assert!(!req.otp.is_empty());
+
+                let stored = patch["recovery"]["otp_hash"].as_str().unwrap();
+                assert_eq!(stored, hash_otp(&req.otp));
+
+                let serialized_output = output.to_string();
+                assert!(
+                    !serialized_output.contains(&req.otp),
+                    "plaintext OTP leaked into output: {serialized_output}"
+                );
+                let serialized_patch = patch.to_string();
+                assert!(
+                    !serialized_patch.contains(&req.otp),
+                    "plaintext OTP leaked into flow context: {serialized_patch}"
+                );
             }
             other => panic!("expected Done, got {other:?}"),
         }
     }
 
     #[tokio::test]
+    async fn issue_recovery_otp_fails_when_gateway_errors() {
+        let (step, _) = step_with_deliverer(Err("OTP_DELIVERY_FAILED: network".to_string()));
+        let ctx = make_ctx(matched_session(), matched_flow(), otp_config());
+        match step.execute(&ctx).await.unwrap() {
+            StepOutcome::Failed { error, retryable } => {
+                assert!(
+                    error.starts_with("OTP_DELIVERY_FAILED"),
+                    "unexpected error: {error}"
+                );
+                assert!(retryable);
+            }
+            other => panic!("expected failed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn issue_recovery_otp_does_not_report_sent_when_gateway_denies_delivery() {
+        let (step, _) = step_with_deliverer(Ok(false));
+        let ctx = make_ctx(matched_session(), matched_flow(), otp_config());
+        match step.execute(&ctx).await.unwrap() {
+            StepOutcome::Failed { error, retryable } => {
+                assert_eq!(error, "OTP_DELIVERY_FAILED");
+                assert!(retryable);
+            }
+            other => panic!("expected failed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn issue_recovery_otp_fails_without_delivery_target() {
+        let (step, _) = step_with_deliverer(Ok(true));
+        let ctx = make_ctx(json!({}), matched_flow(), otp_config());
+        match step.execute(&ctx).await.unwrap() {
+            StepOutcome::Failed { error, .. } => assert_eq!(error, "NO_DELIVERY_TARGET"),
+            other => panic!("expected failed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn issue_recovery_otp_enforces_resend_cooldown() {
-        let step = IssueRecoveryOtpStep;
+        let (step, _) = step_with_deliverer(Ok(true));
         let flow_context = json!({
             "recovery": {
                 "matched": true,

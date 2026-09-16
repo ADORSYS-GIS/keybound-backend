@@ -141,32 +141,34 @@ impl FlowExecutor {
         debug!("Step execution done: {}", step.step_type);
         let actual_output = output.unwrap_or_else(|| serde_json::json!({"result": "done"}));
 
-        self.state
-            .flow
-            .patch_step(
-                &step.id,
-                FlowStepPatch::new()
-                    .status("COMPLETED")
-                    .output(actual_output.clone())
-                    .clear_error()
-                    .finished_at(Utc::now()),
-            )
-            .await?;
-
         let mut next_flow_context = flow.context.clone();
         if let Some(root) = next_flow_context.as_object_mut() {
             let entry = root
                 .entry("step_output")
                 .or_insert_with(|| Value::Object(Default::default()));
             if let Some(step_map) = entry.as_object_mut() {
-                step_map.insert(step.step_type.clone(), actual_output);
+                step_map.insert(step.step_type.clone(), actual_output.clone());
             }
         }
 
+        // Apply side effects (including OTP notification enqueue) BEFORE marking
+        // the step completed, so a delivery failure is never recorded as success.
         if let Some(updates) = updates {
             self.apply_updates(session, &mut next_flow_context, *updates)
                 .await?;
         }
+
+        self.state
+            .flow
+            .patch_step(
+                &step.id,
+                FlowStepPatch::new()
+                    .status("COMPLETED")
+                    .output(actual_output)
+                    .clear_error()
+                    .finished_at(Utc::now()),
+            )
+            .await?;
 
         self.advance_to_next_step(
             flow,
@@ -222,9 +224,13 @@ impl FlowExecutor {
                 match serde_json::from_value::<backend_core::NotificationJob>(notification.clone())
                 {
                     Ok(job) => {
-                        if let Err(e) = self.state.notification_queue.enqueue(job).await {
-                            warn!("Failed to enqueue notification: {}", e);
-                        }
+                        self.state
+                            .notification_queue
+                            .enqueue(job)
+                            .await
+                            .map_err(|e| {
+                                Error::internal("NOTIFICATION_ENQUEUE_FAILED", e.to_string())
+                            })?;
                     }
                     Err(e) => {
                         warn!("Failed to deserialize notification job: {}", e);

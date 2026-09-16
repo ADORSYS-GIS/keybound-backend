@@ -172,7 +172,19 @@ async fn account_recovery_flow_advances_first_slice() {
     }
     assert_eq!(flow_context["recovery"]["matched"], true);
 
-    // 2. issue_recovery_otp (SYSTEM) — stores a HASH, not plaintext.
+    // 2. issue_recovery_otp (SYSTEM) — delivers via HTTP to the sms-gateway
+    // endpoint and stores a HASH, not plaintext. We stand up a mock gateway so
+    // the step's HTTP delivery can be exercised without real infrastructure.
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/otp"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(json!({ "delivered": true })),
+        )
+        .mount(&mock_server)
+        .await;
+    unsafe { std::env::set_var("SMS_SINK_URL", mock_server.uri()) };
+
     let issue = flow
         .steps()
         .iter()
@@ -191,25 +203,46 @@ async fn account_recovery_flow_advances_first_slice() {
     };
     let issue_output = issue_output.expect("issue output");
     assert_eq!(issue_output["otp_sent"], true);
-    let plaintext = issue_output["otp"]
+    // B13: the plaintext OTP must NOT be present in the step output.
+    assert!(
+        issue_output.get("otp").is_none(),
+        "plaintext OTP must not be in output: {issue_output}"
+    );
+
+    let issue_updates = issue_updates.expect("issue updates");
+    assert!(
+        issue_updates.notifications.is_none(),
+        "no Redis notification should be enqueued"
+    );
+
+    // The plaintext travels only inside the outbound HTTP request body to the
+    // sms-gateway; recover it from what the mock gateway received.
+    let received = mock_server
+        .received_requests()
+        .await
+        .expect("gateway received a request");
+    assert_eq!(received.len(), 1);
+    let body: Value = serde_json::from_slice(&received[0].body).expect("json body");
+    let plaintext = body["otp"]
         .as_str()
-        .expect("plaintext otp in output");
+        .expect("otp in request body")
+        .to_string();
+    assert_eq!(body["msisdn"], known_phone);
+    assert_eq!(body["step_id"], "step");
+
+    unsafe { std::env::remove_var("SMS_SINK_URL") };
 
     // The plaintext OTP must NOT be persisted into flow context.
-    if let Some(updates) = &issue_updates
-        && let Some(patch) = &updates.flow_context_patch
-    {
+    if let Some(patch) = &issue_updates.flow_context_patch {
         let serialized = patch.to_string();
         assert!(
-            !serialized.contains(plaintext),
+            !serialized.contains(&plaintext),
             "plaintext OTP leaked into flow context: {serialized}"
         );
     }
 
     // Apply issue's patch; verify the hash is stored and attempts reset.
-    if let Some(updates) = issue_updates
-        && let Some(patch) = updates.flow_context_patch
-    {
+    if let Some(patch) = issue_updates.flow_context_patch {
         merge_into(&mut flow_context, &patch);
     }
     let stored_hash = flow_context["recovery"]["otp_hash"]

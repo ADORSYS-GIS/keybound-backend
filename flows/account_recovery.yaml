@@ -111,7 +111,10 @@ steps:
     actor: SYSTEM
     config:
       message: "Recovery: no safe match, steering to account creation (enumeration-safe)"
-    next: FAILED
+    # A normal "no safe match" is NOT a failure of the recovery flow; the flow
+    # completes with an explicit no-match outcome so the BFF can steer to
+    # account creation.
+    next: COMPLETE
 
   rejected_terminal:
     action: CLOSE_SESSION

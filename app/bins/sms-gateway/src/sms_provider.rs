@@ -12,8 +12,8 @@ use tracing::{debug, info, warn};
 
 #[cfg(test)]
 use wiremock::{
-    Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
+    Mock, MockServer, ResponseTemplate,
 };
 
 const TRANSIENT_RETRY_MAX_ATTEMPTS: usize = 4;
@@ -1010,12 +1010,10 @@ mod tests {
             .await;
 
         // Test with formatted + number (+237-678-532-402)
-        assert!(
-            provider
-                .send_otp("+237-678-532-402", "654321")
-                .await
-                .is_ok()
-        );
+        assert!(provider
+            .send_otp("+237-678-532-402", "654321")
+            .await
+            .is_ok());
 
         // Test with 00-prefixed international number (00237678532402 -> +237678532402)
         assert!(provider.send_otp("00237678532402", "654321").await.is_ok());

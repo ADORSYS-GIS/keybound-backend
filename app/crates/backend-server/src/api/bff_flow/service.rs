@@ -6,6 +6,7 @@ use super::models::{
     SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
 };
 use crate::api::{BackendApi, BffSignatureClaims};
+use crate::flows::definitions::account_recovery::{hash_phone, mask_phone};
 use crate::flows::registry::{actor_label, waiting_status};
 use crate::flows::runtime::{
     merge_json_value, merged_json, resolve_transition, step_services_with_device,
@@ -16,7 +17,7 @@ use backend_flow_sdk::{Actor, Flow, FlowError, HumanReadableId, StepContext, Ste
 use backend_model::db::{FlowInstanceRow, FlowSessionRow};
 use backend_repository::{
     FlowInstanceCreateInput, FlowSessionCreateInput, FlowSessionFilter, FlowStepCreateInput,
-    FlowStepPatch,
+    FlowStepPatch, RecoveryCaseCreateInput, RecoveryCaseUpdate,
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -27,7 +28,20 @@ const FLOW_STATUS_COMPLETED: &str = "COMPLETED";
 const FLOW_STATUS_FAILED: &str = "FAILED";
 const FLOW_STATUS_CLOSED: &str = "CLOSED";
 
-pub async fn require_user_id(api: &BackendApi, headers: &HeaderMap) -> Result<String, Error> {
+/// Identity of an authenticated BFF caller. `service_client_id` is set when the
+/// caller is a service client (e.g. the BFF `azamra-bff`); such callers are not
+/// end-users, so sessions they create must not carry an owning `user_id`.
+#[derive(Debug, Clone)]
+pub(crate) struct BffCallerIdentity {
+    pub user_id: String,
+    pub device_id: String,
+    pub service_client_id: Option<String>,
+}
+
+pub async fn require_caller_identity(
+    api: &BackendApi,
+    headers: &HeaderMap,
+) -> Result<BffCallerIdentity, Error> {
     let claims = api.require_bff_claims(headers)?;
     if claims.user_id.trim().is_empty() {
         return Err(Error::unauthorized(
@@ -39,13 +53,21 @@ pub async fn require_user_id(api: &BackendApi, headers: &HeaderMap) -> Result<St
             "Invalid signature-authenticated device id",
         ));
     }
-    Ok(claims.user_id)
+    Ok(BffCallerIdentity {
+        user_id: claims.user_id,
+        device_id: claims.device_id,
+        service_client_id: claims.service_client_id,
+    })
+}
+
+pub async fn require_user_id(api: &BackendApi, headers: &HeaderMap) -> Result<String, Error> {
+    Ok(require_caller_identity(api, headers).await?.user_id)
 }
 
 #[instrument(skip(api))]
 pub async fn create_session(
     api: &BackendApi,
-    user_id: String,
+    user_id: Option<String>,
     body: CreateSessionRequest,
 ) -> Result<SessionResponse, Error> {
     debug!("Creating session of type: {}", body.session_type);
@@ -71,16 +93,27 @@ pub async fn create_session(
         ),
     )?;
 
+    // A service-created session has no end-user owner: `user_id` is NULL so it
+    // does not need to resolve in `app_user`. Only end-user sessions embed the
+    // user id both on the row and in the session context.
+    let (persisted_user_id, context) = match &user_id {
+        Some(uid) => (
+            Some(uid.clone()),
+            session_context_with_user_id(body.context, uid),
+        ),
+        None => (None, object_context(body.context)),
+    };
+
     let row = api
         .state
         .flow
         .create_session(FlowSessionCreateInput {
             id: session_id,
             human_id,
-            user_id: Some(user_id.clone()),
+            user_id: persisted_user_id,
             session_type: body.session_type,
             status: "OPEN".to_owned(),
-            context: session_context_with_user_id(body.context, &user_id),
+            context,
         })
         .await?;
 
@@ -175,9 +208,14 @@ pub async fn add_flow_to_session(
             status: FLOW_STATUS_RUNNING.to_owned(),
             current_step: None,
             step_ids: json!([]),
-            context: object_context(body.context),
+            context: object_context(body.context.clone()),
         })
         .await?;
+
+    let mut created = created;
+    if created.flow_type.eq_ignore_ascii_case("account_recovery") {
+        created = create_recovery_case(api, &session, created, body.context).await?;
+    }
 
     api.state
         .flow
@@ -188,6 +226,59 @@ pub async fn add_flow_to_session(
     refresh_session_status(api, &session_id).await?;
 
     Ok(advanced.into())
+}
+
+/// Owns the canonical `recovery_case` aggregate for a started account-recovery
+/// flow. The canonical case id is minted by keybound (never the BFF) and stored
+/// in the flow context under `recovery.case_id` so the BFF can look it up.
+async fn create_recovery_case(
+    api: &BackendApi,
+    session: &FlowSessionRow,
+    mut flow: FlowInstanceRow,
+    body_context: Option<Value>,
+) -> Result<FlowInstanceRow, Error> {
+    let phone = recovery_phone_from_context(&session.context, body_context.as_ref());
+
+    let case_id = backend_id::recovery_case_id()?;
+    api.state
+        .recovery_case
+        .create_case(RecoveryCaseCreateInput {
+            id: case_id.clone(),
+            human_id: format!("{}.case", flow.human_id),
+            session_id: Some(session.id.clone()),
+            device_id: None,
+            jkt: None,
+            device_public_jwk: None,
+            requested_phone_hash: phone.as_deref().map(hash_phone).unwrap_or_default(),
+            requested_phone_masked: phone.as_deref().map(mask_phone).unwrap_or_default(),
+            reason: None,
+            status: "IN_PROGRESS".to_owned(),
+            phone_relation: None,
+            matched_user_id: None,
+            expires_at: Some(Utc::now() + Duration::hours(24)),
+        })
+        .await?;
+
+    let mut ctx = flow.context.clone();
+    merge_json_value(&mut ctx, &json!({ "recovery": { "case_id": case_id } }));
+    flow = api
+        .state
+        .flow
+        .update_flow(&flow.id, None, None, None, Some(ctx))
+        .await?;
+
+    Ok(flow)
+}
+
+fn recovery_phone_from_context(
+    session_context: &Value,
+    body_context: Option<&Value>,
+) -> Option<String> {
+    body_context
+        .and_then(|c| c.get("phone_number"))
+        .or_else(|| session_context.get("phone_number"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 #[instrument(skip(api))]
@@ -256,6 +347,55 @@ pub async fn get_step(
 
     ensure_flow_owner(api, &flow, &user_id).await?;
     Ok(step.into())
+}
+
+/// Resolves a step by `flowId` + `stepType`. When retries create multiple step
+/// rows of the same type, returns the current "waiting" attempt (highest
+/// attempt that is not finished); otherwise the most recent attempt.
+#[instrument(skip(api))]
+pub async fn get_flow_step_by_type(
+    api: &BackendApi,
+    flow_id: String,
+    step_type: String,
+    user_id: String,
+) -> Result<StepResponse, Error> {
+    debug!("Getting step by type: {} in flow {}", step_type, flow_id);
+    let flow = api
+        .state
+        .flow
+        .get_flow(&flow_id)
+        .await?
+        .ok_or_else(|| Error::not_found("FLOW_NOT_FOUND", "Flow not found"))?;
+
+    ensure_flow_owner(api, &flow, &user_id).await?;
+
+    let steps = api.state.flow.list_steps_for_flow(&flow_id).await?;
+    let mut matches: Vec<_> = steps
+        .into_iter()
+        .filter(|step| step.step_type == step_type)
+        .collect();
+
+    if matches.is_empty() {
+        return Err(Error::not_found(
+            "STEP_NOT_FOUND",
+            format!("No step of type `{step_type}` in flow"),
+        ));
+    }
+
+    matches.sort_by_key(|step| step.attempt_no);
+
+    // Prefer the current waiting/in-progress attempt (the one the BFF should
+    // submit to), falling back to the latest attempt overall.
+    let chosen = matches
+        .iter()
+        .rev()
+        .find(|step| {
+            step.status.eq_ignore_ascii_case("WAITING")
+                || step.status.eq_ignore_ascii_case("RUNNING")
+        })
+        .unwrap_or_else(|| matches.last().expect("non-empty"));
+
+    Ok(chosen.clone().into())
 }
 
 #[instrument(skip(api))]
@@ -723,6 +863,12 @@ pub(crate) async fn finalize_flow(
         .update_flow(&flow.id, Some(status.to_owned()), Some(None), None, None)
         .await?;
 
+    if let Ok(session) = api.state.flow.get_session(&finalized.session_id).await {
+        if let Some(_session) = session {
+            let _ = sync_recovery_case(api, &finalized).await;
+        }
+    }
+
     if status.eq_ignore_ascii_case(FLOW_STATUS_COMPLETED) {
         write_completed_kyc_metadata(api, &finalized).await?;
     }
@@ -841,7 +987,13 @@ async fn ensure_session_owner(
         .await?
         .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
-    if session.user_id.as_deref() != Some(user_id) {
+    // A session without an owning user was created by a service principal
+    // (e.g. account recovery) and is not bound to any end-user, so there is no
+    // cross-user identity to protect. User-owned sessions still require an
+    // exact owner match.
+    if let Some(owner) = session.user_id.as_deref()
+        && owner != user_id
+    {
         return Err(Error::unauthorized("Session does not belong to caller"));
     }
 
@@ -860,7 +1012,9 @@ async fn ensure_flow_owner(
         .await?
         .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
-    if session.user_id.as_deref() != Some(user_id) {
+    if let Some(owner) = session.user_id.as_deref()
+        && owner != user_id
+    {
         return Err(Error::unauthorized("Flow does not belong to caller"));
     }
 
@@ -893,6 +1047,17 @@ async fn handle_completed_step(
 ) -> Result<FlowInstanceRow, Error> {
     debug!("Step completed: {} branch={:?}", step_type, branch);
 
+    let mut context = store_step_output(flow.context.clone(), step_type, &actual_output);
+    if let Some(updates) = updates {
+        if let Some(flow_patch) = updates.flow_context_patch.as_ref() {
+            context = merged_json(context, flow_patch);
+        }
+        // Apply side effects (including notification enqueue for OTP delivery)
+        // BEFORE marking the step completed, so a delivery failure never leaves
+        // a step recorded as successful.
+        apply_context_updates(api, session, updates).await?;
+    }
+
     api.state
         .flow
         .patch_step(
@@ -900,24 +1065,110 @@ async fn handle_completed_step(
             FlowStepPatch::new()
                 .status(FLOW_STATUS_COMPLETED)
                 .input(input_value)
-                .output(actual_output.clone())
+                .output(actual_output)
                 .clear_error()
                 .finished_at(Utc::now()),
         )
         .await?;
 
-    let mut context = store_step_output(flow.context.clone(), step_type, &actual_output);
-    if let Some(updates) = updates {
-        if let Some(flow_patch) = updates.flow_context_patch.as_ref() {
-            context = merged_json(context, flow_patch);
-        }
-        apply_context_updates(api, session, updates).await?;
-    }
-
-    api.state
+    let updated = api
+        .state
         .flow
         .update_flow(&flow.id, None, None, None, Some(context))
-        .await
+        .await?;
+
+    sync_recovery_case(api, &updated).await?;
+    Ok(updated)
+}
+
+/// Projects the account-recovery flow state into the canonical `recovery_case`
+/// aggregate so the BFF can always read the case back by id. Uses optimistic
+/// concurrency (`update_case` with the row's current version).
+async fn sync_recovery_case(api: &BackendApi, flow: &FlowInstanceRow) -> Result<(), Error> {
+    if !flow.flow_type.eq_ignore_ascii_case("account_recovery") {
+        return Ok(());
+    }
+
+    let Some(recovery) = flow.context.get("recovery") else {
+        return Ok(());
+    };
+    let Some(case_id) = recovery.get("case_id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(case) = api.state.recovery_case.get_case_by_id(case_id).await? else {
+        return Ok(());
+    };
+
+    let mut patch = RecoveryCaseUpdate::default();
+    if let Some(v) = recovery.get("requested_phone_hash").and_then(Value::as_str) {
+        patch.requested_phone_hash = Some(v.to_owned());
+    }
+    if let Some(v) = recovery
+        .get("requested_phone_masked")
+        .and_then(Value::as_str)
+    {
+        patch.requested_phone_masked = Some(v.to_owned());
+    }
+    if let Some(v) = recovery.get("matched_user_id").and_then(Value::as_str) {
+        patch.matched_user_id = Some(Some(v.to_owned()));
+    }
+    if let Some(v) = recovery.get("phone_relation").and_then(Value::as_str) {
+        patch.phone_relation = Some(Some(v.to_owned()));
+    }
+    if let Some(v) = recovery.get("otp_hash").and_then(Value::as_str) {
+        patch.otp_hash = Some(Some(v.to_owned()));
+    }
+    if let Some(v) = recovery.get("otp_expires_at").and_then(Value::as_i64)
+        && let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp(v, 0)
+    {
+        patch.otp_expires_at = Some(Some(dt));
+    }
+    if let Some(v) = recovery.get("otp_attempts").and_then(Value::as_i64) {
+        patch.otp_attempts = Some(v as i32);
+    }
+    if let Some(v) = recovery.get("otp_resend_at").and_then(Value::as_i64)
+        && let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp(v, 0)
+    {
+        patch.otp_resend_at = Some(Some(dt));
+    }
+    if let Some(v) = recovery.get("device_id").and_then(Value::as_str) {
+        patch.device_id = Some(Some(v.to_owned()));
+    }
+    if let Some(v) = recovery.get("jkt").and_then(Value::as_str) {
+        patch.jkt = Some(Some(v.to_owned()));
+    }
+    if let Some(v) = recovery.get("approval_revision").and_then(Value::as_i64) {
+        patch.approval_revision = Some(Some(v));
+    }
+
+    // Capture the admin decision (recorded on `await_admin_decision`) onto the
+    // case and bump the approval revision on approval. Combined with the
+    // versioned `update_case` below, concurrent/out-of-date decisions surface
+    // as a 409 optimistic-concurrency conflict.
+    if let Some(decision) = flow
+        .context
+        .pointer("/step_output/await_admin_decision/decision")
+        .and_then(Value::as_str)
+    {
+        patch.review_decision = Some(Some(decision.to_owned()));
+        if decision.eq_ignore_ascii_case("APPROVED") {
+            patch.approval_revision = Some(Some(case.approval_revision.unwrap_or(1).max(1) + 1));
+        }
+    }
+
+    patch.status = Some(match flow.status.as_str() {
+        s if s.eq_ignore_ascii_case(FLOW_STATUS_COMPLETED) => "COMPLETED".to_owned(),
+        s if s.eq_ignore_ascii_case(FLOW_STATUS_FAILED) => "FAILED".to_owned(),
+        s if s.eq_ignore_ascii_case(FLOW_STATUS_CLOSED) => "CLOSED".to_owned(),
+        _ => "IN_PROGRESS".to_owned(),
+    });
+
+    let _ = api
+        .state
+        .recovery_case
+        .update_case(case_id, case.version, &patch)
+        .await?;
+    Ok(())
 }
 
 pub(crate) async fn apply_context_updates(
@@ -960,9 +1211,13 @@ pub(crate) async fn apply_context_updates(
         for notification in notifications {
             match serde_json::from_value::<backend_core::NotificationJob>(notification.clone()) {
                 Ok(job) => {
-                    if let Err(error) = api.state.notification_queue.enqueue(job).await {
-                        tracing::warn!("Failed to enqueue notification: {}", error);
-                    }
+                    api.state
+                        .notification_queue
+                        .enqueue(job)
+                        .await
+                        .map_err(|error| {
+                            Error::internal("NOTIFICATION_ENQUEUE_FAILED", error.to_string())
+                        })?;
                 }
                 Err(error) => {
                     tracing::warn!("Failed to deserialize notification job: {}", error);
@@ -1187,6 +1442,154 @@ pub async fn require_service_caller(
     headers: &HeaderMap,
 ) -> Result<BffSignatureClaims, Error> {
     api.require_service_caller(headers)
+}
+
+/// Re-triggers OTP issuance for a recovery case without going through the
+/// normal (END_USER) step-submission path. `issue_recovery_otp` is a SYSTEM
+/// step, so it is executed here directly (mirroring the synchronous step-chain
+/// execution); the SMS is re-queued and delivery failure surfaces as a failed
+/// step rather than a false `otp_sent`.
+#[instrument(skip(api))]
+pub async fn resend_recovery_otp(
+    api: &BackendApi,
+    recovery_case_id: String,
+) -> Result<StepResponse, Error> {
+    let case = api
+        .state
+        .recovery_case
+        .get_case_by_id(&recovery_case_id)
+        .await?
+        .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
+
+    let session_id = case.session_id.as_deref().ok_or_else(|| {
+        Error::not_found("RECOVERY_CASE_NOT_BOUND", "Recovery case has no session")
+    })?;
+
+    let session = api
+        .state
+        .flow
+        .get_session(session_id)
+        .await?
+        .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
+
+    let flows = api.state.flow.list_flows_for_session(session_id).await?;
+    let flow = flows
+        .into_iter()
+        .find(|f| f.flow_type.eq_ignore_ascii_case("account_recovery"))
+        .ok_or_else(|| Error::not_found("FLOW_NOT_FOUND", "No recovery flow for case"))?;
+
+    let flow_definition = get_flow_definition(api, &flow.flow_type)?;
+    let step_definition = get_step_definition(flow_definition, "issue_recovery_otp")?;
+
+    let existing = api.state.flow.list_steps_for_flow(&flow.id).await?;
+    let attempt_no = existing
+        .iter()
+        .filter(|s| s.step_type == "issue_recovery_otp")
+        .count() as i32;
+
+    let step_id = backend_id::flow_step_id()?;
+    let human_suffix = if attempt_no == 0 {
+        "issue_recovery_otp".to_owned()
+    } else {
+        format!("issue_recovery_otp-{attempt_no}")
+    };
+    let step_human_id = HumanReadableId::parse(flow.human_id.clone())
+        .map_err(flow_error_to_http)?
+        .with_suffix(&human_suffix)
+        .map_err(flow_error_to_http)?
+        .to_string();
+
+    api.state
+        .flow
+        .create_step(FlowStepCreateInput {
+            id: step_id.clone(),
+            human_id: step_human_id,
+            flow_id: flow.id.clone(),
+            step_type: "issue_recovery_otp".to_owned(),
+            actor: actor_label(step_definition.actor()).to_owned(),
+            status: "WAITING".to_owned(),
+            attempt_no,
+            input: None,
+            output: None,
+            error: None,
+            next_retry_at: None,
+            finished_at: None,
+        })
+        .await?;
+
+    let context = StepContext {
+        session_id: session.id.clone(),
+        session_user_id: session.user_id.clone(),
+        flow_id: flow.id.clone(),
+        step_id: step_id.clone(),
+        input: json!({}),
+        session_context: session.context.clone(),
+        flow_context: flow.context.clone(),
+        services: step_services_with_device(api.state.user.clone(), api.state.device.clone()),
+    };
+
+    let mut next_ctx = flow.context.clone();
+    let outcome = step_definition
+        .execute(&context)
+        .await
+        .map_err(flow_error_to_http)?;
+
+    match outcome {
+        StepOutcome::Done { output, updates }
+        | StepOutcome::Branched {
+            output, updates, ..
+        } => {
+            let actual_output =
+                output.unwrap_or_else(|| json!({ "otp_sent": false, "status": "NOT_ISSUED" }));
+            if let Some(updates) = updates {
+                if let Some(patch) = updates.flow_context_patch.as_ref() {
+                    next_ctx = merged_json(next_ctx, patch);
+                }
+                apply_context_updates(api, &session, updates).await?;
+            }
+            let step = api
+                .state
+                .flow
+                .patch_step(
+                    &step_id,
+                    FlowStepPatch::new()
+                        .status(FLOW_STATUS_COMPLETED)
+                        .output(actual_output)
+                        .clear_error()
+                        .finished_at(Utc::now()),
+                )
+                .await?;
+            let updated_flow = api
+                .state
+                .flow
+                .update_flow(&flow.id, None, None, None, Some(next_ctx))
+                .await?;
+            sync_recovery_case(api, &updated_flow).await?;
+            Ok(step.into())
+        }
+        StepOutcome::Failed { error, retryable } => {
+            let step = api
+                .state
+                .flow
+                .patch_step(
+                    &step_id,
+                    FlowStepPatch::new()
+                        .status(FLOW_STATUS_FAILED)
+                        .error(json!({ "error": error, "retryable": retryable }))
+                        .finished_at(Utc::now()),
+                )
+                .await?;
+            Ok(step.into())
+        }
+        StepOutcome::Waiting { .. } | StepOutcome::Retry { .. } => {
+            let step = api
+                .state
+                .flow
+                .patch_step(&step_id, FlowStepPatch::new().status("WAITING"))
+                .await?;
+            Ok(step.into())
+        }
+    }
 }
 
 fn compute_recovery_bind_hash(recovery_case_id: &str, body: &RecoveryBindRequest) -> String {
@@ -1849,5 +2252,92 @@ mod lookup_by_phone_tests {
             }
             other => panic!("expected 403 Http error, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod create_session_tests {
+    use super::*;
+    use crate::flows::registry::{self, RegistryImports};
+    use crate::test_utils::{MockFlowRepo, TestAppStateBuilder};
+    use backend_model::db::FlowSessionRow;
+    use chrono::Utc;
+    use std::sync::Arc;
+
+    const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+
+    fn api_with(flow: MockFlowRepo) -> BackendApi {
+        let registry = Arc::new(
+            registry::build_registry(RegistryImports {
+                sessions_dir: Some(format!("{FIXTURES}/sessions")),
+                ..Default::default()
+            })
+            .expect("registry builds"),
+        );
+        let state = TestAppStateBuilder::new()
+            .with_flow(Arc::new(flow))
+            .with_flow_registry(registry)
+            .build();
+        let oidc = state.oidc_state.clone();
+        let signature = state.signature_state.clone();
+        BackendApi::new(Arc::new(state), oidc, signature)
+    }
+
+    fn row_from(input: &FlowSessionCreateInput) -> FlowSessionRow {
+        FlowSessionRow {
+            id: input.id.clone(),
+            human_id: input.human_id.clone(),
+            user_id: input.user_id.clone(),
+            session_type: input.session_type.clone(),
+            status: input.status.clone(),
+            context: input.context.clone(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            completed_at: None,
+        }
+    }
+
+    fn request() -> CreateSessionRequest {
+        CreateSessionRequest {
+            session_type: "account_recovery".to_owned(),
+            human_id: None,
+            context: Some(json!({ "phone_number": "+237690000000" })),
+        }
+    }
+
+    #[tokio::test]
+    async fn service_created_session_persists_null_user_id_and_no_user_context() {
+        let mut flow = MockFlowRepo::new();
+        flow.expect_create_session()
+            .returning(|input| Ok(row_from(&input)));
+        let api = api_with(flow);
+
+        let session = create_session(&api, None, request()).await.unwrap();
+        assert!(
+            session.user_id.is_none(),
+            "service session must have no owner"
+        );
+        assert!(
+            session.context.get("user_id").is_none(),
+            "service session context must not carry a user_id: {}",
+            session.context
+        );
+    }
+
+    #[tokio::test]
+    async fn end_user_session_persists_owner_and_user_context() {
+        let mut flow = MockFlowRepo::new();
+        flow.expect_create_session()
+            .returning(|input| Ok(row_from(&input)));
+        let api = api_with(flow);
+
+        let session = create_session(&api, Some("usr_owner".to_owned()), request())
+            .await
+            .unwrap();
+        assert_eq!(session.user_id.as_deref(), Some("usr_owner"));
+        assert_eq!(
+            session.context.get("user_id").and_then(Value::as_str),
+            Some("usr_owner")
+        );
     }
 }

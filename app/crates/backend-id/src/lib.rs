@@ -59,6 +59,10 @@ pub fn flow_step_id() -> Result<String> {
     prefixed("stp")
 }
 
+pub fn recovery_case_id() -> Result<String> {
+    prefixed("rcv")
+}
+
 pub fn signing_key_id() -> Result<String> {
     prefixed("kid")
 }

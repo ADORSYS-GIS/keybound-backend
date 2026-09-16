@@ -5,8 +5,8 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use sms_provider::{
     is_permanent_error, process_notification_job, ApiSmsProvider, AvlytextSmsProvider,
-    ConsoleSmsProvider, FallbackSmsProvider, MTargetSmsProvider, OrangeSmsProvider,
-    SnsSmsProvider, WhatsappSmsProvider,
+    ConsoleSmsProvider, FallbackSmsProvider, MTargetSmsProvider, OrangeSmsProvider, SnsSmsProvider,
+    WhatsappSmsProvider,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -71,6 +71,38 @@ impl UserLookupService for RepoUserLookup {
             metadata,
         }))
     }
+
+    async fn find_users_by_phone(
+        &self,
+        realm: Option<String>,
+        phone: &str,
+    ) -> Result<Vec<UserRecord>, String> {
+        let rows = self
+            .user_repo
+            .find_users_by_phone(realm, phone)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            let metadata = self
+                .user_repo
+                .get_user_metadata(&row.user_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            records.push(UserRecord {
+                user_id: row.user_id,
+                realm: row.realm,
+                username: row.username,
+                full_name: row.full_name,
+                email: row.email,
+                phone_number: row.phone_number,
+                metadata,
+            });
+        }
+
+        Ok(records)
+    }
 }
 
 #[backend_core::async_trait]
@@ -353,6 +385,55 @@ mod tests {
         assert_eq!(
             resolve_transition(&flow, "start", Some("missing"), false).as_deref(),
             Some("next")
+        );
+    }
+
+    #[tokio::test]
+    async fn repo_user_lookup_find_by_phone_routes_to_repository() {
+        use crate::test_utils::MockUserRepo;
+        use backend_model::db::UserRow;
+
+        let phone = "+237690000000";
+        let row = UserRow {
+            user_id: "usr-1".to_string(),
+            realm: "fineract".to_string(),
+            username: phone.to_string(),
+            full_name: Some("Jane".to_string()),
+            email: None,
+            email_verified: false,
+            phone_number: Some(phone.to_string()),
+            disabled: false,
+            attributes: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let mut repo = MockUserRepo::new();
+        repo.expect_find_users_by_phone()
+            .withf(move |realm: &Option<String>, p: &str| {
+                realm.as_deref() == Some("fineract") && p == phone
+            })
+            .returning(move |_, _| Ok(vec![row.clone()]));
+        repo.expect_get_user_metadata()
+            .withf(|uid: &str| uid == "usr-1")
+            .returning(|_| Ok(serde_json::json!({ "fineractClientId": "c-1" })));
+
+        let lookup = RepoUserLookup::new(std::sync::Arc::new(repo));
+        let found = lookup
+            .find_users_by_phone(Some("fineract".to_string()), phone)
+            .await
+            .expect("lookup succeeds");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].user_id, "usr-1");
+        assert_eq!(found[0].realm, "fineract");
+        assert_eq!(found[0].phone_number.as_deref(), Some(phone));
+        assert_eq!(
+            found[0]
+                .metadata
+                .get("fineractClientId")
+                .and_then(serde_json::Value::as_str),
+            Some("c-1")
         );
     }
 }

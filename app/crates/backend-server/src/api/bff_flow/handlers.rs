@@ -129,6 +129,24 @@ pub async fn old_devices_policy(
 }
 
 #[utoipa::path(
+    post,
+    path = "/v1/recoveries/{recoveryCaseId}/otp/resend",
+    tag = "recoveries",
+    params(("recoveryCaseId" = String, Path)),
+    responses((status = 200, body = StepResponse))
+)]
+#[instrument(skip(api, headers))]
+pub async fn resend_recovery_otp(
+    State(api): State<BackendApi>,
+    Path(recovery_case_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<StepResponse>, Error> {
+    service::require_service_caller(&api, &headers).await?;
+    let response = service::resend_recovery_otp(&api, recovery_case_id).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
     get,
     path = "/users/{userId}/completed-kyc",
     tag = "users",
@@ -175,7 +193,14 @@ pub async fn create_session(
     headers: HeaderMap,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<SessionResponse>), Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    // Service clients (e.g. the BFF) create sessions on behalf of a recovery
+    // case, not an end-user, so there is no owning user id to persist.
+    let user_id = if caller.service_client_id.is_some() {
+        None
+    } else {
+        Some(caller.user_id)
+    };
     let session = service::create_session(&api, user_id, body).await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
@@ -287,6 +312,27 @@ pub async fn get_step(
 ) -> Result<Json<StepResponse>, Error> {
     let user_id = service::require_user_id(&api, &headers).await?;
     let step = service::get_step(&api, step_id, user_id).await?;
+    Ok(Json(step))
+}
+
+#[utoipa::path(
+    get,
+    path = "/flows/{flowId}/steps/{stepType}",
+    tag = "steps",
+    params(
+        ("flowId" = String, Path),
+        ("stepType" = String, Path),
+    ),
+    responses((status = 200, body = StepResponse))
+)]
+#[instrument(skip(api, headers))]
+pub async fn get_flow_step_by_type(
+    State(api): State<BackendApi>,
+    Path((flow_id, step_type)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<StepResponse>, Error> {
+    let user_id = service::require_user_id(&api, &headers).await?;
+    let step = service::get_flow_step_by_type(&api, flow_id, step_type, user_id).await?;
     Ok(Json(step))
 }
 

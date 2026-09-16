@@ -306,6 +306,7 @@ mock! {
 #[derive(Default)]
 pub struct TestAppStateBuilder {
     pub flow: Option<Arc<dyn FlowRepo>>,
+    pub flow_registry: Option<Arc<backend_flow_sdk::FlowRegistry>>,
     pub user: Option<Arc<dyn UserRepo>>,
     pub device: Option<Arc<dyn DeviceRepo>>,
     pub recovery_case: Option<Arc<dyn RecoveryCaseRepo>>,
@@ -321,6 +322,14 @@ impl TestAppStateBuilder {
 
     pub fn with_flow(mut self, flow: Arc<dyn FlowRepo>) -> Self {
         self.flow = Some(flow);
+        self
+    }
+
+    pub fn with_flow_registry(
+        mut self,
+        flow_registry: Arc<backend_flow_sdk::FlowRegistry>,
+    ) -> Self {
+        self.flow_registry = Some(flow_registry);
         self
     }
 
@@ -410,9 +419,12 @@ cuss:
 
         AppState {
             flow: self.flow.unwrap_or_else(|| Arc::new(MockFlowRepo::new())),
-            flow_registry: Arc::new(
-                flow_registry::build_registry(flow_registry::RegistryImports::default()).unwrap(),
-            ),
+            flow_registry: self.flow_registry.unwrap_or_else(|| {
+                Arc::new(
+                    flow_registry::build_registry(flow_registry::RegistryImports::default())
+                        .unwrap(),
+                )
+            }),
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
             device: self
                 .device

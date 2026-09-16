@@ -37,6 +37,8 @@ impl RecoveryCaseRepository {
 #[diesel(treat_none_as_null = false)]
 struct CaseChangeset {
     session_id: Option<Option<String>>,
+    requested_phone_hash: Option<String>,
+    requested_phone_masked: Option<String>,
     device_id: Option<Option<String>>,
     jkt: Option<Option<String>>,
     device_public_jwk: Option<Option<Value>>,
@@ -64,6 +66,8 @@ struct CaseChangeset {
 fn changeset(patch: RecoveryCaseUpdate) -> CaseChangeset {
     CaseChangeset {
         session_id: patch.session_id,
+        requested_phone_hash: patch.requested_phone_hash,
+        requested_phone_masked: patch.requested_phone_masked,
         device_id: patch.device_id,
         jkt: patch.jkt,
         device_public_jwk: patch.device_public_jwk,

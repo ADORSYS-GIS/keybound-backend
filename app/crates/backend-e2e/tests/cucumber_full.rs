@@ -1879,20 +1879,23 @@ async fn id_document_awaiting_review(world: &mut FullE2eWorld) {
 
     if let Ok(steps) = steps_response
         && let Some(body) = &steps.body
-            && let Some(steps_arr) = body.as_array() {
-                for step in steps_arr {
-                    if let Some(step_id) = step.get("id").and_then(|v| v.as_str())
-                        && let Some(flags) = step.get("flags").and_then(|v| v.as_array()) {
-                            for flag in flags {
-                                if let Some(flag_str) = flag.as_str()
-                                    && flag_str == "AWAITING_REVIEW" {
-                                        world.flow.id_document_step_id = Some(step_id.to_string());
-                                        return;
-                                    }
-                            }
-                        }
+        && let Some(steps_arr) = body.as_array()
+    {
+        for step in steps_arr {
+            if let Some(step_id) = step.get("id").and_then(|v| v.as_str())
+                && let Some(flags) = step.get("flags").and_then(|v| v.as_array())
+            {
+                for flag in flags {
+                    if let Some(flag_str) = flag.as_str()
+                        && flag_str == "AWAITING_REVIEW"
+                    {
+                        world.flow.id_document_step_id = Some(step_id.to_string());
+                        return;
+                    }
                 }
             }
+        }
+    }
 }
 
 #[when("I approve the id_document session via staff API")]
@@ -2051,13 +2054,14 @@ async fn approved_id_document_session(world: &mut FullE2eWorld) {
 #[then("the response contains session ID")]
 async fn response_contains_session_id(world: &mut FullE2eWorld) {
     if let Some(response) = &world.last_response
-        && let Some(body) = &response.body {
-            if body.get("id").is_none() {
-                world.error = Some(format!("response missing session ID: {}", response.text));
-            } else {
-                world.flow.session_id = body.get("id").and_then(|v| v.as_str()).map(String::from);
-            }
+        && let Some(body) = &response.body
+    {
+        if body.get("id").is_none() {
+            world.error = Some(format!("response missing session ID: {}", response.text));
+        } else {
+            world.flow.session_id = body.get("id").and_then(|v| v.as_str()).map(String::from);
         }
+    }
 }
 
 #[then("sm_instance row persisted for KYC_ID_DOCUMENT with import_id = 1")]
@@ -2368,50 +2372,52 @@ async fn session_state_document_rejected(world: &mut FullE2eWorld) {
 async fn user_profile_contains_id_document_status(world: &mut FullE2eWorld) {
     if let Some(response) = &world.last_response
         && let Some(body) = &response.body
-            && let Some(kyc) = body.get("kyc")
-                && kyc.get("id_document").is_none() {
-                    world.error =
-                        Some("user profile missing id_document verification status".to_string());
-                }
+        && let Some(kyc) = body.get("kyc")
+        && kyc.get("id_document").is_none()
+    {
+        world.error = Some("user profile missing id_document verification status".to_string());
+    }
 }
 
 #[then("completed KYC contains flow \"id_document\"")]
 async fn completed_kyc_contains_id_document(world: &mut FullE2eWorld) {
     if let Some(response) = &world.last_response
         && let Some(body) = &response.body
-            && let Some(completed) = body.get("completed")
-                && let Some(arr) = completed.as_array()
-                    && !arr.iter().any(|v| v.as_str() == Some("id_document")) {
-                        world.error =
-                            Some("completed KYC does not contain id_document".to_string());
-                    }
+        && let Some(completed) = body.get("completed")
+        && let Some(arr) = completed.as_array()
+        && !arr.iter().any(|v| v.as_str() == Some("id_document"))
+    {
+        world.error = Some("completed KYC does not contain id_document".to_string());
+    }
 }
 
 #[then("KYC tier level is updated appropriately")]
 async fn kyc_tier_updated_appropritately(world: &mut FullE2eWorld) {
     if let Some(response) = &world.last_response
-        && let Some(body) = &response.body {
-            if let Some(tier) = body.get("tier") {
-                if tier.is_null() {
-                    world.error = Some("KYC tier level is null".to_string());
-                }
-            } else {
-                world.error = Some("user profile missing tier field".to_string());
+        && let Some(body) = &response.body
+    {
+        if let Some(tier) = body.get("tier") {
+            if tier.is_null() {
+                world.error = Some("KYC tier level is null".to_string());
             }
+        } else {
+            world.error = Some("user profile missing tier field".to_string());
         }
+    }
 }
 
 #[then("the response contains flow ID")]
 async fn response_contains_flow_id(world: &mut FullE2eWorld) {
     if let Some(response) = &world.last_response
-        && let Some(body) = &response.body {
-            if body.get("id").is_none() {
-                world.error = Some(format!("response missing flow ID: {}", response.text));
-            } else {
-                world.flow.id_document_flow_id =
-                    body.get("id").and_then(|v| v.as_str()).map(String::from);
-            }
+        && let Some(body) = &response.body
+    {
+        if body.get("id").is_none() {
+            world.error = Some(format!("response missing flow ID: {}", response.text));
+        } else {
+            world.flow.id_document_flow_id =
+                body.get("id").and_then(|v| v.as_str()).map(String::from);
         }
+    }
 }
 
 #[tokio::main]

@@ -513,7 +513,8 @@ recovery-lookup-audience: user-storage
 recovery-lookup-required-scope: "recovery:phone-lookup"
 recovery-lookup-realm: fineract
 "#;
-        let bff: super::BffAuth = serde_yaml::from_str(yaml).expect("should deserialize kebab-case keys");
+        let bff: super::BffAuth =
+            serde_yaml::from_str(yaml).expect("should deserialize kebab-case keys");
         assert_eq!(bff.recovery_lookup_service_client_id, "azamra-bff");
         assert_eq!(bff.recovery_lookup_audience, "user-storage");
         assert_eq!(bff.recovery_lookup_required_scope, "recovery:phone-lookup");

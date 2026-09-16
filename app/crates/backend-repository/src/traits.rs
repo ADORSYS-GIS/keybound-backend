@@ -472,6 +472,8 @@ pub struct RecoveryCaseCreateInput {
 #[derive(Debug, Clone, Default)]
 pub struct RecoveryCaseUpdate {
     pub session_id: Option<Option<String>>,
+    pub requested_phone_hash: Option<String>,
+    pub requested_phone_masked: Option<String>,
     pub device_id: Option<Option<String>>,
     pub jkt: Option<Option<String>>,
     pub device_public_jwk: Option<Option<Value>>,

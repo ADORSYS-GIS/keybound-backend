@@ -26,10 +26,12 @@ pub use models::*;
         handlers::add_flow_to_session,
         handlers::get_flow,
         handlers::list_flow_steps,
+        handlers::get_flow_step_by_type,
         handlers::get_step,
         handlers::submit_step,
         handlers::recovery_bind,
         handlers::old_devices_policy,
+        handlers::resend_recovery_otp,
     ),
     components(schemas(
         UserResponse,
@@ -81,6 +83,10 @@ pub fn router(api: BackendApi) -> Router {
             get(handlers::get_recovery_case),
         )
         .route(
+            "/v1/recoveries/{recovery_case_id}/otp/resend",
+            post(handlers::resend_recovery_otp),
+        )
+        .route(
             "/v1/recoveries/{recovery_case_id}/device-bindings",
             post(handlers::recovery_bind),
         )
@@ -103,6 +109,10 @@ pub fn router(api: BackendApi) -> Router {
         )
         .route("/flows/{flow_id}", get(handlers::get_flow))
         .route("/flows/{flow_id}/steps", get(handlers::list_flow_steps))
+        .route(
+            "/flows/{flow_id}/steps/{step_type}",
+            get(handlers::get_flow_step_by_type),
+        )
         .route(
             "/steps/{step_id}",
             get(handlers::get_step).post(handlers::submit_step),

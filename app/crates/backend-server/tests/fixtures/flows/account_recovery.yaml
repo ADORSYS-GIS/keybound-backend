@@ -111,7 +111,7 @@ steps:
     actor: SYSTEM
     config:
       message: "Recovery: no safe match, steering to account creation (enumeration-safe)"
-    next: FAILED
+    next: COMPLETE
 
   rejected_terminal:
     action: CLOSE_SESSION
