@@ -1,5 +1,6 @@
 use crate::flows::registry as flow_registry;
 use crate::object_storage::{EncryptionMode, ObjectStorage, PresignedUpload};
+use crate::security::{OtpLockRegistry, RateLimiter};
 use crate::state::AppState;
 use crate::worker::NotificationQueue;
 use backend_auth::{OidcState, SignatureState};
@@ -442,6 +443,8 @@ cuss:
             oidc_state,
             signature_state,
             replay_guard: Arc::new(crate::auth_signature::InMemoryReplayGuard::new()),
+            otp_locks: Arc::new(OtpLockRegistry::new()),
+            rate_limiter: Arc::new(RateLimiter::new()),
         }
     }
 }

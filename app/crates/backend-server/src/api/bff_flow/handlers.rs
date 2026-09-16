@@ -216,14 +216,7 @@ pub async fn create_session(
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<SessionResponse>), Error> {
     let caller = service::require_caller_identity(&api, &headers).await?;
-    // Service clients (e.g. the BFF) create sessions on behalf of a recovery
-    // case, not an end-user, so there is no owning user id to persist.
-    let user_id = if caller.service_client_id.is_some() {
-        None
-    } else {
-        Some(caller.user_id)
-    };
-    let session = service::create_session(&api, user_id, body).await?;
+    let session = service::create_session(&api, &caller, body).await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
 
@@ -240,8 +233,8 @@ pub async fn get_session(
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<SessionDetailResponse>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let payload = service::get_session(&api, session_id, user_id).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let payload = service::get_session(&api, session_id, &caller).await?;
     Ok(Json(payload))
 }
 
@@ -258,8 +251,8 @@ pub async fn list_session_flows(
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<FlowResponse>>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let flows = service::list_session_flows(&api, session_id, user_id).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let flows = service::list_session_flows(&api, session_id, &caller).await?;
     Ok(Json(flows))
 }
 
@@ -278,8 +271,8 @@ pub async fn add_flow_to_session(
     headers: HeaderMap,
     Json(body): Json<AddFlowRequest>,
 ) -> Result<(StatusCode, Json<FlowResponse>), Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let flow = service::add_flow_to_session(&api, session_id, user_id, body).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let flow = service::add_flow_to_session(&api, session_id, &caller, body).await?;
     Ok((StatusCode::CREATED, Json(flow)))
 }
 
@@ -296,8 +289,8 @@ pub async fn get_flow(
     Path(flow_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<FlowDetailResponse>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let flow = service::get_flow(&api, flow_id, user_id).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let flow = service::get_flow(&api, flow_id, &caller).await?;
     Ok(Json(flow))
 }
 
@@ -314,8 +307,8 @@ pub async fn list_flow_steps(
     Path(flow_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<StepResponse>>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let steps = service::list_flow_steps(&api, flow_id, user_id).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let steps = service::list_flow_steps(&api, flow_id, &caller).await?;
     Ok(Json(steps))
 }
 
@@ -332,8 +325,8 @@ pub async fn get_step(
     Path(step_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<StepResponse>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let step = service::get_step(&api, step_id, user_id).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let step = service::get_step(&api, step_id, &caller).await?;
     Ok(Json(step))
 }
 
@@ -353,8 +346,8 @@ pub async fn get_flow_step_by_type(
     Path((flow_id, step_type)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<StepResponse>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let step = service::get_flow_step_by_type(&api, flow_id, step_type, user_id).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let step = service::get_flow_step_by_type(&api, flow_id, step_type, &caller).await?;
     Ok(Json(step))
 }
 
@@ -373,7 +366,7 @@ pub async fn submit_step(
     headers: HeaderMap,
     Json(body): Json<SubmitStepRequest>,
 ) -> Result<Json<StepResponse>, Error> {
-    let user_id = service::require_user_id(&api, &headers).await?;
-    let step = service::submit_step(&api, step_id, user_id, body).await?;
+    let caller = service::require_caller_identity(&api, &headers).await?;
+    let step = service::submit_step(&api, step_id, &caller, body).await?;
     Ok(Json(step))
 }

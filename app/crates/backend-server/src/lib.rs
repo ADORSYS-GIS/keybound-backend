@@ -13,6 +13,7 @@ pub(crate) mod flows;
 pub(crate) mod health;
 pub mod metrics;
 pub(crate) mod object_storage;
+pub(crate) mod security;
 pub(crate) mod state;
 pub(crate) mod swagger;
 #[cfg(any(test, feature = "test-utils"))]

@@ -133,7 +133,7 @@ async fn list_recovery_cases(
                     .map(str::to_owned),
                 approved_jkt: row.jkt,
                 approved_device_id: row.device_id,
-                otp_challenge_ref: row.otp_hash.as_ref().map(|_| row.id),
+                otp_challenge_ref: row.otp_expires_at.map(|_| row.id.clone()),
                 otp_expires_at: row.otp_expires_at,
                 otp_resend_allowed_at: row.otp_resend_at,
                 created_at: row.created_at,
@@ -370,9 +370,27 @@ async fn get_staff_flow(
         .ok_or_else(|| Error::not_found("FLOW_NOT_FOUND", "Flow not found"))?;
     let steps = api.state.flow.list_steps_for_flow(&flow_id).await?;
 
+    // C1: never project recovery hashes/existence signals, even to staff.
+    let mut flow_response: FlowResponse = flow.into();
+    if flow_response.flow_type.eq_ignore_ascii_case("account_recovery") {
+        bff_service::redact_recovery_fields(&mut flow_response.context);
+    }
+    let mut steps: Vec<StepResponse> = steps.into_iter().map(Into::into).collect();
+    for step in &mut steps {
+        if let Some(input) = step.input.as_mut() {
+            bff_service::redact_recovery_fields(input);
+        }
+        if let Some(output) = step.output.as_mut() {
+            bff_service::redact_recovery_fields(output);
+        }
+        if let Some(error) = step.error.as_mut() {
+            bff_service::redact_recovery_fields(error);
+        }
+    }
+
     Ok(Json(FlowDetailResponse {
-        flow: flow.into(),
-        steps: steps.into_iter().map(Into::into).collect(),
+        flow: flow_response,
+        steps,
     }))
 }
 
@@ -1034,12 +1052,18 @@ fn build_staff_session_response(
     StaffSessionResponse {
         id: row.id,
         human_id: row.human_id,
-        session_type: row.session_type,
+        session_type: row.session_type.clone(),
         status: row.status,
         user_id,
         phone_number,
         full_name,
-        context: row.context,
+        context: {
+            let mut context = row.context;
+            if row.session_type.eq_ignore_ascii_case("account_recovery") {
+                bff_service::redact_recovery_fields(&mut context);
+            }
+            context
+        },
         created_at: row.created_at,
         updated_at: row.updated_at,
     }

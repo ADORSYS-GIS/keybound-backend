@@ -1,5 +1,6 @@
 use crate::flows::registry as flow_registry;
 use crate::object_storage::{ObjectStorage, S3ObjectStorage};
+use crate::security::{OtpLockRegistry, RateLimiter};
 use crate::worker::{NotificationQueue, RedisNotificationQueue};
 use backend_auth::{HttpClient, OidcState, SignatureState};
 use backend_core::Config;
@@ -26,6 +27,8 @@ pub struct AppState {
     pub oidc_state: Arc<OidcState>,
     pub signature_state: Arc<SignatureState>,
     pub replay_guard: Arc<dyn crate::auth_signature::ReplayGuard>,
+    pub otp_locks: Arc<OtpLockRegistry>,
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -157,6 +160,8 @@ impl AppState {
             oidc_state,
             signature_state,
             replay_guard,
+            otp_locks: Arc::new(OtpLockRegistry::new()),
+            rate_limiter: Arc::new(RateLimiter::new()),
         })
     }
 }

@@ -86,12 +86,30 @@ steps:
   # driven through the BFF /complete (proof-validated challenge signature), never
   # by keybound's own flow execution. The case therefore HOLDS in the APPROVED
   # state (a WAIT) until that external, proof-validated bind finalizes it.
+  #
+  # The out-of-band finalization path (owned by the BFF, not this flow) is:
+  #   POST /bff/v1/recoveries/{caseId}/device-bindings   (bind the new device)
+  #   POST /bff/v1/recoveries/{caseId}/old-devices/policy (revoke/quarantine old)
+  #   POST /bff/v1/recoveries/{caseId}/complete           (mark the case COMPLETED)
+  # The BFF advances this step by submitting it AFTER a successful bind; the
+  # NOOP transition below then completes the flow to COMPLETED. The recovery-case
+  # status transition is monotonic (see sync_recovery_case), so a COMPLETED case
+  # is never regressed back to APPROVED by a later projection from this RUNNING
+  # hold step.
   approved_hold:
     action: WAIT
     actor: END_USER
     config:
       actor: USER
     next: APPROVED
+
+  # Terminal step reached when the BFF submits `approved_hold` after a
+  # successful out-of-band bind. NOOP completes the flow to COMPLETED (the case
+  # status is driven monotonic by sync_recovery_case, so COMPLETED sticks even if
+  # the case was already finalized via /complete).
+  APPROVED:
+    action: NOOP
+    actor: SYSTEM
 
   no_match_terminal:
     action: DEBUG_LOG
@@ -109,7 +127,3 @@ steps:
     config:
       reason: REJECTED_BY_ADMIN
     next: CLOSED
-
-  APPROVED:
-    action: NOOP
-    actor: SYSTEM

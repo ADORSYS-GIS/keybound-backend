@@ -158,6 +158,16 @@ impl Error {
         }
     }
 
+    /// Creates a too-many-requests (429) HTTP error with a specific error key.
+    pub fn too_many_requests(error_key: &'static str, message: impl Into<String>) -> Self {
+        Self::Http {
+            error_key,
+            status_code: 429,
+            message: message.into(),
+            context: None,
+        }
+    }
+
     /// Creates an internal server error (500) HTTP error with a specific error key.
     pub fn internal(error_key: &'static str, message: impl Into<String>) -> Self {
         Self::Http {

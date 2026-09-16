@@ -9,20 +9,24 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Memory-hard, iterated KDF (Argon2id) with a fixed application salt so that
-/// derived hashes stay deterministic: phone hashes must be re-derivable for
-/// case lookup (`get_case_by_phone_hash`) and OTP hashes are compared directly
-/// against a later submission. A fixed salt avoids reversible/rainbow-table
-/// SHA-256 while still producing a reproducible value within the flow.
-fn kdf_secret(secret: &str) -> String {
+/// Memory-hard, iterated KDF (Argon2id) with an explicit salt.
+///
+/// Phone hashes use a FIXED application salt so they stay deterministic and
+/// re-derivable for case lookup (`get_case_by_phone_hash`) — they are never
+/// projected to clients. OTP hashes use a per-issue RANDOM salt (stored next to
+/// the hash) so the same OTP never hashes identically across issuances and an
+/// attacker who reads a projected value cannot brute-force the 6-digit code
+/// offline (review item C1).
+fn kdf_secret(secret: &str, salt: &[u8]) -> String {
     use argon2::{Algorithm, Argon2, Params, Version};
-    const SALT: &[u8] = b"azamra-recovery-kdf-v1";
     let params = Params::new(19 * 1024, 3, 1, Some(32)).expect("valid argon2 params");
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut out = [0u8; 32];
-    let _ = argon2.hash_password_into(secret.as_bytes(), SALT, &mut out);
+    let _ = argon2.hash_password_into(secret.as_bytes(), salt, &mut out);
     hex::encode(out)
 }
+
+const PHONE_HASH_SALT: &[u8] = b"azamra-recovery-phone-kdf-v1";
 
 pub fn steps() -> Vec<StepRef> {
     vec![
@@ -60,12 +64,36 @@ pub(crate) fn mask_phone(phone: &str) -> String {
     format!("{}{}****{}", prefix, &head[..head.len().min(4)], tail)
 }
 
+/// Deterministic phone hash (fixed salt) used for `get_case_by_phone_hash`
+/// lookup. Never projected to clients (see `redact_recovery_fields`).
 pub(crate) fn hash_phone(phone: &str) -> String {
-    kdf_secret(phone)
+    kdf_secret(phone, PHONE_HASH_SALT)
 }
 
-fn hash_otp(otp: &str) -> String {
-    kdf_secret(otp)
+/// Per-issue salted OTP hash. `salt` must be the random per-issuance salt that
+/// was stored alongside the hash.
+fn hash_otp(otp: &str, salt: &[u8]) -> String {
+    kdf_secret(otp, salt)
+}
+
+/// Generates a fresh random salt for one OTP issuance.
+fn generate_otp_salt() -> String {
+    let mut salt = [0u8; 16];
+    rand::rng().fill(&mut salt);
+    hex::encode(salt)
+}
+
+/// Constant-time string comparison to avoid leaking a mismatched OTP prefix
+/// through early-exit timing.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 fn is_e164(value: &str) -> bool {
@@ -148,12 +176,35 @@ impl Step for ResolveExistingAccountStep {
             });
         }
 
-        let realm = config.realm.or_else(|| {
+        // C3(c): the lookup realm must match the configured recovery lookup
+        // realm. The authoritative configured realm is injected into the
+        // session context (`recovery.lookup_realm`) by the service layer at
+        // session creation; a client-supplied realm that contradicts it is
+        // rejected so cross-realm account-existence probing fails.
+        let configured_realm = ctx
+            .session_context
+            .pointer("/recovery/lookup_realm")
+            .and_then(Value::as_str);
+        let requested_realm = config.realm.as_deref().or_else(|| {
             ctx.session_context
                 .get("realm")
                 .and_then(Value::as_str)
-                .map(str::to_string)
         });
+
+        let realm = match configured_realm {
+            Some(configured) => {
+                if let Some(requested) = requested_realm
+                    && requested != configured
+                {
+                    return Ok(StepOutcome::Failed {
+                        error: "RECOVERY_REALM_REJECTED".to_string(),
+                        retryable: false,
+                    });
+                }
+                configured.to_string()
+            }
+            None => requested_realm.map(str::to_string).unwrap_or_default(),
+        };
 
         let service = ctx.services.user_lookup.as_ref().ok_or_else(|| {
             FlowError::InvalidDefinition(
@@ -162,7 +213,7 @@ impl Step for ResolveExistingAccountStep {
         })?;
 
         let candidates = service
-            .find_users_by_phone(realm, &phone)
+            .find_users_by_phone(Some(realm), &phone)
             .await
             .map_err(FlowError::InvalidDefinition)?;
 
@@ -421,20 +472,27 @@ impl Step for IssueRecoveryOtpStep {
         }
 
         let otp = generate_otp(config.length);
-        let otp_hash = hash_otp(&otp);
+        let salt = generate_otp_salt();
+        let otp_hash = hash_otp(&otp, salt.as_bytes());
         let expires_at = now + config.expiry_seconds as i64;
 
+        let mut recovery_patch = json!({
+            "otp_hash": otp_hash,
+            "otp_salt": salt,
+            "otp_expires_at": expires_at,
+            "otp_resend_at": now + config.resend_cooldown_seconds as i64,
+            "otp_max_attempts": config.max_attempts,
+            "otp_issued": true,
+        });
+        // M1: a resend must NOT reset the attempts counter, otherwise a locked
+        // case could be unlocked by resending. Only the first issuance starts
+        // the counter at zero.
+        if !has_hash {
+            recovery_patch["otp_attempts"] = json!(0);
+        }
+
         let updates = ContextUpdates {
-            flow_context_patch: Some(json!({
-                "recovery": {
-                    "otp_hash": otp_hash,
-                    "otp_expires_at": expires_at,
-                    "otp_attempts": 0,
-                    "otp_resend_at": now + config.resend_cooldown_seconds as i64,
-                    "otp_max_attempts": config.max_attempts,
-                    "otp_issued": true,
-                }
-            })),
+            flow_context_patch: Some(json!({ "recovery": recovery_patch })),
             ..Default::default()
         };
 
@@ -583,6 +641,9 @@ impl Step for VerifyRecoveryOtpStep {
         let stored_hash = recovery
             .and_then(|r| r.get("otp_hash"))
             .and_then(Value::as_str);
+        let stored_salt = recovery
+            .and_then(|r| r.get("otp_salt"))
+            .and_then(Value::as_str);
         let expires_at = recovery
             .and_then(|r| r.get("otp_expires_at"))
             .and_then(Value::as_i64);
@@ -607,6 +668,8 @@ impl Step for VerifyRecoveryOtpStep {
             });
         }
 
+        // M1: a locked case is rejected before any hash work is done (skips
+        // expensive KDF once the attempts are exhausted).
         if current_attempts >= config.max_attempts {
             return Ok(StepOutcome::Failed {
                 error: "MAX_ATTEMPTS_EXCEEDED".to_string(),
@@ -614,8 +677,18 @@ impl Step for VerifyRecoveryOtpStep {
             });
         }
 
-        let submitted_hash = hash_otp(submitted);
-        if stored_hash != submitted_hash {
+        // A missing per-issue salt means the stored hash was produced by an
+        // older (fixed-salt) issuance; treat it as unverifiable so we never
+        // fall back to a deterministic comparison.
+        let Some(stored_salt) = stored_salt else {
+            return Ok(StepOutcome::Failed {
+                error: "NO_OTP_FOUND".to_string(),
+                retryable: false,
+            });
+        };
+
+        let submitted_hash = hash_otp(submitted, stored_salt.as_bytes());
+        if !constant_time_eq(stored_hash, &submitted_hash) {
             let new_attempts = current_attempts + 1;
             return Ok(StepOutcome::Branched {
                 branch: "retry".to_string(),
@@ -656,6 +729,9 @@ mod tests {
     use backend_flow_sdk::StepServices;
     use std::collections::HashMap;
     use std::sync::Mutex;
+
+    /// A fixed 16-byte salt (hex) used only by unit tests.
+    const TEST_SALT: &str = "cafebabecafebabecafebabecafebabe";
 
     struct FakeDeliverer {
         result: Mutex<Result<bool, String>>,
@@ -727,13 +803,28 @@ mod tests {
     }
 
     #[test]
-    fn otp_hash_is_not_plaintext() {
+    fn otp_hash_is_salted_per_issuance() {
         let otp = "123456";
-        let h = hash_otp(otp);
+        let salt_a = generate_otp_salt();
+        let salt_b = generate_otp_salt();
+        let h = hash_otp(otp, salt_a.as_bytes());
         assert_eq!(h.len(), 64);
         assert_ne!(h, otp);
-        assert_eq!(h, hash_otp(otp), "hashing must be deterministic");
-        assert_ne!(h, hash_otp("654321"));
+        // The same OTP with the same salt is deterministic...
+        assert_eq!(h, hash_otp(otp, salt_a.as_bytes()));
+        // ...but with a different (fresh per-issue) salt it differs, defeating
+        // offline brute-force of a projected hash.
+        assert_ne!(h, hash_otp(otp, salt_b.as_bytes()));
+        assert_ne!(salt_a, salt_b, "fresh salts must differ");
+        assert_ne!(h, hash_otp("654321", salt_a.as_bytes()));
+    }
+
+    #[test]
+    fn constant_time_compare_rejects_mismatch_and_matches_identically() {
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "abd"));
+        assert!(!constant_time_eq("abc", "abcd"));
+        assert!(!constant_time_eq("", "x"));
     }
 
     #[test]
@@ -762,6 +853,7 @@ mod tests {
                 let updates = updates.unwrap();
                 let patch = updates.flow_context_patch.unwrap();
                 assert!(patch["recovery"]["otp_hash"].as_str().is_some());
+                assert!(patch["recovery"]["otp_salt"].as_str().is_some());
                 assert_eq!(patch["recovery"]["otp_attempts"], 0);
                 assert!(patch["recovery"]["otp_expires_at"].is_i64());
 
@@ -778,7 +870,8 @@ mod tests {
                 assert!(!req.otp.is_empty());
 
                 let stored = patch["recovery"]["otp_hash"].as_str().unwrap();
-                assert_eq!(stored, hash_otp(&req.otp));
+                let salt = patch["recovery"]["otp_salt"].as_str().unwrap();
+                assert_eq!(stored, hash_otp(&req.otp, salt.as_bytes()));
 
                 let serialized_output = output.to_string();
                 assert!(
@@ -855,12 +948,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn issue_recovery_otp_resend_does_not_reset_attempts() {
+        let (step, _) = step_with_deliverer(Ok(true));
+        // A previous issuance already exhausted attempts (case locked).
+        let flow_context = json!({
+            "recovery": {
+                "matched": true,
+                "otp_hash": "existing",
+                "otp_attempts": 5,
+                "otp_max_attempts": 5,
+            }
+        });
+        let ctx = make_ctx(
+            json!({ "phone_number": "+237690000000" }),
+            flow_context,
+            otp_config(),
+        );
+        match step.execute(&ctx).await.unwrap() {
+            StepOutcome::Done { updates, .. } => {
+                let patch = updates.unwrap().flow_context_patch.unwrap();
+                // M1: a resend must NOT reset the attempts counter, so a locked
+                // case stays locked. The patch simply omits otp_attempts, which
+                // leaves the existing (exhausted) count in place.
+                assert!(
+                    !patch["recovery"]
+                        .as_object()
+                        .map(|o| o.contains_key("otp_attempts"))
+                        .unwrap_or(true),
+                    "resend must not touch otp_attempts: {patch}"
+                );
+            }
+            other => panic!("expected done resend, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn verify_recovery_otp_accepts_correct_code() {
         let step = VerifyRecoveryOtpStep;
         let otp = "246810";
         let flow_context = json!({
             "recovery": {
-                "otp_hash": hash_otp(otp),
+                "otp_hash": hash_otp(otp, TEST_SALT.as_bytes()),
+                "otp_salt": TEST_SALT,
                 "otp_expires_at": now_ts() + 1800,
                 "otp_attempts": 0,
             }
@@ -882,7 +1011,8 @@ mod tests {
         let otp = "246810";
         let flow_context = json!({
             "recovery": {
-                "otp_hash": hash_otp(otp),
+                "otp_hash": hash_otp(otp, TEST_SALT.as_bytes()),
+                "otp_salt": TEST_SALT,
                 "otp_expires_at": now_ts() + 1800,
                 "otp_attempts": 0,
             }
@@ -910,7 +1040,8 @@ mod tests {
         let otp = "246810";
         let flow_context = json!({
             "recovery": {
-                "otp_hash": hash_otp(otp),
+                "otp_hash": hash_otp(otp, TEST_SALT.as_bytes()),
+                "otp_salt": TEST_SALT,
                 "otp_expires_at": now_ts() + 1800,
                 "otp_attempts": 5,
             }
@@ -935,7 +1066,8 @@ mod tests {
         let otp = "246810";
         let flow_context = json!({
             "recovery": {
-                "otp_hash": hash_otp(otp),
+                "otp_hash": hash_otp(otp, TEST_SALT.as_bytes()),
+                "otp_salt": TEST_SALT,
                 "otp_expires_at": now_ts() - 10,
                 "otp_attempts": 0,
             }
