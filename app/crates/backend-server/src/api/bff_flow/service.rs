@@ -1,9 +1,10 @@
 use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, EnrollmentBindResponse,
-    EnrollmentBindStatus, FlowDetailResponse, FlowResponse, LookupByPhoneCandidate,
-    LookupByPhoneRequest, LookupByPhoneResponse, OldDevicePolicyRequest, OldDevicePolicyResponse,
-    OldDevicePolicyStatus, PhoneMatchField, RecoveryBindRequest, RecoveryCaseResponse,
-    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    EnrollmentBindStatus, FinalizeRecoveryRequest, FlowDetailResponse, FlowResponse,
+    LookupByPhoneCandidate, LookupByPhoneRequest, LookupByPhoneResponse, OldDevicePolicyRequest,
+    OldDevicePolicyResponse, OldDevicePolicyStatus, PhoneMatchField, RecoveryBindRequest,
+    RecoveryCaseResponse, SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest,
+    UserResponse,
 };
 use crate::api::{BackendApi, BffSignatureClaims};
 use crate::flows::definitions::account_recovery::{hash_phone, mask_phone};
@@ -1084,7 +1085,10 @@ async fn handle_completed_step(
 /// Projects the account-recovery flow state into the canonical `recovery_case`
 /// aggregate so the BFF can always read the case back by id. Uses optimistic
 /// concurrency (`update_case` with the row's current version).
-async fn sync_recovery_case(api: &BackendApi, flow: &FlowInstanceRow) -> Result<(), Error> {
+pub(crate) async fn sync_recovery_case(
+    api: &BackendApi,
+    flow: &FlowInstanceRow,
+) -> Result<(), Error> {
     if !flow.flow_type.eq_ignore_ascii_case("account_recovery") {
         return Ok(());
     }
@@ -1092,6 +1096,13 @@ async fn sync_recovery_case(api: &BackendApi, flow: &FlowInstanceRow) -> Result<
     let Some(recovery) = flow.context.get("recovery") else {
         return Ok(());
     };
+    if recovery
+        .get("decision_pending")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
     let Some(case_id) = recovery.get("case_id").and_then(Value::as_str) else {
         return Ok(());
     };
@@ -1159,7 +1170,10 @@ async fn sync_recovery_case(api: &BackendApi, flow: &FlowInstanceRow) -> Result<
         // The approval-revision bump is owned by the atomic staff decision update
         // (which records `recovery.case_version`). Avoid double-bumping here.
         if decision.eq_ignore_ascii_case("APPROVED")
-            && recovery.get("case_version").and_then(Value::as_i64).is_none()
+            && recovery
+                .get("case_version")
+                .and_then(Value::as_i64)
+                .is_none()
         {
             patch.approval_revision = Some(Some(case.approval_revision.unwrap_or(1).max(1) + 1));
         }
@@ -1467,7 +1481,7 @@ pub async fn get_recovery_case(
     // Only safe, non-enumerating fields are exposed. Phone hashes, the OTP
     // hash, evidence, and risk flags are never returned to the facade.
     Ok(RecoveryCaseResponse {
-        case_id: row.id,
+        case_id: row.id.clone(),
         status: row.status,
         target_user_id: row.matched_user_id,
         approval_revision: row.approval_revision.unwrap_or(1),
@@ -1478,10 +1492,52 @@ pub async fn get_recovery_case(
             .map(str::to_string),
         approved_jkt: row.jkt,
         approved_device_id: row.device_id,
+        otp_challenge_ref: row.otp_hash.as_ref().map(|_| row.id.clone()),
+        otp_expires_at: row.otp_expires_at,
+        otp_resend_allowed_at: row.otp_resend_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
         version: row.version,
     })
+}
+
+pub async fn finalize_recovery(
+    api: &BackendApi,
+    recovery_case_id: String,
+    body: FinalizeRecoveryRequest,
+) -> Result<RecoveryCaseResponse, Error> {
+    let row = api
+        .state
+        .recovery_case
+        .get_case_by_id(&recovery_case_id)
+        .await?
+        .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
+    if row.status.eq_ignore_ascii_case("COMPLETED") {
+        return get_recovery_case(api, recovery_case_id).await;
+    }
+    if !row.status.eq_ignore_ascii_case("APPROVED")
+        || row.matched_user_id.as_deref() != Some(body.target_user_id.as_str())
+        || row.approval_revision.unwrap_or(1) != body.approval_revision
+        || row.device_id.as_deref() != Some(body.device_id.as_str())
+        || row.jkt.as_deref() != Some(body.jkt.as_str())
+    {
+        return Err(Error::conflict(
+            "RECOVERY_FINALIZATION_MISMATCH",
+            "Recovery completion does not match the approved case",
+        ));
+    }
+    api.state
+        .recovery_case
+        .update_case(
+            &recovery_case_id,
+            row.version,
+            &RecoveryCaseUpdate {
+                status: Some("COMPLETED".to_owned()),
+                ..Default::default()
+            },
+        )
+        .await?;
+    get_recovery_case(api, recovery_case_id).await
 }
 
 pub async fn require_service_caller(
@@ -1778,11 +1834,34 @@ pub async fn recovery_bind(
         .await;
 
     match bind_res {
-        Ok(record_id) => Ok(EnrollmentBindResponse {
-            status: EnrollmentBindStatus::Bound,
-            device_record_id: Some(record_id),
-            bound_user_id: body.target_user_id.clone(),
-        }),
+        Ok(record_id) => {
+            let case = api
+                .state
+                .recovery_case
+                .get_case_by_id(&recovery_case_id)
+                .await?
+                .ok_or_else(|| {
+                    Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found")
+                })?;
+            if !case.status.eq_ignore_ascii_case("COMPLETED") {
+                api.state
+                    .recovery_case
+                    .update_case(
+                        &recovery_case_id,
+                        case.version,
+                        &RecoveryCaseUpdate {
+                            status: Some("COMPLETED".to_owned()),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+            }
+            Ok(EnrollmentBindResponse {
+                status: EnrollmentBindStatus::Bound,
+                device_record_id: Some(record_id),
+                bound_user_id: body.target_user_id.clone(),
+            })
+        }
         Err(Error::Http {
             status_code: 409,
             error_key,
@@ -2497,7 +2576,12 @@ mod recovery_case_projection_tests {
         );
         assert_eq!(
             recovery_case_status(
-                &flow("RUNNING", Some("collect_assisted_evidence"), json!({}), json!({})),
+                &flow(
+                    "RUNNING",
+                    Some("collect_assisted_evidence"),
+                    json!({}),
+                    json!({})
+                ),
                 Some("NEEDS_MORE_EVIDENCE")
             ),
             "NEEDS_MORE_EVIDENCE"
@@ -2506,7 +2590,12 @@ mod recovery_case_projection_tests {
         // No decision yet: awaiting review vs evidence required.
         assert_eq!(
             recovery_case_status(
-                &flow("RUNNING", Some("await_admin_decision"), json!({}), json!({})),
+                &flow(
+                    "RUNNING",
+                    Some("await_admin_decision"),
+                    json!({}),
+                    json!({})
+                ),
                 None
             ),
             "PENDING_REVIEW"
@@ -2529,9 +2618,11 @@ mod recovery_case_projection_tests {
         repo.expect_update_case()
             // K3: the projection must use the authoritative case_version (4),
             // never the freshly re-read row version (3).
-            .withf(|id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
-                id == "case_1" && *expected_version == 4
-            })
+            .withf(
+                |id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
+                    id == "case_1" && *expected_version == 4
+                },
+            )
             .returning(|id, _, patch| {
                 let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
                 row.id = id.to_owned();
@@ -2554,9 +2645,11 @@ mod recovery_case_projection_tests {
         repo.expect_get_case_by_id()
             .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
         repo.expect_update_case()
-            .withf(|_id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
-                *expected_version == 3
-            })
+            .withf(
+                |_id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
+                    *expected_version == 3
+                },
+            )
             .returning(|id, _, patch| {
                 let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
                 row.id = id.to_owned();

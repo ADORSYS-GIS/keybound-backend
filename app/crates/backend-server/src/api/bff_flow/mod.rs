@@ -32,6 +32,7 @@ pub use models::*;
         handlers::recovery_bind,
         handlers::old_devices_policy,
         handlers::resend_recovery_otp,
+        handlers::finalize_recovery,
     ),
     components(schemas(
         UserResponse,
@@ -50,6 +51,7 @@ pub use models::*;
         StepResponse,
         RecoveryBindRequest,
         RecoveryCaseResponse,
+        FinalizeRecoveryRequest,
         EnrollmentBindStatus,
         EnrollmentBindResponse,
         OldDevicePolicy,
@@ -85,6 +87,10 @@ pub fn router(api: BackendApi) -> Router {
         .route(
             "/v1/recoveries/{recovery_case_id}/otp/resend",
             post(handlers::resend_recovery_otp),
+        )
+        .route(
+            "/v1/recoveries/{recovery_case_id}/complete",
+            post(handlers::finalize_recovery),
         )
         .route(
             "/v1/recoveries/{recovery_case_id}/device-bindings",

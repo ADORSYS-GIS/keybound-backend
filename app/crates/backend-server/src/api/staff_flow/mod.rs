@@ -9,10 +9,12 @@ use axum::{Json, Router, routing::get};
 use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_flow_sdk::{StepContext, StepOutcome};
-use backend_repository::{FlowSessionFilter, FlowStepPatch, RecoveryCaseUpdate};
+use backend_repository::{
+    FlowSessionFilter, FlowStepPatch, RecoveryCaseFilter, RecoveryCaseUpdate,
+};
 use chrono::DateTime;
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use tracing::instrument;
@@ -27,6 +29,8 @@ use utoipa::{OpenApi, ToSchema};
         list_admin_steps,
         get_admin_step,
         submit_admin_step,
+        list_recovery_cases,
+        list_recovery_case_events,
     ),
     components(schemas(
         StaffSessionQuery,
@@ -54,7 +58,126 @@ pub fn router(api: BackendApi) -> Router {
             "/steps/{step_id}",
             get(get_admin_step).post(submit_admin_step),
         )
+        .route("/recovery-cases", get(list_recovery_cases))
+        .route(
+            "/recovery-cases/{case_id}/events",
+            get(list_recovery_case_events),
+        )
         .with_state(api)
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryCaseQuery {
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffRecoveryCaseResponse {
+    pub case_id: String,
+    pub status: String,
+    pub target_user_id: Option<String>,
+    pub approval_revision: i64,
+    pub old_device_policy: Option<String>,
+    pub approved_jkt: Option<String>,
+    pub approved_device_id: Option<String>,
+    pub otp_challenge_ref: Option<String>,
+    pub otp_expires_at: Option<DateTime<Utc>>,
+    pub otp_resend_allowed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub version: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffRecoveryEventResponse {
+    pub id: String,
+    pub case_id: String,
+    pub event: String,
+    pub actor: String,
+    pub actor_type: String,
+    pub created_at: DateTime<Utc>,
+    pub details: serde_json::Value,
+}
+
+#[utoipa::path(get, path = "/flow/recovery-cases", responses((status = 200, body = [StaffRecoveryCaseResponse])), tag = "staff-flow")]
+async fn list_recovery_cases(
+    State(api): State<BackendApi>,
+    headers: HeaderMap,
+    Query(query): Query<RecoveryCaseQuery>,
+) -> Result<Json<Vec<StaffRecoveryCaseResponse>>, Error> {
+    let _token = require_staff_token(&api, &headers).await?;
+    let (rows, _) = api
+        .state
+        .recovery_case
+        .list_cases(RecoveryCaseFilter {
+            status: query.status,
+            matched_user_id: None,
+            page: 1,
+            limit: 100,
+        })
+        .await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| StaffRecoveryCaseResponse {
+                case_id: row.id.clone(),
+                status: row.status,
+                target_user_id: row.matched_user_id,
+                approval_revision: row.approval_revision.unwrap_or(1),
+                old_device_policy: row
+                    .old_devices
+                    .get("policy")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                approved_jkt: row.jkt,
+                approved_device_id: row.device_id,
+                otp_challenge_ref: row.otp_hash.as_ref().map(|_| row.id),
+                otp_expires_at: row.otp_expires_at,
+                otp_resend_allowed_at: row.otp_resend_at,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                version: row.version,
+            })
+            .collect(),
+    ))
+}
+
+#[utoipa::path(get, path = "/flow/recovery-cases/{caseId}/events", responses((status = 200, body = [StaffRecoveryEventResponse])), tag = "staff-flow")]
+async fn list_recovery_case_events(
+    State(api): State<BackendApi>,
+    headers: HeaderMap,
+    Path(case_id): Path<String>,
+) -> Result<Json<Vec<StaffRecoveryEventResponse>>, Error> {
+    let _token = require_staff_token(&api, &headers).await?;
+    let case = api
+        .state
+        .recovery_case
+        .get_case_by_id(&case_id)
+        .await?
+        .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
+    let mut events = Vec::new();
+    if let Some(session_id) = case.session_id {
+        for flow in api.state.flow.list_flows_for_session(&session_id).await? {
+            if !flow.flow_type.eq_ignore_ascii_case("account_recovery") {
+                continue;
+            }
+            for step in api.state.flow.list_steps_for_flow(&flow.id).await? {
+                events.push(StaffRecoveryEventResponse {
+                    id: step.id,
+                    case_id: case_id.clone(),
+                    event: format!("{}_{}", step.step_type, step.status).to_uppercase(),
+                    actor: step.actor.clone(),
+                    actor_type: step.actor,
+                    created_at: step.updated_at,
+                    details: json!({ "attempt": step.attempt_no }),
+                });
+            }
+        }
+    }
+    events.sort_by_key(|event| event.created_at);
+    Ok(Json(events))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -499,6 +622,12 @@ async fn submit_admin_step(
         }
         bff_service::apply_context_updates(&api, &session, updates).await?;
     }
+    if recovery_decision.is_some() {
+        updated_flow_context = crate::flows::runtime::merged_json(
+            updated_flow_context,
+            &json!({ "recovery": { "decision_pending": true } }),
+        );
+    }
 
     let updated_step = api
         .state
@@ -548,16 +677,22 @@ async fn submit_admin_step(
     // (using the reviewer's expectedVersion) still rejects concurrent/stale
     // reviewers with a 409.
     if let Some(decision) = recovery_decision {
-        let recovery_context_patch =
-            apply_recovery_decision_update(&api, &decision).await?;
+        let recovery_context_patch = apply_recovery_decision_update(&api, &decision).await?;
         if let Some(recovery_context_patch) = recovery_context_patch {
             let mut context = current_flow.context.clone();
-            context = crate::flows::runtime::merged_json(context, &recovery_context_patch);
+            context = crate::flows::runtime::merged_json(
+                context,
+                &crate::flows::runtime::merged_json(
+                    recovery_context_patch,
+                    &json!({ "recovery": { "decision_pending": false } }),
+                ),
+            );
             current_flow = api
                 .state
                 .flow
                 .update_flow(&current_flow.id, None, None, None, Some(context))
                 .await?;
+            bff_service::sync_recovery_case(&api, &current_flow).await?;
         }
     }
 
@@ -625,7 +760,10 @@ async fn validate_recovery_decision(
         .unwrap_or("")
         .to_uppercase();
 
-    if !matches!(decision.as_str(), "APPROVED" | "REJECTED" | "NEEDS_MORE_EVIDENCE") {
+    if !matches!(
+        decision.as_str(),
+        "APPROVED" | "REJECTED" | "NEEDS_MORE_EVIDENCE"
+    ) {
         return Err(Error::bad_request(
             "INVALID_RECOVERY_DECISION",
             "decision must be APPROVED, REJECTED or NEEDS_MORE_EVIDENCE",
@@ -643,7 +781,10 @@ async fn validate_recovery_decision(
             .get("expectedVersion")
             .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
-                Error::bad_request("MISSING_EXPECTED_VERSION", "expectedVersion is required for approval")
+                Error::bad_request(
+                    "MISSING_EXPECTED_VERSION",
+                    "expectedVersion is required for approval",
+                )
             })?
     } else {
         body.input
@@ -669,7 +810,10 @@ async fn validate_recovery_decision(
             .get("checklist")
             .filter(|value| value.is_object())
             .ok_or_else(|| {
-                Error::bad_request("RECOVERY_CHECKLIST_INCOMPLETE", "checklist must be an object for approval")
+                Error::bad_request(
+                    "RECOVERY_CHECKLIST_INCOMPLETE",
+                    "checklist must be an object for approval",
+                )
             })?
     } else {
         body.input
@@ -754,7 +898,9 @@ async fn apply_recovery_decision_update(
             &decision.patch,
         )
         .await?;
-    Ok(Some(json!({ "recovery": { "case_version": updated.version } })))
+    Ok(Some(
+        json!({ "recovery": { "case_version": updated.version } }),
+    ))
 }
 
 /// Validates and immediately applies a recovery decision.
@@ -999,7 +1145,9 @@ mod recovery_decision_tests {
             .unwrap_err();
         match err {
             Error::Http {
-                status_code, error_key, ..
+                status_code,
+                error_key,
+                ..
             } => {
                 assert_eq!(status_code, 409);
                 assert_eq!(error_key, "STALE_RECOVERY_VERSION");
@@ -1019,7 +1167,9 @@ mod recovery_decision_tests {
             .unwrap_err();
         match err {
             Error::Http {
-                status_code, error_key, ..
+                status_code,
+                error_key,
+                ..
             } => {
                 assert_eq!(status_code, 400);
                 assert_eq!(error_key, "INVALID_RECOVERY_DECISION");
@@ -1039,7 +1189,9 @@ mod recovery_decision_tests {
             .unwrap_err();
         match err {
             Error::Http {
-                status_code, error_key, ..
+                status_code,
+                error_key,
+                ..
             } => {
                 assert_eq!(status_code, 400);
                 assert_eq!(error_key, "RECOVERY_CHECKLIST_INCOMPLETE");
@@ -1063,7 +1215,9 @@ mod recovery_decision_tests {
             .unwrap_err();
         match err {
             Error::Http {
-                status_code, error_key, ..
+                status_code,
+                error_key,
+                ..
             } => {
                 assert_eq!(status_code, 400);
                 assert_eq!(error_key, "RECOVERY_CHECKLIST_INCOMPLETE");
@@ -1078,13 +1232,15 @@ mod recovery_decision_tests {
         repo.expect_get_case_by_id()
             .returning(|_| Ok(Some(case_row(3))));
         repo.expect_update_case()
-            .withf(|id: &str, expected_version: &i64, patch: &RecoveryCaseUpdate| {
-                id == "case_1"
-                    && *expected_version == 3
-                    && patch.review_decision.as_ref() == Some(&Some("APPROVED".to_owned()))
-                    && patch.status.as_deref() == Some("APPROVED")
-                    && patch.approval_revision == Some(Some(3))
-            })
+            .withf(
+                |id: &str, expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                    id == "case_1"
+                        && *expected_version == 3
+                        && patch.review_decision.as_ref() == Some(&Some("APPROVED".to_owned()))
+                        && patch.status.as_deref() == Some("APPROVED")
+                        && patch.approval_revision == Some(Some(3))
+                },
+            )
             .returning(|id, _, _| {
                 let mut row = case_row(4);
                 row.id = id.to_owned();

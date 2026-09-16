@@ -9,9 +9,10 @@ use crate::api::BackendApi;
 
 use super::models::{
     AddFlowRequest, CompletedKycResponse, CreateSessionRequest, EnrollmentBindResponse,
-    FlowDetailResponse, FlowResponse, LookupByPhoneRequest, LookupByPhoneResponse,
-    OldDevicePolicyRequest, OldDevicePolicyResponse, RecoveryBindRequest, RecoveryCaseResponse,
-    SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest, UserResponse,
+    FinalizeRecoveryRequest, FlowDetailResponse, FlowResponse, LookupByPhoneRequest,
+    LookupByPhoneResponse, OldDevicePolicyRequest, OldDevicePolicyResponse, RecoveryBindRequest,
+    RecoveryCaseResponse, SessionDetailResponse, SessionResponse, StepResponse, SubmitStepRequest,
+    UserResponse,
 };
 use super::service;
 
@@ -31,6 +32,27 @@ pub async fn get_recovery_case(
     let _caller = service::require_service_caller(&api, &headers).await?;
     let response = service::get_recovery_case(&api, recovery_case_id).await?;
     Ok(Json(response))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/recoveries/{recoveryCaseId}/complete",
+    tag = "recoveries",
+    params(("recoveryCaseId" = String, Path)),
+    request_body = FinalizeRecoveryRequest,
+    responses((status = 200, body = RecoveryCaseResponse))
+)]
+#[instrument(skip(api, headers, body))]
+pub async fn finalize_recovery(
+    State(api): State<BackendApi>,
+    Path(recovery_case_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<FinalizeRecoveryRequest>,
+) -> Result<Json<RecoveryCaseResponse>, Error> {
+    let _caller = service::require_service_caller(&api, &headers).await?;
+    Ok(Json(
+        service::finalize_recovery(&api, recovery_case_id, body).await?,
+    ))
 }
 
 #[utoipa::path(

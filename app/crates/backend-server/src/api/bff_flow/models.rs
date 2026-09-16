@@ -19,6 +19,12 @@ pub struct RecoveryCaseResponse {
     #[serde(default)]
     pub approved_device_id: Option<String>,
     #[serde(default)]
+    pub otp_challenge_ref: Option<String>,
+    #[serde(default)]
+    pub otp_expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub otp_resend_allowed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub updated_at: DateTime<Utc>,
@@ -94,6 +100,15 @@ pub struct RecoveryBindRequest {
     pub jkt: String,
     pub public_jwk: Value,
     pub binding_operation_id: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizeRecoveryRequest {
+    pub target_user_id: String,
+    pub approval_revision: i64,
+    pub device_id: String,
+    pub jkt: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
