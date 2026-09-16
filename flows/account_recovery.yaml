@@ -71,50 +71,37 @@ steps:
       source: flow
       pointer: /step_output/await_admin_decision/decision
       cases:
-        APPROVED: recovery_bind
+        APPROVED: approved_hold
+        NEEDS_MORE_EVIDENCE: collect_assisted_evidence
         REJECTED: rejected_terminal
       default_branch: rejected_terminal
     branches:
-      recovery_bind: recovery_bind
+      approved_hold: approved_hold
+      collect_assisted_evidence: collect_assisted_evidence
       rejected_terminal: rejected_terminal
     fail: FAILED
 
-  # Finalization: bind the new device, apply the old-device policy, then
-  # restrictions, then complete.
-  recovery_bind:
-    action: RECOVERY_BIND
-    actor: SYSTEM
-    next: revoke_or_quarantine_old_devices
-    fail: FAILED
-
-  revoke_or_quarantine_old_devices:
-    action: OLD_DEVICES_POLICY
-    actor: SYSTEM
+  # Approval does NOT bind the device here. Device binding and old-device/session
+  # finalization are security-critical and are owned by the Keycloak SPI path
+  # driven through the BFF /complete (proof-validated challenge signature), never
+  # by keybound's own flow execution. The case therefore HOLDS in the APPROVED
+  # state (a WAIT) until that external, proof-validated bind finalizes it.
+  approved_hold:
+    action: WAIT
+    actor: END_USER
     config:
-      policy: REVOKE_ALL_PREVIOUS
-    next: apply_restrictions
-    fail: FAILED
-
-  apply_restrictions:
-    action: APPLY_RESTRICTIONS
-    actor: SYSTEM
-    next: complete_recovery
-    fail: FAILED
-
-  complete_recovery:
-    action: NOOP
-    actor: SYSTEM
-    next: COMPLETE
+      actor: USER
+    next: APPROVED
 
   no_match_terminal:
     action: DEBUG_LOG
     actor: SYSTEM
     config:
-      message: "Recovery: no safe match, steering to account creation (enumeration-safe)"
-    # A normal "no safe match" is NOT a failure of the recovery flow; the flow
-    # completes with an explicit no-match outcome so the BFF can steer to
-    # account creation.
-    next: COMPLETE
+      message: "Recovery: no safe match; case held for review-only (enumeration-safe, no OTP)"
+    # A "no safe match" must NOT self-complete: completing would leak account
+    # existence and falsely signal success. It follows the same public shape as a
+    # matched case and is routed into review, where a human differentiates it.
+    next: await_admin_decision
 
   rejected_terminal:
     action: CLOSE_SESSION
@@ -123,6 +110,6 @@ steps:
       reason: REJECTED_BY_ADMIN
     next: CLOSED
 
-  COMPLETE:
+  APPROVED:
     action: NOOP
     actor: SYSTEM

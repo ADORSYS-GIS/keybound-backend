@@ -252,7 +252,7 @@ async fn create_recovery_case(
             requested_phone_hash: phone.as_deref().map(hash_phone).unwrap_or_default(),
             requested_phone_masked: phone.as_deref().map(mask_phone).unwrap_or_default(),
             reason: None,
-            status: "IN_PROGRESS".to_owned(),
+            status: "EVIDENCE_REQUIRED".to_owned(),
             phone_relation: None,
             matched_user_id: None,
             expires_at: Some(Utc::now() + Duration::hours(24)),
@@ -1142,33 +1142,80 @@ async fn sync_recovery_case(api: &BackendApi, flow: &FlowInstanceRow) -> Result<
     }
 
     // Capture the admin decision (recorded on `await_admin_decision`) onto the
-    // case and bump the approval revision on approval. Combined with the
-    // versioned `update_case` below, concurrent/out-of-date decisions surface
-    // as a 409 optimistic-concurrency conflict.
-    if let Some(decision) = flow
+    // case. The authoritative, atomic version-checked decision transition is
+    // performed by `submit_admin_step` (staff_flow), which records the decision,
+    // bumps the approval revision on approval, and stores the resulting version
+    // in the flow context under `recovery.case_version`. This projection re-uses
+    // that authoritative version (never a freshly re-read one) for its own
+    // versioned update, so a concurrent/out-of-date write surfaces as a 409
+    // rather than silently clobbering a newer revision.
+    let decision = flow
         .context
         .pointer("/step_output/await_admin_decision/decision")
         .and_then(Value::as_str)
-    {
-        patch.review_decision = Some(Some(decision.to_owned()));
-        if decision.eq_ignore_ascii_case("APPROVED") {
+        .map(str::to_owned);
+    if let Some(decision) = &decision {
+        patch.review_decision = Some(Some(decision.clone()));
+        // The approval-revision bump is owned by the atomic staff decision update
+        // (which records `recovery.case_version`). Avoid double-bumping here.
+        if decision.eq_ignore_ascii_case("APPROVED")
+            && recovery.get("case_version").and_then(Value::as_i64).is_none()
+        {
             patch.approval_revision = Some(Some(case.approval_revision.unwrap_or(1).max(1) + 1));
         }
     }
 
-    patch.status = Some(match flow.status.as_str() {
-        s if s.eq_ignore_ascii_case(FLOW_STATUS_COMPLETED) => "COMPLETED".to_owned(),
-        s if s.eq_ignore_ascii_case(FLOW_STATUS_FAILED) => "FAILED".to_owned(),
-        s if s.eq_ignore_ascii_case(FLOW_STATUS_CLOSED) => "CLOSED".to_owned(),
-        _ => "IN_PROGRESS".to_owned(),
-    });
+    patch.status = Some(recovery_case_status(flow, decision.as_deref()));
+
+    // Use the version produced by the atomic version-checked staff transition
+    // when present; otherwise fall back to the row's current version.
+    let expected_version = recovery
+        .get("case_version")
+        .and_then(Value::as_i64)
+        .unwrap_or(case.version);
+
+    if patch.is_noop() {
+        return Ok(());
+    }
 
     let _ = api
         .state
         .recovery_case
-        .update_case(case_id, case.version, &patch)
+        .update_case(case_id, expected_version, &patch)
         .await?;
     Ok(())
+}
+
+/// Maps the account-recovery flow phase onto the documented recovery-case
+/// status enum: EVIDENCE_REQUIRED, PENDING_REVIEW, APPROVED,
+/// NEEDS_MORE_EVIDENCE, COMPLETED, FAILED, CLOSED.
+fn recovery_case_status(flow: &FlowInstanceRow, decision: Option<&str>) -> String {
+    match flow.status.as_str() {
+        s if s.eq_ignore_ascii_case(FLOW_STATUS_COMPLETED) => "COMPLETED".to_owned(),
+        s if s.eq_ignore_ascii_case(FLOW_STATUS_FAILED) => "FAILED".to_owned(),
+        s if s.eq_ignore_ascii_case(FLOW_STATUS_CLOSED) => "CLOSED".to_owned(),
+        _ => match decision {
+            Some(d) if d.eq_ignore_ascii_case("APPROVED") => "APPROVED".to_owned(),
+            Some(d) if d.eq_ignore_ascii_case("REJECTED") => "CLOSED".to_owned(),
+            Some(d) if d.eq_ignore_ascii_case("NEEDS_MORE_EVIDENCE") => {
+                "NEEDS_MORE_EVIDENCE".to_owned()
+            }
+            Some(_) => "PENDING_REVIEW".to_owned(),
+            None => {
+                // No decision yet: derive from the current phase. Once evidence
+                // has been collected and the case is parked at the admin step it
+                // is awaiting review; before that the user must provide evidence.
+                let current = flow.current_step.as_deref().unwrap_or("");
+                if current.eq_ignore_ascii_case("await_admin_decision")
+                    || current.eq_ignore_ascii_case("record_admin_decision")
+                {
+                    "PENDING_REVIEW".to_owned()
+                } else {
+                    "EVIDENCE_REQUIRED".to_owned()
+                }
+            }
+        },
+    }
 }
 
 pub(crate) async fn apply_context_updates(
@@ -2339,5 +2386,190 @@ mod create_session_tests {
             session.context.get("user_id").and_then(Value::as_str),
             Some("usr_owner")
         );
+    }
+}
+
+#[cfg(test)]
+mod recovery_case_projection_tests {
+    use super::*;
+    use crate::test_utils::{MockRecoveryCaseRepo, TestAppStateBuilder};
+    use backend_model::db::RecoveryCaseRow;
+    use std::sync::Arc;
+
+    fn flow(
+        status: &str,
+        current_step: Option<&str>,
+        recovery: Value,
+        step_output: Value,
+    ) -> FlowInstanceRow {
+        let mut context = json!({ "recovery": recovery });
+        if step_output.is_object() && !step_output.as_object().unwrap().is_empty() {
+            context["step_output"] = step_output;
+        }
+        FlowInstanceRow {
+            id: "flow_1".to_owned(),
+            human_id: "rc.f1".to_owned(),
+            session_id: "sess_1".to_owned(),
+            flow_type: "account_recovery".to_owned(),
+            status: status.to_owned(),
+            current_step: current_step.map(str::to_owned),
+            step_ids: json!([]),
+            context,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn case_row(version: i64, status: &str) -> RecoveryCaseRow {
+        RecoveryCaseRow {
+            id: "case_1".to_owned(),
+            human_id: "rc.f1.case".to_owned(),
+            session_id: Some("sess_1".to_owned()),
+            device_id: None,
+            jkt: None,
+            device_public_jwk: None,
+            requested_phone_hash: "hash".to_owned(),
+            requested_phone_masked: "+****".to_owned(),
+            reason: None,
+            status: status.to_owned(),
+            phone_relation: None,
+            matched_user_id: None,
+            otp_hash: None,
+            otp_expires_at: None,
+            otp_attempts: 0,
+            otp_resend_at: None,
+            review_decision: None,
+            review_reason: None,
+            review_checklist: None,
+            review_expected_version: None,
+            approval_revision: None,
+            evidence: json!({}),
+            old_devices: json!([]),
+            risk_flags: json!({}),
+            expires_at: None,
+            review_expires_at: None,
+            approved_expires_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            version,
+        }
+    }
+
+    fn api_with(repo: MockRecoveryCaseRepo) -> BackendApi {
+        let state = TestAppStateBuilder::new()
+            .with_recovery_case(Arc::new(repo))
+            .build();
+        let oidc = state.oidc_state.clone();
+        let signature = state.signature_state.clone();
+        BackendApi::new(Arc::new(state), oidc, signature)
+    }
+
+    #[test]
+    fn recovery_case_status_maps_documented_enum() {
+        // Terminal flow statuses pass through.
+        assert_eq!(
+            recovery_case_status(&flow("COMPLETED", None, json!({}), json!({})), None),
+            "COMPLETED"
+        );
+        assert_eq!(
+            recovery_case_status(&flow("FAILED", None, json!({}), json!({})), None),
+            "FAILED"
+        );
+        assert_eq!(
+            recovery_case_status(&flow("CLOSED", None, json!({}), json!({})), None),
+            "CLOSED"
+        );
+
+        // Decisions drive the recovery-specific statuses, never generic ones.
+        assert_eq!(
+            recovery_case_status(
+                &flow("RUNNING", Some("approved_hold"), json!({}), json!({})),
+                Some("APPROVED")
+            ),
+            "APPROVED"
+        );
+        assert_eq!(
+            recovery_case_status(
+                &flow("RUNNING", Some("rejected_terminal"), json!({}), json!({})),
+                Some("REJECTED")
+            ),
+            "CLOSED"
+        );
+        assert_eq!(
+            recovery_case_status(
+                &flow("RUNNING", Some("collect_assisted_evidence"), json!({}), json!({})),
+                Some("NEEDS_MORE_EVIDENCE")
+            ),
+            "NEEDS_MORE_EVIDENCE"
+        );
+
+        // No decision yet: awaiting review vs evidence required.
+        assert_eq!(
+            recovery_case_status(
+                &flow("RUNNING", Some("await_admin_decision"), json!({}), json!({})),
+                None
+            ),
+            "PENDING_REVIEW"
+        );
+        assert_eq!(
+            recovery_case_status(
+                &flow("RUNNING", Some("verify_recovery_otp"), json!({}), json!({})),
+                None
+            ),
+            "EVIDENCE_REQUIRED"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_recovery_case_uses_version_from_version_checked_update() {
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .withf(|id: &str| id == "case_1")
+            .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
+        repo.expect_update_case()
+            // K3: the projection must use the authoritative case_version (4),
+            // never the freshly re-read row version (3).
+            .withf(|id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
+                id == "case_1" && *expected_version == 4
+            })
+            .returning(|id, _, patch| {
+                let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
+                row.id = id.to_owned();
+                Ok(row)
+            });
+
+        let api = api_with(repo);
+        let f = flow(
+            "RUNNING",
+            Some("approved_hold"),
+            json!({ "case_id": "case_1", "case_version": 4 }),
+            json!({ "await_admin_decision": { "decision": "APPROVED" } }),
+        );
+        sync_recovery_case(&api, &f).await.expect("sync succeeds");
+    }
+
+    #[tokio::test]
+    async fn sync_recovery_case_falls_back_to_row_version_when_no_case_version() {
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
+        repo.expect_update_case()
+            .withf(|_id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
+                *expected_version == 3
+            })
+            .returning(|id, _, patch| {
+                let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
+                row.id = id.to_owned();
+                Ok(row)
+            });
+
+        let api = api_with(repo);
+        let f = flow(
+            "RUNNING",
+            Some("verify_recovery_otp"),
+            json!({ "case_id": "case_1" }),
+            json!({}),
+        );
+        sync_recovery_case(&api, &f).await.expect("sync succeeds");
     }
 }

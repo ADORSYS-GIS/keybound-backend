@@ -335,3 +335,84 @@ async fn resolve_unknown_phone_does_not_leak_existence() {
         );
     }
 }
+
+#[tokio::test]
+async fn approval_holds_at_approved_and_never_binds_from_keybound() {
+    let registry = fixture_registry();
+    let flow = registry.get_flow("account_recovery").expect("flow present");
+
+    let step_names: Vec<&str> = flow.steps().iter().map(|s| s.step_type()).collect();
+    // K1: keybound must NOT perform the security-critical bind/revocation itself.
+    for forbidden in [
+        "RECOVERY_BIND",
+        "OLD_DEVICES_POLICY",
+        "APPLY_RESTRICTIONS",
+        "recovery_bind",
+        "revoke_or_quarantine_old_devices",
+        "apply_restrictions",
+        "complete_recovery",
+    ] {
+        assert!(
+            !step_names.contains(&forbidden),
+            "flow must not contain security-critical bind/revocation step {forbidden}: {step_names:?}"
+        );
+    }
+    assert!(
+        step_names.contains(&"approved_hold"),
+        "flow must hold in approved_hold after approval: {step_names:?}"
+    );
+
+    // Approval branches to the hold (a WAIT), not to any bind step.
+    let record = flow
+        .transitions()
+        .get("record_admin_decision")
+        .expect("record_admin_decision transition");
+    let branch_targets: Vec<&str> = record.branches.values().map(String::as_str).collect();
+    assert!(
+        branch_targets.contains(&"approved_hold"),
+        "approval must branch to approved_hold: {branch_targets:?}"
+    );
+    assert!(
+        branch_targets.contains(&"collect_assisted_evidence"),
+        "needs-more-evidence must branch to collect_assisted_evidence: {branch_targets:?}"
+    );
+    assert!(
+        branch_targets.contains(&"rejected_terminal"),
+        "rejection must branch to rejected_terminal: {branch_targets:?}"
+    );
+    for forbidden in [
+        "recovery_bind",
+        "revoke_or_quarantine_old_devices",
+        "apply_restrictions",
+        "complete_recovery",
+    ] {
+        assert!(
+            !branch_targets.contains(&forbidden),
+            "record_admin_decision must not branch to bind/revocation step {forbidden}: {branch_targets:?}"
+        );
+    }
+
+    // The hold is a WAIT step (actor END_USER); submitting it never reaches a
+    // completing NOOP within keybound — binding is owned by the SPI /complete
+    // path.
+    let hold = flow
+        .steps()
+        .iter()
+        .find(|s| s.step_type() == "approved_hold")
+        .expect("approved_hold step");
+    assert_eq!(hold.actor(), Actor::EndUser);
+
+    // K2: a "no safe match" must NOT self-complete (existence leak + false
+    // success). It is routed into review instead, indistinguishable from the
+    // matched path until a human differentiates it.
+    let no_match = flow
+        .transitions()
+        .get("no_match_terminal")
+        .expect("no_match_terminal transition");
+    assert_eq!(no_match.on_success, "await_admin_decision");
+    assert_ne!(
+        no_match.on_success.to_uppercase(),
+        "COMPLETE",
+        "no_match must not end in COMPLETE"
+    );
+}

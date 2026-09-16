@@ -9,7 +9,7 @@ use axum::{Json, Router, routing::get};
 use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_flow_sdk::{StepContext, StepOutcome};
-use backend_repository::{FlowSessionFilter, FlowStepPatch};
+use backend_repository::{FlowSessionFilter, FlowStepPatch, RecoveryCaseUpdate};
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
@@ -392,6 +392,14 @@ async fn submit_admin_step(
         .await?
         .ok_or_else(|| Error::not_found("SESSION_NOT_FOUND", "Session not found"))?;
 
+    // Recovery admin decisions bypass the generic WAIT validation: they must
+    // validate the reviewer's expectedVersion and enforce the recovery
+    // checklist. We only VALIDATE here (no case mutation yet): the actual
+    // version-checked transition on the case is deferred until after the flow
+    // transition below is committed, so a failed flow step can never leave the
+    // case APPROVED while the flow never advances.
+    let recovery_decision = validate_recovery_decision(&api, &flow, &body).await?;
+
     let flow_definition = bff_service::get_flow_definition(&api, &flow.flow_type)?;
     let step_definition = bff_service::get_step_definition(flow_definition, &step.step_type)?;
 
@@ -534,8 +542,234 @@ async fn submit_admin_step(
         current_flow = bff_service::finalize_flow(&api, &current_flow, "COMPLETED").await?;
     }
 
+    // Apply the recovery decision only now, after the flow transition has been
+    // committed. This guarantees the case can never be left APPROVED while the
+    // flow step/transition did not advance. The version-checked `update_case`
+    // (using the reviewer's expectedVersion) still rejects concurrent/stale
+    // reviewers with a 409.
+    if let Some(decision) = recovery_decision {
+        let recovery_context_patch =
+            apply_recovery_decision_update(&api, &decision).await?;
+        if let Some(recovery_context_patch) = recovery_context_patch {
+            let mut context = current_flow.context.clone();
+            context = crate::flows::runtime::merged_json(context, &recovery_context_patch);
+            current_flow = api
+                .state
+                .flow
+                .update_flow(&current_flow.id, None, None, None, Some(context))
+                .await?;
+        }
+    }
+
     bff_service::refresh_session_status(&api, &current_flow.session_id).await?;
     Ok(Json(updated_step.into()))
+}
+
+/// A validated recovery decision that has not yet been applied to the case.
+///
+/// Validation (stale-version rejection, decision and checklist enforcement,
+/// patch construction) happens up-front, while the actual atomic,
+/// version-checked `update_case` is deferred until after the flow transition
+/// has been committed (see `submit_admin_step`), so the case can never be left
+/// APPROVED while the flow has not advanced.
+struct RecoveryDecision {
+    case_id: String,
+    expected_version: i64,
+    patch: RecoveryCaseUpdate,
+}
+
+/// Handles an account-recovery KYC Manager decision on `await_admin_decision`.
+///
+/// This intentionally does NOT use the generic WAIT-step validation. Instead it:
+/// 1. validates the reviewer's submitted `expectedVersion` against the case's
+///    current version (a stale reviewer is rejected with 409),
+/// 2. enforces the recovery checklist,
+/// 3. builds the case patch (applied later, after the flow transition commits,
+///    through an atomic, version-checked `update_case`).
+///
+/// This is the validate-only half: it performs no mutation of the case. The
+/// caller applies the returned decision via `apply_recovery_decision_update`
+/// only once the flow transition has been committed. Returns `None` when the
+/// flow is not an account-recovery decision step.
+async fn validate_recovery_decision(
+    api: &BackendApi,
+    flow: &backend_model::db::FlowInstanceRow,
+    body: &SubmitStepRequest,
+) -> Result<Option<RecoveryDecision>, Error> {
+    if !flow.flow_type.eq_ignore_ascii_case("account_recovery") {
+        return Ok(None);
+    }
+
+    let case_id = flow
+        .context
+        .pointer("/recovery/case_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            Error::bad_request(
+                "RECOVERY_CASE_NOT_FOUND",
+                "Recovery flow has no recovery case",
+            )
+        })?;
+
+    let case = api
+        .state
+        .recovery_case
+        .get_case_by_id(case_id)
+        .await?
+        .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
+
+    let decision = body
+        .input
+        .get("decision")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_uppercase();
+
+    if !matches!(decision.as_str(), "APPROVED" | "REJECTED" | "NEEDS_MORE_EVIDENCE") {
+        return Err(Error::bad_request(
+            "INVALID_RECOVERY_DECISION",
+            "decision must be APPROVED, REJECTED or NEEDS_MORE_EVIDENCE",
+        ));
+    }
+
+    // Reject stale reviewers before touching the case. The atomic update in
+    // `apply_recovery_decision_update` re-checks the version, so a race between
+    // two reviewers still yields 409. For APPROVED decisions, expectedVersion
+    // is required (staff review). For REJECTED/NEEDS_MORE_EVIDENCE, it is
+    // optional (user-initiated cancel may not provide it; the version-checked
+    // `update_case` still protects via the case row version).
+    let expected_version = if decision == "APPROVED" {
+        body.input
+            .get("expectedVersion")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| {
+                Error::bad_request("MISSING_EXPECTED_VERSION", "expectedVersion is required for approval")
+            })?
+    } else {
+        body.input
+            .get("expectedVersion")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(case.version)
+    };
+    if expected_version != case.version {
+        return Err(Error::conflict(
+            "STALE_RECOVERY_VERSION",
+            format!(
+                "Recovery case {} was modified by another reviewer (expected version {expected_version}, current {})",
+                case.id, case.version
+            ),
+        ));
+    }
+
+    // Checklist is required for APPROVED decisions (staff KYC review).
+    // For REJECTED/NEEDS_MORE_EVIDENCE (user-initiated cancel), it is optional.
+    let empty_checklist = serde_json::Value::Object(serde_json::Map::new());
+    let checklist = if decision == "APPROVED" {
+        body.input
+            .get("checklist")
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                Error::bad_request("RECOVERY_CHECKLIST_INCOMPLETE", "checklist must be an object for approval")
+            })?
+    } else {
+        body.input
+            .get("checklist")
+            .filter(|value| value.is_object())
+            .unwrap_or(&empty_checklist)
+    };
+
+    // For APPROVED decisions: the reviewer must confirm that identity was
+    // verified and that the new device key proof was verified.
+    // For REJECTED/NEEDS_MORE_EVIDENCE: no checklist enforcement.
+    if decision == "APPROVED" {
+        let identity_verified = checklist
+            .get("kycIdentityVerified")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if !identity_verified {
+            return Err(Error::bad_request(
+                "RECOVERY_CHECKLIST_INCOMPLETE",
+                "checklist.kycIdentityVerified must be true",
+            ));
+        }
+        let key_verified = checklist
+            .get("deviceKeyProofVerified")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if !key_verified {
+            return Err(Error::bad_request(
+                "RECOVERY_CHECKLIST_INCOMPLETE",
+                "checklist.deviceKeyProofVerified must be true for approval",
+            ));
+        }
+    }
+
+    let status = match decision.as_str() {
+        "APPROVED" => "APPROVED",
+        "REJECTED" => "CLOSED",
+        _ => "NEEDS_MORE_EVIDENCE",
+    };
+
+    let mut patch = RecoveryCaseUpdate {
+        review_decision: Some(Some(decision.clone())),
+        review_reason: Some(Some(
+            body.input
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+        )),
+        review_checklist: Some(Some(checklist.clone())),
+        review_expected_version: Some(Some(expected_version)),
+        status: Some(status.to_owned()),
+        ..Default::default()
+    };
+
+    if decision == "APPROVED" {
+        patch.approval_revision = Some(Some(case.approval_revision.unwrap_or(1).max(1) + 1));
+        patch.approved_expires_at = Some(Some(Utc::now() + chrono::Duration::days(7)));
+    }
+
+    Ok(Some(RecoveryDecision {
+        case_id: case_id.to_owned(),
+        expected_version,
+        patch,
+    }))
+}
+
+/// Applies a validated recovery decision through an atomic, version-checked
+/// transition on the case. Returns the flow-context patch carrying the
+/// authoritative `recovery.case_version` produced by the update (consumed by
+/// the `sync_recovery_case` projection).
+async fn apply_recovery_decision_update(
+    api: &BackendApi,
+    decision: &RecoveryDecision,
+) -> Result<Option<serde_json::Value>, Error> {
+    let updated = api
+        .state
+        .recovery_case
+        .update_case(
+            &decision.case_id,
+            decision.expected_version,
+            &decision.patch,
+        )
+        .await?;
+    Ok(Some(json!({ "recovery": { "case_version": updated.version } })))
+}
+
+/// Validates and immediately applies a recovery decision.
+///
+/// Kept as a convenience wrapper (validate + apply in one call) so callers that
+/// do not need the deferred-apply ordering can use a single step.
+async fn apply_recovery_decision(
+    api: &BackendApi,
+    flow: &backend_model::db::FlowInstanceRow,
+    body: &SubmitStepRequest,
+) -> Result<Option<serde_json::Value>, Error> {
+    let Some(decision) = validate_recovery_decision(api, flow, body).await? else {
+        return Ok(None);
+    };
+    apply_recovery_decision_update(api, &decision).await
 }
 
 async fn get_admin_step_row(
@@ -662,5 +896,224 @@ fn build_staff_session_response(
         context: row.context,
         created_at: row.created_at,
         updated_at: row.updated_at,
+    }
+}
+
+#[cfg(test)]
+mod recovery_decision_tests {
+    use super::*;
+    use crate::test_utils::{MockRecoveryCaseRepo, TestAppStateBuilder};
+    use backend_model::db::{FlowInstanceRow, RecoveryCaseRow};
+    use std::sync::Arc;
+
+    fn flow_row() -> FlowInstanceRow {
+        FlowInstanceRow {
+            id: "flow_1".to_owned(),
+            human_id: "rc.f1".to_owned(),
+            session_id: "sess_1".to_owned(),
+            flow_type: "account_recovery".to_owned(),
+            status: "RUNNING".to_owned(),
+            current_step: Some("await_admin_decision".to_owned()),
+            step_ids: json!([]),
+            context: json!({ "recovery": { "case_id": "case_1" } }),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn case_row(version: i64) -> RecoveryCaseRow {
+        RecoveryCaseRow {
+            id: "case_1".to_owned(),
+            human_id: "rc.f1.case".to_owned(),
+            session_id: Some("sess_1".to_owned()),
+            device_id: None,
+            jkt: None,
+            device_public_jwk: None,
+            requested_phone_hash: "hash".to_owned(),
+            requested_phone_masked: "+****".to_owned(),
+            reason: None,
+            status: "PENDING_REVIEW".to_owned(),
+            phone_relation: None,
+            matched_user_id: None,
+            otp_hash: None,
+            otp_expires_at: None,
+            otp_attempts: 0,
+            otp_resend_at: None,
+            review_decision: None,
+            review_reason: None,
+            review_checklist: None,
+            review_expected_version: None,
+            approval_revision: Some(2),
+            evidence: json!({}),
+            old_devices: json!([]),
+            risk_flags: json!({}),
+            expires_at: None,
+            review_expires_at: None,
+            approved_expires_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            version,
+        }
+    }
+
+    fn api_with(repo: MockRecoveryCaseRepo) -> BackendApi {
+        let state = TestAppStateBuilder::new()
+            .with_recovery_case(Arc::new(repo))
+            .build();
+        let oidc = state.oidc_state.clone();
+        let signature = state.signature_state.clone();
+        BackendApi::new(Arc::new(state), oidc, signature)
+    }
+
+    fn valid_input(decision: &str) -> serde_json::Value {
+        json!({
+            "decision": decision,
+            "expectedVersion": 3,
+            "reason": "verified",
+            "checklist": {
+                "kycIdentityVerified": true,
+                "deviceKeyProofVerified": true,
+            }
+        })
+    }
+
+    fn stale_case_repo() -> MockRecoveryCaseRepo {
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(3))));
+        repo
+    }
+
+    #[tokio::test]
+    async fn stale_reviewer_version_is_rejected_with_409() {
+        let mut repo = MockRecoveryCaseRepo::new();
+        // Case has already moved to version 5; reviewer still holds version 3.
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(5))));
+        let api = api_with(repo);
+        let body = SubmitStepRequest {
+            input: valid_input("APPROVED"),
+        };
+        let err = apply_recovery_decision(&api, &flow_row(), &body)
+            .await
+            .unwrap_err();
+        match err {
+            Error::Http {
+                status_code, error_key, ..
+            } => {
+                assert_eq!(status_code, 409);
+                assert_eq!(error_key, "STALE_RECOVERY_VERSION");
+            }
+            other => panic!("expected 409 Http error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_decision_is_rejected() {
+        let api = api_with(stale_case_repo());
+        let body = SubmitStepRequest {
+            input: json!({ "decision": "MAYBE", "expectedVersion": 3, "checklist": {} }),
+        };
+        let err = apply_recovery_decision(&api, &flow_row(), &body)
+            .await
+            .unwrap_err();
+        match err {
+            Error::Http {
+                status_code, error_key, ..
+            } => {
+                assert_eq!(status_code, 400);
+                assert_eq!(error_key, "INVALID_RECOVERY_DECISION");
+            }
+            other => panic!("expected 400 Http error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_checklist_is_rejected() {
+        let api = api_with(stale_case_repo());
+        let body = SubmitStepRequest {
+            input: json!({ "decision": "APPROVED", "expectedVersion": 3 }),
+        };
+        let err = apply_recovery_decision(&api, &flow_row(), &body)
+            .await
+            .unwrap_err();
+        match err {
+            Error::Http {
+                status_code, error_key, ..
+            } => {
+                assert_eq!(status_code, 400);
+                assert_eq!(error_key, "RECOVERY_CHECKLIST_INCOMPLETE");
+            }
+            other => panic!("expected 400 Http error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn approval_requires_device_key_proof_verified() {
+        let api = api_with(stale_case_repo());
+        let body = SubmitStepRequest {
+            input: json!({
+                "decision": "APPROVED",
+                "expectedVersion": 3,
+                "checklist": { "kycIdentityVerified": true, "deviceKeyProofVerified": false }
+            }),
+        };
+        let err = apply_recovery_decision(&api, &flow_row(), &body)
+            .await
+            .unwrap_err();
+        match err {
+            Error::Http {
+                status_code, error_key, ..
+            } => {
+                assert_eq!(status_code, 400);
+                assert_eq!(error_key, "RECOVERY_CHECKLIST_INCOMPLETE");
+            }
+            other => panic!("expected 400 Http error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn approval_uses_atomic_version_checked_transition_and_bumps_revision() {
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(3))));
+        repo.expect_update_case()
+            .withf(|id: &str, expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                id == "case_1"
+                    && *expected_version == 3
+                    && patch.review_decision.as_ref() == Some(&Some("APPROVED".to_owned()))
+                    && patch.status.as_deref() == Some("APPROVED")
+                    && patch.approval_revision == Some(Some(3))
+            })
+            .returning(|id, _, _| {
+                let mut row = case_row(4);
+                row.id = id.to_owned();
+                row.status = "APPROVED".to_owned();
+                Ok(row)
+            });
+
+        let api = api_with(repo);
+        let body = SubmitStepRequest {
+            input: valid_input("APPROVED"),
+        };
+        let patch = apply_recovery_decision(&api, &flow_row(), &body)
+            .await
+            .expect("approval succeeds");
+        let patch = patch.expect("recovery patch returned");
+        assert_eq!(patch["recovery"]["case_version"], 4);
+    }
+
+    #[tokio::test]
+    async fn non_recovery_flow_is_not_treated_as_decision() {
+        let api = api_with(MockRecoveryCaseRepo::new());
+        let mut f = flow_row();
+        f.flow_type = "phone_otp".to_owned();
+        let body = SubmitStepRequest {
+            input: valid_input("APPROVED"),
+        };
+        let patch = apply_recovery_decision(&api, &f, &body)
+            .await
+            .expect("non-recovery flows pass through");
+        assert!(patch.is_none());
     }
 }

@@ -498,6 +498,36 @@ pub struct RecoveryCaseUpdate {
     pub approved_expires_at: Option<Option<DateTime<Utc>>>,
 }
 
+impl RecoveryCaseUpdate {
+    pub fn is_noop(&self) -> bool {
+        self.session_id.is_none()
+            && self.requested_phone_hash.is_none()
+            && self.requested_phone_masked.is_none()
+            && self.device_id.is_none()
+            && self.jkt.is_none()
+            && self.device_public_jwk.is_none()
+            && self.reason.is_none()
+            && self.status.is_none()
+            && self.phone_relation.is_none()
+            && self.matched_user_id.is_none()
+            && self.otp_hash.is_none()
+            && self.otp_expires_at.is_none()
+            && self.otp_attempts.is_none()
+            && self.otp_resend_at.is_none()
+            && self.review_decision.is_none()
+            && self.review_reason.is_none()
+            && self.review_checklist.is_none()
+            && self.review_expected_version.is_none()
+            && self.approval_revision.is_none()
+            && self.evidence.is_none()
+            && self.old_devices.is_none()
+            && self.risk_flags.is_none()
+            && self.expires_at.is_none()
+            && self.review_expires_at.is_none()
+            && self.approved_expires_at.is_none()
+    }
+}
+
 #[backend_core::async_trait]
 pub trait RecoveryCaseRepo: Send + Sync {
     async fn create_case(
