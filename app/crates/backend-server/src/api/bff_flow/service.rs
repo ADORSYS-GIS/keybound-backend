@@ -741,7 +741,10 @@ async fn submit_step_inner(
     // Previously the case stayed at EVIDENCE_REQUIRED after the user submitted
     // verify_recovery_otp / collect_assisted_evidence, because this projection
     // was only invoked on the system-step and finalize paths.
-    if current_flow.flow_type.eq_ignore_ascii_case("account_recovery") {
+    if current_flow
+        .flow_type
+        .eq_ignore_ascii_case("account_recovery")
+    {
         sync_recovery_case(api, &current_flow).await?;
     }
 
@@ -1473,8 +1476,7 @@ pub(crate) async fn sync_recovery_case(
     // (COMPLETED/CLOSED/FAILED) must never be overwritten by a non-terminal
     // one, otherwise a later sync from a still-RUNNING flow parked at
     // `approved_hold` would regress a completed case back to APPROVED.
-    if !(is_terminal_recovery_status(&case.status)
-        && !is_terminal_recovery_status(&desired_status))
+    if !(is_terminal_recovery_status(&case.status) && !is_terminal_recovery_status(&desired_status))
     {
         patch.status = Some(desired_status);
     }
@@ -1490,11 +1492,29 @@ pub(crate) async fn sync_recovery_case(
         return Ok(());
     }
 
-    let _ = api
+    let updated = api
         .state
         .recovery_case
         .update_case(case_id, expected_version, &patch)
         .await?;
+
+    // Write back the authoritative case version into the flow context so the
+    // stored `recovery.case_version` stays in lock-step with the DB row. Without
+    // this, any projection write that follows a staff decision bumps the DB
+    // version but leaves the stored value stale, so the next projection write
+    // would compare a stale expected version against the advanced row and trip
+    // RECOVERY_CASE_VERSION_CONFLICT.
+    let mut context = flow.context.clone();
+    if let Some(recovery_ctx) = context.get_mut("recovery").and_then(Value::as_object_mut)
+        && recovery_ctx.get("case_version").and_then(Value::as_i64) != Some(updated.version)
+    {
+        recovery_ctx.insert("case_version".to_owned(), json!(updated.version));
+        api.state
+            .flow
+            .update_flow(&flow.id, None, None, None, Some(context))
+            .await?;
+    }
+
     Ok(())
 }
 
@@ -2926,9 +2946,9 @@ mod create_session_tests {
 #[cfg(test)]
 mod recovery_case_projection_tests {
     use super::*;
-    use crate::test_utils::{MockRecoveryCaseRepo, TestAppStateBuilder};
+    use crate::test_utils::{MockFlowRepo, MockRecoveryCaseRepo, TestAppStateBuilder};
     use backend_model::db::RecoveryCaseRow;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     fn flow(
         status: &str,
@@ -2996,6 +3016,41 @@ mod recovery_case_projection_tests {
         let oidc = state.oidc_state.clone();
         let signature = state.signature_state.clone();
         BackendApi::new(Arc::new(state), oidc, signature)
+    }
+
+    fn api_with_flow(repo: MockRecoveryCaseRepo, flow: MockFlowRepo) -> BackendApi {
+        let state = TestAppStateBuilder::new()
+            .with_recovery_case(Arc::new(repo))
+            .with_flow(Arc::new(flow))
+            .build();
+        let oidc = state.oidc_state.clone();
+        let signature = state.signature_state.clone();
+        BackendApi::new(Arc::new(state), oidc, signature)
+    }
+
+    /// Builds a `MockFlowRepo` whose `update_flow` echoes back the submitted
+    /// context, and captures the last-written context for assertions.
+    fn flow_repo_echo(seen: std::sync::Arc<std::sync::Mutex<Option<Value>>>) -> MockFlowRepo {
+        let mut flow = MockFlowRepo::new();
+        flow.expect_update_flow()
+            .returning(move |id, _, _, _, context| {
+                if let Some(ctx) = &context {
+                    *seen.lock().unwrap() = Some(ctx.clone());
+                }
+                Ok(FlowInstanceRow {
+                    id: id.to_owned(),
+                    human_id: "rc.f1".to_owned(),
+                    session_id: "sess_1".to_owned(),
+                    flow_type: "account_recovery".to_owned(),
+                    status: "RUNNING".to_owned(),
+                    current_step: None,
+                    step_ids: json!([]),
+                    context: context.unwrap_or_default(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+            });
+        flow
     }
 
     #[test]
@@ -3111,7 +3166,8 @@ mod recovery_case_projection_tests {
                 Ok(row)
             });
 
-        let api = api_with(repo);
+        let seen = Arc::new(Mutex::new(None));
+        let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let f = flow(
             "RUNNING",
             Some("verify_recovery_otp"),
@@ -3119,6 +3175,15 @@ mod recovery_case_projection_tests {
             json!({}),
         );
         sync_recovery_case(&api, &f).await.expect("sync succeeds");
+        // The write-back keeps recovery.case_version in lock-step with the DB
+        // version (3 -> 4), so a later projection never uses a stale version.
+        let written = seen.lock().unwrap().clone().expect("flow context written");
+        assert_eq!(
+            written
+                .pointer("/recovery/case_version")
+                .and_then(Value::as_i64),
+            Some(4)
+        );
     }
 
     #[tokio::test]
@@ -3131,16 +3196,19 @@ mod recovery_case_projection_tests {
             // M2: the projection must NOT regress the terminal COMPLETED status
             // back to APPROVED even though the flow is still RUNNING at
             // approved_hold with an APPROVED decision recorded.
-            .withf(|_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
-                patch.status.as_deref() != Some("APPROVED")
-            })
+            .withf(
+                |_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                    patch.status.as_deref() != Some("APPROVED")
+                },
+            )
             .returning(|id, _, patch| {
                 let mut row = case_row(10, patch.status.as_deref().unwrap_or_default());
                 row.id = id.to_owned();
                 Ok(row)
             });
 
-        let api = api_with(repo);
+        let seen = Arc::new(Mutex::new(None));
+        let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let f = flow(
             "RUNNING",
             Some("approved_hold"),
@@ -3148,14 +3216,20 @@ mod recovery_case_projection_tests {
             json!({ "await_admin_decision": { "decision": "APPROVED" } }),
         );
         sync_recovery_case(&api, &f).await.expect("sync succeeds");
+        let written = seen.lock().unwrap().clone().expect("flow context written");
+        assert_eq!(
+            written
+                .pointer("/recovery/case_version")
+                .and_then(Value::as_i64),
+            Some(10)
+        );
     }
 
     #[test]
     fn otp_projection_is_uniform_for_matched_and_unmatched() {
         // Matched / OTP outstanding: real expiry, real challenge ref.
         let real_expiry = Utc::now() + chrono::Duration::minutes(10);
-        let (ref_matched, expiry_matched) =
-            recovery_otp_projection("case_1", Some(real_expiry));
+        let (ref_matched, expiry_matched) = recovery_otp_projection("case_1", Some(real_expiry));
         assert_eq!(ref_matched, "case_1");
         assert_eq!(expiry_matched, Some(real_expiry));
 
@@ -3195,16 +3269,19 @@ mod recovery_case_projection_tests {
         repo.expect_get_case_by_id()
             .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
         repo.expect_update_case()
-            .withf(|_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
-                patch.status.as_deref() == Some("PENDING_REVIEW")
-            })
+            .withf(
+                |_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                    patch.status.as_deref() == Some("PENDING_REVIEW")
+                },
+            )
             .returning(|id, _, patch| {
                 let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
                 row.id = id.to_owned();
                 Ok(row)
             });
 
-        let api = api_with(repo);
+        let seen = Arc::new(Mutex::new(None));
+        let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let f = flow(
             "RUNNING",
             Some("collect_assisted_evidence"),
@@ -3212,6 +3289,13 @@ mod recovery_case_projection_tests {
             json!({}),
         );
         sync_recovery_case(&api, &f).await.expect("sync succeeds");
+        let written = seen.lock().unwrap().clone().expect("flow context written");
+        assert_eq!(
+            written
+                .pointer("/recovery/case_version")
+                .and_then(Value::as_i64),
+            Some(4)
+        );
     }
 
     #[tokio::test]
@@ -3220,23 +3304,27 @@ mod recovery_case_projection_tests {
         repo.expect_get_case_by_id()
             .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
         repo.expect_update_case()
-            .withf(|_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
-                // Fix 4: evidence is persisted from collect_assisted_evidence and
-                // risk flags computed from the unmatched phone relation.
-                let evidence_ok = patch
-                    .evidence
-                    .as_ref()
-                    .map(|value| value.is_array())
-                    .unwrap_or(false);
-                let risk_ok = patch
-                    .risk_flags
-                    .as_ref()
-                    .and_then(|value| value.as_array())
-                    .is_some_and(|flags| {
-                        flags.iter().any(|flag| flag == "UNMATCHED_OR_AMBIGUOUS_PHONE")
-                    });
-                evidence_ok && risk_ok
-            })
+            .withf(
+                |_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                    // Fix 4: evidence is persisted from collect_assisted_evidence and
+                    // risk flags computed from the unmatched phone relation.
+                    let evidence_ok = patch
+                        .evidence
+                        .as_ref()
+                        .map(|value| value.is_array())
+                        .unwrap_or(false);
+                    let risk_ok = patch
+                        .risk_flags
+                        .as_ref()
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|flags| {
+                            flags
+                                .iter()
+                                .any(|flag| flag == "UNMATCHED_OR_AMBIGUOUS_PHONE")
+                        });
+                    evidence_ok && risk_ok
+                },
+            )
             .returning(|id, _, patch| {
                 let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
                 row.id = id.to_owned();
@@ -3245,7 +3333,8 @@ mod recovery_case_projection_tests {
                 Ok(row)
             });
 
-        let api = api_with(repo);
+        let seen = Arc::new(Mutex::new(None));
+        let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let f = flow(
             "RUNNING",
             Some("collect_assisted_evidence"),
@@ -3253,6 +3342,98 @@ mod recovery_case_projection_tests {
             json!({ "collect_assisted_evidence": { "idCard": "front-back" } }),
         );
         sync_recovery_case(&api, &f).await.expect("sync succeeds");
+        let written = seen.lock().unwrap().clone().expect("flow context written");
+        assert_eq!(
+            written
+                .pointer("/recovery/case_version")
+                .and_then(Value::as_i64),
+            Some(4)
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_recovery_case_keeps_case_version_in_lock_step_across_reviews() {
+        // Simulates the NEEDS_MORE_EVIDENCE loop (review -> more evidence ->
+        // re-review): after a staff decision the flow context carries
+        // `recovery.case_version`; each projection write must advance the stored
+        // value in lock-step so the next projection (or decision) never trips
+        // RECOVERY_CASE_VERSION_CONFLICT on a stale expected version.
+        //
+        // First write: case_version 4 in the flow, DB row at 4 -> bump to 5 and
+        // write 5 back into the flow context.
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(4, "PENDING_REVIEW"))));
+        repo.expect_update_case()
+            .withf(
+                |_id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
+                    *expected_version == 4
+                },
+            )
+            .returning(|id, _, patch| {
+                let mut row = case_row(5, patch.status.as_deref().unwrap_or_default());
+                row.id = id.to_owned();
+                Ok(row)
+            });
+
+        let seen = Arc::new(Mutex::new(None));
+        let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
+        let first = flow(
+            "RUNNING",
+            Some("collect_assisted_evidence"),
+            json!({ "case_id": "case_1", "case_version": 4 }),
+            json!({ "await_admin_decision": { "decision": "NEEDS_MORE_EVIDENCE" } }),
+        );
+        sync_recovery_case(&api, &first)
+            .await
+            .expect("first sync succeeds");
+        let written = seen.lock().unwrap().clone().expect("flow context written");
+        assert_eq!(
+            written
+                .pointer("/recovery/case_version")
+                .and_then(Value::as_i64),
+            Some(5),
+            "write-back must advance recovery.case_version to the DB version"
+        );
+
+        // Second write: the flow context now carries the written-back 5; the DB
+        // row is at 5 too, so the projection's expected version (5) matches and
+        // the write succeeds instead of 409ing.
+        let mut repo2 = MockRecoveryCaseRepo::new();
+        repo2
+            .expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(5, "NEEDS_MORE_EVIDENCE"))));
+        repo2
+            .expect_update_case()
+            .withf(
+                |_id: &str, expected_version: &i64, _patch: &RecoveryCaseUpdate| {
+                    *expected_version == 5
+                },
+            )
+            .returning(|id, _, patch| {
+                let mut row = case_row(6, patch.status.as_deref().unwrap_or_default());
+                row.id = id.to_owned();
+                Ok(row)
+            });
+        let seen2 = Arc::new(Mutex::new(None));
+        let api2 = api_with_flow(repo2, flow_repo_echo(seen2.clone()));
+        let second = flow(
+            "RUNNING",
+            Some("collect_assisted_evidence"),
+            json!({ "case_id": "case_1", "case_version": 5 }),
+            json!({ "await_admin_decision": { "decision": "NEEDS_MORE_EVIDENCE" } }),
+        );
+        sync_recovery_case(&api2, &second)
+            .await
+            .expect("second sync must not conflict");
+        let written2 = seen2.lock().unwrap().clone().expect("flow context written");
+        assert_eq!(
+            written2
+                .pointer("/recovery/case_version")
+                .and_then(Value::as_i64),
+            Some(6),
+            "write-back must keep advancing in lock-step"
+        );
     }
 }
 
@@ -3326,7 +3507,10 @@ mod recovery_projection_redaction_tests {
             );
         }
         // Non-sensitive recovery fields survive.
-        assert_eq!(value.pointer("/recovery/case_id").and_then(Value::as_str), Some("case_1"));
+        assert_eq!(
+            value.pointer("/recovery/case_id").and_then(Value::as_str),
+            Some("case_1")
+        );
         assert_eq!(
             value
                 .pointer("/recovery/requested_phone_masked")
@@ -3339,7 +3523,13 @@ mod recovery_projection_redaction_tests {
     fn flow_response_projection_redacts_recovery_context() {
         let response = flow_response(flow_with_context("account_recovery", recovery_context()));
         let serialized = serde_json::to_string(&response.context).unwrap();
-        for forbidden in ["otp_hash", "otp_salt", "matched_user_id", "phone-hash", "usr_victim"] {
+        for forbidden in [
+            "otp_hash",
+            "otp_salt",
+            "matched_user_id",
+            "phone-hash",
+            "usr_victim",
+        ] {
             assert!(
                 !serialized.contains(forbidden),
                 "flow projection leaked {forbidden}: {serialized}"
@@ -3414,9 +3604,7 @@ mod recovery_owner_tests {
     }
 
     fn api_with(flow: MockFlowRepo) -> BackendApi {
-        let state = TestAppStateBuilder::new()
-            .with_flow(Arc::new(flow))
-            .build();
+        let state = TestAppStateBuilder::new().with_flow(Arc::new(flow)).build();
         let oidc = state.oidc_state.clone();
         let signature = state.signature_state.clone();
         BackendApi::new(Arc::new(state), oidc, signature)
