@@ -739,8 +739,8 @@ async fn submit_step_inner(
 
     // Fix 3: reflect the newly-created waiting step in the recovery-case status.
     // Previously the case stayed at EVIDENCE_REQUIRED after the user submitted
-    // verify_recovery_otp / collect_assisted_evidence, because this projection
-    // was only invoked on the system-step and finalize paths.
+    // verify_recovery_otp, because this projection was only invoked on the
+    // system-step and finalize paths.
     if current_flow
         .flow_type
         .eq_ignore_ascii_case("account_recovery")
@@ -1538,13 +1538,12 @@ fn recovery_case_status(flow: &FlowInstanceRow, decision: Option<&str>) -> Strin
             }
             Some(_) => "PENDING_REVIEW".to_owned(),
             None => {
-                // No decision yet: derive from the current phase. Once evidence
-                // has been collected and the case is parked at the admin step it
-                // is awaiting review; before that the user must provide evidence.
+                // No decision yet: derive from the current phase. Once the case
+                // is parked at the admin step it is awaiting review; before that
+                // the user must verify the OTP.
                 let current = flow.current_step.as_deref().unwrap_or("");
                 if current.eq_ignore_ascii_case("await_admin_decision")
                     || current.eq_ignore_ascii_case("record_admin_decision")
-                    || current.eq_ignore_ascii_case("collect_assisted_evidence")
                 {
                     "PENDING_REVIEW".to_owned()
                 } else {
@@ -1821,7 +1820,8 @@ pub async fn get_recovery_case(
         .await?
         .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
 
-    let (otp_challenge_ref, otp_expires_at) = recovery_otp_projection(&row.id, row.otp_expires_at);
+    let (otp_challenge_ref, otp_expires_at) =
+        recovery_otp_projection(&row.id, row.created_at, row.otp_expires_at);
 
     // Only safe, non-enumerating fields are exposed. Phone hashes, the OTP
     // hash, evidence, and risk flags are never returned to the facade.
@@ -1855,18 +1855,21 @@ pub async fn get_recovery_case(
 /// `otp_challenge_ref` with `caseId`, and the value is stable across reads. A
 /// matched case that has an outstanding OTP carries the real expiry; a
 /// no-match / not-yet-issued case has no OTP and no expiry in storage, so we
-/// project a plausible expiry to keep field presence identical. Verification of
-/// a synthetic challenge never succeeds (no real OTP was ever issued for it),
-/// which is indistinguishable from a wrong code on a matched case.
+/// project a STABLE synthetic expiry derived from the case `created_at`
+/// (identical on every read) to keep field presence and stability identical.
+/// Verification of a synthetic challenge never succeeds (no real OTP was ever
+/// issued for it), which is indistinguishable from a wrong code on a matched
+/// case.
 pub(crate) fn recovery_otp_projection(
     case_id: &str,
+    created_at: chrono::DateTime<Utc>,
     otp_expires_at: Option<chrono::DateTime<Utc>>,
 ) -> (String, Option<chrono::DateTime<Utc>>) {
     match otp_expires_at {
         Some(expires_at) => (case_id.to_owned(), Some(expires_at)),
         None => (
             case_id.to_owned(),
-            Some(Utc::now() + chrono::Duration::minutes(30)),
+            Some(created_at + chrono::Duration::minutes(30)),
         ),
     }
 }
@@ -1934,7 +1937,7 @@ pub async fn resend_recovery_otp(
         .await?
         .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
 
-    // M2: OTP resend is only meaningful before review. Approved/completed
+    // M2: OTP resend is only meaningful before OTP verification. Approved/completed
     // cases must not re-issue an OTP.
     if !matches!(
         case.status.to_ascii_uppercase().as_str(),
@@ -1942,7 +1945,7 @@ pub async fn resend_recovery_otp(
     ) {
         return Err(Error::conflict(
             "RESEND_NOT_ALLOWED",
-            "OTP resend is only allowed while the case is awaiting evidence",
+            "OTP resend is only allowed before OTP verification",
         ));
     }
 
@@ -3055,18 +3058,6 @@ mod recovery_case_projection_tests {
             ),
             "CLOSED"
         );
-        assert_eq!(
-            recovery_case_status(
-                &flow(
-                    "RUNNING",
-                    Some("collect_assisted_evidence"),
-                    json!({}),
-                    json!({})
-                ),
-                Some("NEEDS_MORE_EVIDENCE")
-            ),
-            "NEEDS_MORE_EVIDENCE"
-        );
 
         // No decision yet: awaiting review vs evidence required.
         assert_eq!(
@@ -3199,24 +3190,31 @@ mod recovery_case_projection_tests {
     #[test]
     fn otp_projection_is_uniform_for_matched_and_unmatched() {
         // Matched / OTP outstanding: real expiry, challenge ref is the case id.
+        let created_at = Utc::now();
         let real_expiry = Utc::now() + chrono::Duration::minutes(10);
-        let (ref_matched, expiry_matched) = recovery_otp_projection("case_1", Some(real_expiry));
+        let (ref_matched, expiry_matched) =
+            recovery_otp_projection("case_1", created_at, Some(real_expiry));
         assert_eq!(ref_matched, "case_1");
         assert_eq!(expiry_matched, Some(real_expiry));
 
         // Unmatched / not-yet-issued: no OTP in storage. The challenge ref MUST
         // be identical to the matched branch (the case id) so a caller cannot
-        // tell the two apart, and identical on every read (stable). Only the
-        // expiry is a plausible future time.
-        let (ref_unmatched, expiry_unmatched) = recovery_otp_projection("case_1", None);
+        // tell the two apart, and the synthetic expiry must be STABLE (derived
+        // from created_at, not "now") so a replayed read does not move it.
+        let (ref_unmatched, expiry_unmatched) = recovery_otp_projection("case_1", created_at, None);
         assert_eq!(
             ref_unmatched, ref_matched,
             "matched and unmatched must project the same, stable challenge ref"
         );
-        let (ref_unmatched_again, _) = recovery_otp_projection("case_1", None);
+        let (ref_unmatched_again, expiry_unmatched_again) =
+            recovery_otp_projection("case_1", created_at, None);
         assert_eq!(
             ref_unmatched, ref_unmatched_again,
             "ref must be stable across reads"
+        );
+        assert_eq!(
+            expiry_unmatched, expiry_unmatched_again,
+            "synthetic expiry must be stable across reads (not move with 'now')"
         );
         let Some(expiry_unmatched) = expiry_unmatched else {
             panic!("unmatched case must still carry a plausible expiry");
@@ -3230,6 +3228,7 @@ mod recovery_case_projection_tests {
         // states (outstanding OTP vs no OTP / unmatched) must project public
         // responses whose OTP-challenge fields are identical in value, so a
         // caller cannot infer whether the phone matched an account.
+        let created_at = Utc::now();
         let base = RecoveryCaseResponse {
             case_id: "case_1".to_owned(),
             status: "EVIDENCE_REQUIRED".to_owned(),
@@ -3248,15 +3247,19 @@ mod recovery_case_projection_tests {
 
         let matched = RecoveryCaseResponse {
             otp_challenge_ref: Some(
-                recovery_otp_projection("case_1", Some(Utc::now() + chrono::Duration::minutes(10)))
-                    .0,
+                recovery_otp_projection(
+                    "case_1",
+                    created_at,
+                    Some(Utc::now() + chrono::Duration::minutes(10)),
+                )
+                .0,
             ),
             otp_expires_at: Some(Utc::now() + chrono::Duration::minutes(10)),
             ..base.clone()
         };
         let unmatched = RecoveryCaseResponse {
-            otp_challenge_ref: Some(recovery_otp_projection("case_1", None).0),
-            otp_expires_at: recovery_otp_projection("case_1", None).1,
+            otp_challenge_ref: Some(recovery_otp_projection("case_1", created_at, None).0),
+            otp_expires_at: recovery_otp_projection("case_1", created_at, None).1,
             ..base.clone()
         };
 
@@ -3275,15 +3278,14 @@ mod recovery_case_projection_tests {
     }
 
     #[test]
-    fn collect_assisted_evidence_maps_to_pending_review() {
-        // Fix 3: a RUNNING flow parked at collect_assisted_evidence (evidence
-        // collected, awaiting the admin decision) is PENDING_REVIEW, not
-        // EVIDENCE_REQUIRED.
+    fn awaiting_admin_decision_maps_to_pending_review() {
+        // A RUNNING flow parked at the admin decision step (after OTP
+        // verification) is PENDING_REVIEW, not EVIDENCE_REQUIRED.
         assert_eq!(
             recovery_case_status(
                 &flow(
                     "RUNNING",
-                    Some("collect_assisted_evidence"),
+                    Some("await_admin_decision"),
                     json!({}),
                     json!({})
                 ),
@@ -3294,7 +3296,7 @@ mod recovery_case_projection_tests {
     }
 
     #[tokio::test]
-    async fn sync_recovery_case_sets_pending_review_after_evidence_collected() {
+    async fn sync_recovery_case_sets_pending_review_at_admin_decision() {
         let mut repo = MockRecoveryCaseRepo::new();
         repo.expect_get_case_by_id()
             .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
@@ -3314,7 +3316,7 @@ mod recovery_case_projection_tests {
         let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let f = flow(
             "RUNNING",
-            Some("collect_assisted_evidence"),
+            Some("await_admin_decision"),
             json!({ "case_id": "case_1" }),
             json!({}),
         );
@@ -3359,9 +3361,9 @@ mod recovery_case_projection_tests {
         let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let f = flow(
             "RUNNING",
-            Some("collect_assisted_evidence"),
+            Some("await_admin_decision"),
             json!({ "case_id": "case_1", "phone_relation": "UNKNOWN" }),
-            json!({ "collect_assisted_evidence": { "idCard": "front-back" } }),
+            json!({}),
         );
         sync_recovery_case(&api, &f).await.expect("sync succeeds");
         let written = seen.lock().unwrap().clone().expect("flow context written");
@@ -3375,11 +3377,11 @@ mod recovery_case_projection_tests {
 
     #[tokio::test]
     async fn sync_recovery_case_keeps_case_version_in_lock_step_across_reviews() {
-        // Simulates the NEEDS_MORE_EVIDENCE loop (review -> more evidence ->
-        // re-review): after a staff decision the flow context carries
-        // `recovery.case_version`; each projection write must advance the stored
-        // value in lock-step so the next projection (or decision) never trips
-        // RECOVERY_CASE_VERSION_CONFLICT on a stale expected version.
+        // Simulates repeated staff reviews: after a staff decision the flow
+        // context carries `recovery.case_version`; each projection write must
+        // advance the stored value in lock-step so the next projection (or
+        // decision) never trips RECOVERY_CASE_VERSION_CONFLICT on a stale
+        // expected version.
         //
         // First write: case_version 4 in the flow, DB row at 4 -> bump to 5 and
         // write 5 back into the flow context.
@@ -3402,9 +3404,9 @@ mod recovery_case_projection_tests {
         let api = api_with_flow(repo, flow_repo_echo(seen.clone()));
         let first = flow(
             "RUNNING",
-            Some("collect_assisted_evidence"),
+            Some("await_admin_decision"),
             json!({ "case_id": "case_1", "case_version": 4 }),
-            json!({ "await_admin_decision": { "decision": "NEEDS_MORE_EVIDENCE" } }),
+            json!({ "await_admin_decision": { "decision": "APPROVED" } }),
         );
         sync_recovery_case(&api, &first)
             .await
@@ -3424,7 +3426,7 @@ mod recovery_case_projection_tests {
         let mut repo2 = MockRecoveryCaseRepo::new();
         repo2
             .expect_get_case_by_id()
-            .returning(|_| Ok(Some(case_row(5, "NEEDS_MORE_EVIDENCE"))));
+            .returning(|_| Ok(Some(case_row(5, "APPROVED"))));
         repo2
             .expect_update_case()
             .withf(
@@ -3441,9 +3443,9 @@ mod recovery_case_projection_tests {
         let api2 = api_with_flow(repo2, flow_repo_echo(seen2.clone()));
         let second = flow(
             "RUNNING",
-            Some("collect_assisted_evidence"),
+            Some("await_admin_decision"),
             json!({ "case_id": "case_1", "case_version": 5 }),
-            json!({ "await_admin_decision": { "decision": "NEEDS_MORE_EVIDENCE" } }),
+            json!({ "await_admin_decision": { "decision": "APPROVED" } }),
         );
         sync_recovery_case(&api2, &second)
             .await

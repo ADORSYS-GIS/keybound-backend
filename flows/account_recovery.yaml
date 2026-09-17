@@ -45,18 +45,12 @@ steps:
       max_attempts: 5
       attempts_field: otp_attempts
     branches:
-      verified: collect_assisted_evidence
+      verified: await_admin_decision
       retry: verify_recovery_otp
     fail: FAILED
 
-  collect_assisted_evidence:
-    action: WAIT
-    actor: END_USER
-    config:
-      actor: USER
-    next: await_admin_decision
-
-  # KYC Manager review via staff_flow (ADMIN actor).
+  # KYC Manager review via staff_flow (ADMIN actor). Evidence is verified
+  # out-of-band by the reviewer; keybound only records the decision.
   await_admin_decision:
     action: WAIT
     actor: ADMIN
@@ -72,12 +66,10 @@ steps:
       pointer: /step_output/await_admin_decision/decision
       cases:
         APPROVED: approved_hold
-        NEEDS_MORE_EVIDENCE: collect_assisted_evidence
         REJECTED: rejected_terminal
       default_branch: rejected_terminal
     branches:
       approved_hold: approved_hold
-      collect_assisted_evidence: collect_assisted_evidence
       rejected_terminal: rejected_terminal
     fail: FAILED
 

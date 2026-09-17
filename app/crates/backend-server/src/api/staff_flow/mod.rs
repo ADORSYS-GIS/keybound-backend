@@ -168,8 +168,11 @@ async fn list_recovery_cases(
         items: rows
             .into_iter()
             .map(|row| {
-                let (otp_challenge_ref, otp_expires_at) =
-                    bff_service::recovery_otp_projection(&row.id, row.otp_expires_at);
+                let (otp_challenge_ref, otp_expires_at) = bff_service::recovery_otp_projection(
+                    &row.id,
+                    row.created_at,
+                    row.otp_expires_at,
+                );
                 StaffRecoveryCaseResponse {
                     case_id: row.id.clone(),
                     status: row.status,
@@ -625,8 +628,19 @@ async fn submit_admin_step(
     headers: HeaderMap,
     Json(body): Json<SubmitStepRequest>,
 ) -> Result<Json<StepResponse>, Error> {
-    let token = require_staff_token(&api, &headers).await?;
-    let reviewer_id = token.claims.sub.clone();
+    let (token, principal) = require_staff_token(&api, &headers).await?;
+    // A human staff user's identity is the token subject. For the authorized
+    // BFF staff service, the human reviewer id is delegated in the request body
+    // (trusted only because the caller is the explicitly authorized service).
+    let reviewer_id = match principal {
+        StaffPrincipal::StaffUser => token.claims.sub.clone(),
+        StaffPrincipal::BffService => body
+            .input
+            .get("reviewerId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    };
     let decided_at = Utc::now();
 
     let step = get_admin_step_row(&api, &step_id).await?;
@@ -897,21 +911,17 @@ async fn validate_recovery_decision(
         .unwrap_or("")
         .to_uppercase();
 
-    if !matches!(
-        decision.as_str(),
-        "APPROVED" | "REJECTED" | "NEEDS_MORE_EVIDENCE"
-    ) {
+    if !matches!(decision.as_str(), "APPROVED" | "REJECTED") {
         return Err(Error::bad_request(
             "INVALID_RECOVERY_DECISION",
-            "decision must be APPROVED, REJECTED or NEEDS_MORE_EVIDENCE",
+            "decision must be APPROVED or REJECTED",
         ));
     }
 
     // Reject stale reviewers before touching the case. The atomic update in
     // `apply_recovery_decision_update` re-checks the version, so a race between
     // two reviewers still yields 409. For APPROVED decisions, expectedVersion
-    // is required (staff review). For REJECTED/NEEDS_MORE_EVIDENCE, it is
-    // optional (user-initiated cancel may not provide it; the version-checked
+    // is required (staff review). For REJECTED it is optional (the version-checked
     // `update_case` still protects via the case row version).
     let expected_version = if decision == "APPROVED" {
         body.input
@@ -940,7 +950,7 @@ async fn validate_recovery_decision(
     }
 
     // Checklist is required for APPROVED decisions (staff KYC review).
-    // For REJECTED/NEEDS_MORE_EVIDENCE (user-initiated cancel), it is optional.
+    // For REJECTED it is optional.
     let empty_checklist = serde_json::Value::Object(serde_json::Map::new());
     let checklist = if decision == "APPROVED" {
         body.input
@@ -961,7 +971,7 @@ async fn validate_recovery_decision(
 
     // For APPROVED decisions: the reviewer must confirm that identity was
     // verified and that the new device key proof was verified.
-    // For REJECTED/NEEDS_MORE_EVIDENCE: no checklist enforcement.
+    // For REJECTED: no checklist enforcement.
     if decision == "APPROVED" {
         let identity_verified = checklist
             .get("kycIdentityVerified")
@@ -1081,20 +1091,26 @@ async fn get_admin_step_row(
     Ok(step)
 }
 
-async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<JwtToken, Error> {
+async fn require_staff_token(
+    api: &BackendApi,
+    headers: &HeaderMap,
+) -> Result<(JwtToken, StaffPrincipal), Error> {
     if !api.state.config.staff.enabled {
-        return Ok(JwtToken::new(backend_auth::Claims {
-            sub: "usr_auth_disabled".to_owned(),
-            azp: None,
-            aud: None,
-            scope: None,
-            name: Some("auth-disabled".to_owned()),
-            iss: api.state.config.oauth2.issuer.clone(),
-            exp: usize::MAX,
-            preferred_username: Some("auth-disabled".to_owned()),
-            realm_access: None,
-            groups: None,
-        }));
+        return Ok((
+            JwtToken::new(backend_auth::Claims {
+                sub: "usr_auth_disabled".to_owned(),
+                azp: None,
+                aud: None,
+                scope: None,
+                name: Some("auth-disabled".to_owned()),
+                iss: api.state.config.oauth2.issuer.clone(),
+                exp: usize::MAX,
+                preferred_username: Some("auth-disabled".to_owned()),
+                realm_access: None,
+                groups: None,
+            }),
+            StaffPrincipal::StaffUser,
+        ));
     }
 
     let auth_header = headers
@@ -1108,9 +1124,21 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
 
     let token = JwtToken::verify(&auth_header[7..], &api.oidc_state).await?;
 
-    authorize_staff_token(&token.claims, &api.state.config.staff)?;
+    let principal = authorize_staff_token(&token.claims, &api.state.config.staff)?;
 
-    Ok(token)
+    Ok((token, principal))
+}
+
+/// Identifies how the staff surface caller was authorized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StaffPrincipal {
+    /// The explicitly authorized BFF staff service identity (delegated calls).
+    /// Decisions may carry the human reviewer id in the request body, which is
+    /// trusted only because the caller is the authorized service.
+    BffService,
+    /// A human staff user carrying the staff realm role. The reviewer identity
+    /// is the token's subject.
+    StaffUser,
 }
 
 /// Authorizes a verified staff token: accepts either the permitted BFF staff
@@ -1119,7 +1147,7 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
 pub(crate) fn authorize_staff_token(
     claims: &backend_auth::Claims,
     staff: &backend_core::StaffAuth,
-) -> Result<(), Error> {
+) -> Result<StaffPrincipal, Error> {
     // Defense in depth: if neither a staff role nor a service identity is
     // configured, no caller can be authorized for the staff surface.
     if staff.staff_role.is_empty() && staff.service_client_id.is_empty() {
@@ -1149,14 +1177,16 @@ pub(crate) fn authorize_staff_token(
 
     let is_staff_user = !staff.staff_role.is_empty() && claims.has_realm_role(&staff.staff_role);
 
-    if !is_permitted_service && !is_staff_user {
-        return Err(Error::forbidden(
+    if is_permitted_service {
+        Ok(StaffPrincipal::BffService)
+    } else if is_staff_user {
+        Ok(StaffPrincipal::StaffUser)
+    } else {
+        Err(Error::forbidden(
             "STAFF_ACCESS_DENIED",
             "Caller is not authorized for the staff surface",
-        ));
+        ))
     }
-
-    Ok(())
 }
 
 async fn resolve_user_ids_for_filters(
