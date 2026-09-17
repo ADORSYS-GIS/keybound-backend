@@ -27,6 +27,19 @@ impl AudienceClaim {
     }
 }
 
+/// Keycloak `realm_access` claim (realm roles assigned to the principal).
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct RealmAccess {
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+impl RealmAccess {
+    pub fn contains_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|candidate| candidate == role)
+    }
+}
+
 /// JWT token claims from the OAuth2/OIDC provider (typically Keycloak).
 #[derive(Deserialize, Clone, Debug)]
 pub struct Claims {
@@ -48,6 +61,12 @@ pub struct Claims {
     /// Preferred username (often used as fallback for name)
     #[serde(default)]
     pub preferred_username: Option<String>,
+    /// Keycloak realm roles (e.g. staff/recovery-admin).
+    #[serde(default)]
+    pub realm_access: Option<RealmAccess>,
+    /// Keycloak group memberships (alternate source of staff authorization).
+    #[serde(default)]
+    pub groups: Option<Vec<String>>,
 }
 
 impl Claims {
@@ -56,5 +75,19 @@ impl Claims {
         self.name
             .clone()
             .or_else(|| self.preferred_username.clone())
+    }
+
+    /// Returns true when the principal carries `role` as a Keycloak realm role
+    /// or as a group membership.
+    pub fn has_realm_role(&self, role: &str) -> bool {
+        self.realm_access
+            .as_ref()
+            .map(|access| access.contains_role(role))
+            .unwrap_or(false)
+            || self
+                .groups
+                .as_ref()
+                .map(|groups| groups.iter().any(|group| group == role))
+                .unwrap_or(false)
     }
 }

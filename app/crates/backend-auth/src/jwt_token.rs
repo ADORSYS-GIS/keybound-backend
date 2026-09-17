@@ -137,6 +137,8 @@ mod tests {
             iss: "https://issuer.example".to_owned(),
             exp: usize::MAX,
             preferred_username: None,
+            realm_access: None,
+            groups: None,
         });
 
         assert_eq!(token.user_id(), "usr_001");

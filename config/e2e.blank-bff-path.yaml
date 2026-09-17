@@ -73,6 +73,10 @@ bff:
 staff:
   enabled: true
   base-path: /staff
+  staff-role: "staff/recovery-admin"
+  service-client-id: "azamra-bff"
+  audience: "user-storage"
+  required-scope: "recovery:phone-lookup"
 
 cuss:
   api_url: ${CUSS_URL}

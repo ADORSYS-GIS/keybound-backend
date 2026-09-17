@@ -356,6 +356,20 @@ pub struct StaffAuth {
     pub enabled: bool,
     #[serde(alias = "base-path")]
     pub base_path: String,
+    /// Keycloak realm role (or group) that marks a staff principal allowed to
+    /// use the staff surface (e.g. `staff/recovery-admin`).
+    #[serde(default, alias = "staff-role")]
+    pub staff_role: String,
+    /// The BFF service-client identity permitted to call the staff surface on
+    /// behalf of staff (azp of the service token).
+    #[serde(default, alias = "service-client-id")]
+    pub service_client_id: String,
+    /// Expected audience of the permitted staff service token.
+    #[serde(default)]
+    pub audience: String,
+    /// Required scope of the permitted staff service token.
+    #[serde(default, alias = "required-scope")]
+    pub required_scope: String,
 }
 
 /// Auth API surface configuration.

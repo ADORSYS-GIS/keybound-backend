@@ -737,6 +737,14 @@ async fn submit_step_inner(
         current_flow = finalize_flow(api, &current_flow, FLOW_STATUS_COMPLETED).await?;
     }
 
+    // Fix 3: reflect the newly-created waiting step in the recovery-case status.
+    // Previously the case stayed at EVIDENCE_REQUIRED after the user submitted
+    // verify_recovery_otp / collect_assisted_evidence, because this projection
+    // was only invoked on the system-step and finalize paths.
+    if current_flow.flow_type.eq_ignore_ascii_case("account_recovery") {
+        sync_recovery_case(api, &current_flow).await?;
+    }
+
     refresh_session_status(api, &current_flow.session_id).await?;
 
     Ok(updated_step)
@@ -1408,6 +1416,30 @@ pub(crate) async fn sync_recovery_case(
         patch.approval_revision = Some(Some(v));
     }
 
+    // Fix 4: persist the collected evidence, computed risk flags, and the
+    // old-device list onto the case so the authorized staff-detail surface can
+    // render them. Writes are suppressed when unchanged to avoid needless
+    // version churn on every projection.
+    let evidence = normalize_recovery_evidence(&case.id, flow.context.clone());
+    if evidence != case.evidence {
+        patch.evidence = Some(evidence);
+    }
+    let old_devices = recovery
+        .get("old_devices")
+        .filter(|value| value.is_array())
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let risk_flags = compute_recovery_risk_flags(recovery, &old_devices);
+    if old_devices != case.old_devices {
+        patch.old_devices = Some(old_devices);
+    }
+    if risk_flags != case.risk_flags {
+        patch.risk_flags = Some(risk_flags);
+    }
+    if let Some(v) = recovery.get("reason").and_then(Value::as_str) {
+        patch.reason = Some(Some(v.to_owned()));
+    }
+
     // Capture the admin decision (recorded on `await_admin_decision`) onto the
     // case. The authoritative, atomic version-checked decision transition is
     // performed by `submit_admin_step` (staff_flow), which records the decision,
@@ -1496,6 +1528,7 @@ fn recovery_case_status(flow: &FlowInstanceRow, decision: Option<&str>) -> Strin
                 let current = flow.current_step.as_deref().unwrap_or("");
                 if current.eq_ignore_ascii_case("await_admin_decision")
                     || current.eq_ignore_ascii_case("record_admin_decision")
+                    || current.eq_ignore_ascii_case("collect_assisted_evidence")
                 {
                     "PENDING_REVIEW".to_owned()
                 } else {
@@ -1504,6 +1537,54 @@ fn recovery_case_status(flow: &FlowInstanceRow, decision: Option<&str>) -> Strin
             }
         },
     }
+}
+
+/// Normalizes the evidence submitted on the `collect_assisted_evidence` step
+/// into an array of evidence records for the case `evidence` JSONB column. A
+/// submitted array is kept verbatim; a single object is wrapped into a record
+/// with a stable, non-enumerating id. No evidence (or a non-object) yields an
+/// empty array.
+fn normalize_recovery_evidence(case_id: &str, context: Value) -> Value {
+    let Some(value) = context.pointer("/step_output/collect_assisted_evidence") else {
+        return json!([]);
+    };
+    if value.is_array() {
+        return value.clone();
+    }
+    if value.is_object() {
+        let summary = value.clone();
+        let record_type = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("assisted");
+        return json!([{
+            "id": format!("{case_id}:evidence"),
+            "type": record_type,
+            "status": "COLLECTED",
+            "summary": summary,
+        }]);
+    }
+    json!([])
+}
+
+/// Computes an enumeration-safe set of risk flags for the case from the flow
+/// recovery context and the old-device list. Flags are stable strings so the
+/// projection stays idempotent.
+fn compute_recovery_risk_flags(recovery: &Value, old_devices: &Value) -> Value {
+    let mut flags: Vec<Value> = Vec::new();
+    let relation = recovery
+        .get("phone_relation")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !relation.is_empty() && !relation.eq_ignore_ascii_case("MATCHED") {
+        flags.push(json!("UNMATCHED_OR_AMBIGUOUS_PHONE"));
+    }
+    if let Some(devices) = old_devices.as_array()
+        && !devices.is_empty()
+    {
+        flags.push(json!("OLD_DEVICES_PRESENT"));
+    }
+    json!(flags)
 }
 
 pub(crate) async fn apply_context_updates(
@@ -1752,6 +1833,8 @@ pub async fn get_recovery_case(
         .await?
         .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
 
+    let (otp_challenge_ref, otp_expires_at) = recovery_otp_projection(&row.id, row.otp_expires_at);
+
     // Only safe, non-enumerating fields are exposed. Phone hashes, the OTP
     // hash, evidence, and risk flags are never returned to the facade.
     Ok(RecoveryCaseResponse {
@@ -1766,13 +1849,36 @@ pub async fn get_recovery_case(
             .map(str::to_string),
         approved_jkt: row.jkt,
         approved_device_id: row.device_id,
-        otp_challenge_ref: row.otp_expires_at.map(|_| row.id.clone()),
-        otp_expires_at: row.otp_expires_at,
+        otp_challenge_ref: Some(otp_challenge_ref),
+        otp_expires_at,
         otp_resend_allowed_at: row.otp_resend_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
         version: row.version,
     })
+}
+
+/// Projects the OTP challenge fields so their presence is identical for matched
+/// and unmatched/not-yet-issued cases.
+///
+/// A matched case that has an outstanding OTP carries the real expiry and the
+/// real challenge ref (the case id). A no-match / not-yet-issued case has no
+/// OTP and no expiry in storage; to avoid disclosing account existence through
+/// the presence of the challenge fields, we return a synthetic opaque
+/// challenge ref plus a plausible expiry. Verification of such a synthetic
+/// challenge never succeeds (no real OTP was ever issued for it), which is
+/// indistinguishable from a wrong code on a matched case.
+pub(crate) fn recovery_otp_projection(
+    case_id: &str,
+    otp_expires_at: Option<chrono::DateTime<Utc>>,
+) -> (String, Option<chrono::DateTime<Utc>>) {
+    match otp_expires_at {
+        Some(expires_at) => (case_id.to_owned(), Some(expires_at)),
+        None => (
+            backend_id::prefixed("otp").unwrap_or_else(|_| format!("otp_{case_id}")),
+            Some(Utc::now() + chrono::Duration::minutes(30)),
+        ),
+    }
 }
 
 pub async fn finalize_recovery(
@@ -3040,6 +3146,111 @@ mod recovery_case_projection_tests {
             Some("approved_hold"),
             json!({ "case_id": "case_1", "otp_expires_at": Utc::now().timestamp() }),
             json!({ "await_admin_decision": { "decision": "APPROVED" } }),
+        );
+        sync_recovery_case(&api, &f).await.expect("sync succeeds");
+    }
+
+    #[test]
+    fn otp_projection_is_uniform_for_matched_and_unmatched() {
+        // Matched / OTP outstanding: real expiry, real challenge ref.
+        let real_expiry = Utc::now() + chrono::Duration::minutes(10);
+        let (ref_matched, expiry_matched) =
+            recovery_otp_projection("case_1", Some(real_expiry));
+        assert_eq!(ref_matched, "case_1");
+        assert_eq!(expiry_matched, Some(real_expiry));
+
+        // Unmatched / not-yet-issued: no OTP in storage. Presence must be
+        // identical in shape (some ref + some future expiry), but the ref must
+        // NOT be the enumerable case id and the expiry must be plausible.
+        let (ref_unmatched, expiry_unmatched) = recovery_otp_projection("case_1", None);
+        assert_ne!(ref_unmatched, "case_1");
+        let Some(expiry_unmatched) = expiry_unmatched else {
+            panic!("unmatched case must still carry a plausible expiry");
+        };
+        assert!(expiry_unmatched > Utc::now());
+    }
+
+    #[test]
+    fn collect_assisted_evidence_maps_to_pending_review() {
+        // Fix 3: a RUNNING flow parked at collect_assisted_evidence (evidence
+        // collected, awaiting the admin decision) is PENDING_REVIEW, not
+        // EVIDENCE_REQUIRED.
+        assert_eq!(
+            recovery_case_status(
+                &flow(
+                    "RUNNING",
+                    Some("collect_assisted_evidence"),
+                    json!({}),
+                    json!({})
+                ),
+                None
+            ),
+            "PENDING_REVIEW"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_recovery_case_sets_pending_review_after_evidence_collected() {
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
+        repo.expect_update_case()
+            .withf(|_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                patch.status.as_deref() == Some("PENDING_REVIEW")
+            })
+            .returning(|id, _, patch| {
+                let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
+                row.id = id.to_owned();
+                Ok(row)
+            });
+
+        let api = api_with(repo);
+        let f = flow(
+            "RUNNING",
+            Some("collect_assisted_evidence"),
+            json!({ "case_id": "case_1" }),
+            json!({}),
+        );
+        sync_recovery_case(&api, &f).await.expect("sync succeeds");
+    }
+
+    #[tokio::test]
+    async fn sync_recovery_case_persists_evidence_and_risk_flags() {
+        let mut repo = MockRecoveryCaseRepo::new();
+        repo.expect_get_case_by_id()
+            .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
+        repo.expect_update_case()
+            .withf(|_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
+                // Fix 4: evidence is persisted from collect_assisted_evidence and
+                // risk flags computed from the unmatched phone relation.
+                let evidence_ok = patch
+                    .evidence
+                    .as_ref()
+                    .map(|value| value.is_array())
+                    .unwrap_or(false);
+                let risk_ok = patch
+                    .risk_flags
+                    .as_ref()
+                    .and_then(|value| value.as_array())
+                    .is_some_and(|flags| {
+                        flags.iter().any(|flag| flag == "UNMATCHED_OR_AMBIGUOUS_PHONE")
+                    });
+                evidence_ok && risk_ok
+            })
+            .returning(|id, _, patch| {
+                let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
+                row.id = id.to_owned();
+                row.evidence = patch.evidence.clone().unwrap_or_else(|| json!([]));
+                row.risk_flags = patch.risk_flags.clone().unwrap_or_else(|| json!([]));
+                Ok(row)
+            });
+
+        let api = api_with(repo);
+        let f = flow(
+            "RUNNING",
+            Some("collect_assisted_evidence"),
+            json!({ "case_id": "case_1", "phone_relation": "UNKNOWN" }),
+            json!({ "collect_assisted_evidence": { "idCard": "front-back" } }),
         );
         sync_recovery_case(&api, &f).await.expect("sync succeeds");
     }

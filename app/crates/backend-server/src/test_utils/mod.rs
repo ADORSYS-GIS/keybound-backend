@@ -396,6 +396,10 @@ bff:
 staff:
   enabled: true
   base_path: "/staff"
+  staff_role: "staff/recovery-admin"
+  service_client_id: "azamra-bff"
+  audience: "user-storage"
+  required_scope: "recovery:phone-lookup"
 cuss:
   api_url: "http://localhost:8082"
 "#,
@@ -459,6 +463,48 @@ pub fn create_fake_jwt(user_id: &str) -> backend_auth::JwtToken {
         iss: "http://localhost/test".to_owned(),
         exp: usize::MAX,
         preferred_username: None,
+        realm_access: None,
+        groups: None,
+    };
+    backend_auth::JwtToken::new(claims)
+}
+
+pub fn create_fake_service_jwt(
+    client_id: &str,
+    audience: &str,
+    scope: &str,
+) -> backend_auth::JwtToken {
+    let claims = backend_auth::Claims {
+        sub: format!("service-account-{client_id}"),
+        azp: Some(client_id.to_owned()),
+        aud: Some(backend_auth::AudienceClaim::Many(vec![
+            audience.to_owned(),
+        ])),
+        scope: Some(scope.to_owned()),
+        name: None,
+        iss: "http://localhost/test".to_owned(),
+        exp: usize::MAX,
+        preferred_username: None,
+        realm_access: None,
+        groups: None,
+    };
+    backend_auth::JwtToken::new(claims)
+}
+
+pub fn create_fake_staff_jwt(user_id: &str, roles: &[&str]) -> backend_auth::JwtToken {
+    let claims = backend_auth::Claims {
+        sub: user_id.to_owned(),
+        azp: None,
+        aud: None,
+        scope: None,
+        name: None,
+        iss: "http://localhost/test".to_owned(),
+        exp: usize::MAX,
+        preferred_username: None,
+        realm_access: Some(backend_auth::RealmAccess {
+            roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+        }),
+        groups: None,
     };
     backend_auth::JwtToken::new(claims)
 }

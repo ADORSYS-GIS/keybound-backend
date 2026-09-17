@@ -31,6 +31,7 @@ use utoipa::{OpenApi, ToSchema};
         submit_admin_step,
         list_recovery_cases,
         list_recovery_case_events,
+        get_staff_recovery_case_detail,
     ),
     components(schemas(
         StaffSessionQuery,
@@ -42,7 +43,10 @@ use utoipa::{OpenApi, ToSchema};
         SessionResponse,
         FlowResponse,
         FlowDetailResponse,
-        StepResponse
+        StepResponse,
+        StaffRecoveryCaseListResponse,
+        StaffRecoveryCaseDetailResponse,
+        StaffRecoveryReviewResponse,
     )),
     tags((name = "staff-flow", description = "Staff flow v2 endpoints"))
 )]
@@ -63,6 +67,10 @@ pub fn router(api: BackendApi) -> Router {
             "/recovery-cases/{case_id}/events",
             get(list_recovery_case_events),
         )
+        .route(
+            "/recovery-cases/{case_id}/detail",
+            get(get_staff_recovery_case_detail),
+        )
         .with_state(api)
 }
 
@@ -70,6 +78,10 @@ pub fn router(api: BackendApi) -> Router {
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryCaseQuery {
     pub status: Option<String>,
+    #[serde(default = "default_page")]
+    pub page: i32,
+    #[serde(default = "default_limit")]
+    pub limit: i32,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -92,6 +104,42 @@ pub struct StaffRecoveryCaseResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct StaffRecoveryCaseListResponse {
+    pub items: Vec<StaffRecoveryCaseResponse>,
+    pub page: i32,
+    pub limit: i32,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffRecoveryReviewResponse {
+    pub decision: Option<String>,
+    pub reason: Option<String>,
+    pub checklist: Option<serde_json::Value>,
+    pub reviewer_id: Option<String>,
+    pub decided_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffRecoveryCaseDetailResponse {
+    pub case_id: String,
+    pub status: String,
+    pub version: i64,
+    pub target_user_id: Option<String>,
+    pub requested_phone_mask: String,
+    pub reason: Option<String>,
+    pub phone_number_relation: Option<String>,
+    pub otp_verified: bool,
+    pub evidence: serde_json::Value,
+    pub risk_flags: serde_json::Value,
+    pub old_devices: serde_json::Value,
+    pub review: Option<StaffRecoveryReviewResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct StaffRecoveryEventResponse {
     pub id: String,
     pub case_id: String,
@@ -102,46 +150,56 @@ pub struct StaffRecoveryEventResponse {
     pub details: serde_json::Value,
 }
 
-#[utoipa::path(get, path = "/flow/recovery-cases", responses((status = 200, body = [StaffRecoveryCaseResponse])), tag = "staff-flow")]
+#[utoipa::path(get, path = "/flow/recovery-cases", responses((status = 200, body = StaffRecoveryCaseListResponse)), tag = "staff-flow")]
 async fn list_recovery_cases(
     State(api): State<BackendApi>,
     headers: HeaderMap,
     Query(query): Query<RecoveryCaseQuery>,
-) -> Result<Json<Vec<StaffRecoveryCaseResponse>>, Error> {
+) -> Result<Json<StaffRecoveryCaseListResponse>, Error> {
     let _token = require_staff_token(&api, &headers).await?;
-    let (rows, _) = api
+    let filter = RecoveryCaseFilter {
+        status: query.status,
+        matched_user_id: None,
+        page: query.page,
+        limit: query.limit,
+    }
+    .normalized();
+    let (rows, total) = api
         .state
         .recovery_case
-        .list_cases(RecoveryCaseFilter {
-            status: query.status,
-            matched_user_id: None,
-            page: 1,
-            limit: 100,
-        })
+        .list_cases(filter.clone())
         .await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|row| StaffRecoveryCaseResponse {
-                case_id: row.id.clone(),
-                status: row.status,
-                target_user_id: row.matched_user_id,
-                approval_revision: row.approval_revision.unwrap_or(1),
-                old_device_policy: row
-                    .old_devices
-                    .get("policy")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned),
-                approved_jkt: row.jkt,
-                approved_device_id: row.device_id,
-                otp_challenge_ref: row.otp_expires_at.map(|_| row.id.clone()),
-                otp_expires_at: row.otp_expires_at,
-                otp_resend_allowed_at: row.otp_resend_at,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-                version: row.version,
+    Ok(Json(StaffRecoveryCaseListResponse {
+        items: rows
+            .into_iter()
+            .map(|row| {
+                let (otp_challenge_ref, otp_expires_at) =
+                    bff_service::recovery_otp_projection(&row.id, row.otp_expires_at);
+                StaffRecoveryCaseResponse {
+                    case_id: row.id.clone(),
+                    status: row.status,
+                    target_user_id: row.matched_user_id,
+                    approval_revision: row.approval_revision.unwrap_or(1),
+                    old_device_policy: row
+                        .old_devices
+                        .get("policy")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    approved_jkt: row.jkt,
+                    approved_device_id: row.device_id,
+                    otp_challenge_ref: Some(otp_challenge_ref),
+                    otp_expires_at,
+                    otp_resend_allowed_at: row.otp_resend_at,
+                    created_at: row.created_at,
+                    updated_at: row.updated_at,
+                    version: row.version,
+                }
             })
             .collect(),
-    ))
+        page: filter.page,
+        limit: filter.limit,
+        total,
+    }))
 }
 
 #[utoipa::path(get, path = "/flow/recovery-cases/{caseId}/events", responses((status = 200, body = [StaffRecoveryEventResponse])), tag = "staff-flow")]
@@ -178,6 +236,65 @@ async fn list_recovery_case_events(
     }
     events.sort_by_key(|event| event.created_at);
     Ok(Json(events))
+}
+
+#[utoipa::path(
+    get,
+    path = "/flow/recovery-cases/{caseId}/detail",
+    params(("caseId" = String, Path)),
+    responses((status = 200, body = StaffRecoveryCaseDetailResponse)),
+    tag = "staff-flow",
+    security(("bearerAuth" = []))
+)]
+async fn get_staff_recovery_case_detail(
+    State(api): State<BackendApi>,
+    headers: HeaderMap,
+    Path(case_id): Path<String>,
+) -> Result<Json<StaffRecoveryCaseDetailResponse>, Error> {
+    let _token = require_staff_token(&api, &headers).await?;
+    let case = api
+        .state
+        .recovery_case
+        .get_case_by_id(&case_id)
+        .await?
+        .ok_or_else(|| Error::not_found("RECOVERY_CASE_NOT_FOUND", "Recovery case not found"))?;
+
+    let review = if case.review_decision.is_some() {
+        Some(StaffRecoveryReviewResponse {
+            decision: case.review_decision.clone(),
+            reason: case.review_reason.clone(),
+            checklist: case.review_checklist.clone(),
+            reviewer_id: None,
+            decided_at: None,
+        })
+    } else {
+        None
+    };
+    let otp_verified = otp_verified_from_status(&case.status);
+
+    Ok(Json(StaffRecoveryCaseDetailResponse {
+        case_id: case.id.clone(),
+        status: case.status,
+        version: case.version,
+        target_user_id: case.matched_user_id,
+        requested_phone_mask: case.requested_phone_masked,
+        reason: case.reason,
+        phone_number_relation: case.phone_relation,
+        otp_verified,
+        evidence: case.evidence,
+        risk_flags: case.risk_flags,
+        old_devices: case.old_devices,
+        review,
+    }))
+}
+
+fn otp_verified_from_status(status: &str) -> bool {
+    // The flow only reaches evidence collection / review after the OTP has been
+    // verified, so reaching a post-verification status implies OTP success.
+    matches!(
+        status.to_ascii_uppercase().as_str(),
+        "PENDING_REVIEW" | "APPROVED" | "NEEDS_MORE_EVIDENCE" | "COMPLETED"
+    )
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -968,6 +1085,8 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
             iss: api.state.config.oauth2.issuer.clone(),
             exp: usize::MAX,
             preferred_username: Some("auth-disabled".to_owned()),
+            realm_access: None,
+            groups: None,
         }));
     }
 
@@ -980,7 +1099,55 @@ async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<Jw
         return Err(Error::unauthorized("Missing bearer token"));
     }
 
-    JwtToken::verify(&auth_header[7..], &api.oidc_state).await
+    let token = JwtToken::verify(&auth_header[7..], &api.oidc_state).await?;
+
+    authorize_staff_token(&token.claims, &api.state.config.staff)?;
+
+    Ok(token)
+}
+
+/// Authorizes a verified staff token: accepts either the permitted BFF staff
+/// service identity (azp/audience/scope) or a user token carrying the staff
+/// realm role. Rejects everything else with 403 STAFF_ACCESS_DENIED.
+pub(crate) fn authorize_staff_token(
+    claims: &backend_auth::Claims,
+    staff: &backend_core::StaffAuth,
+) -> Result<(), Error> {
+    // Defense in depth: if neither a staff role nor a service identity is
+    // configured, no caller can be authorized for the staff surface.
+    if staff.staff_role.is_empty() && staff.service_client_id.is_empty() {
+        return Err(Error::forbidden(
+            "STAFF_AUTH_DISABLED",
+            "Staff authorization is not fully configured",
+        ));
+    }
+
+    let is_permitted_service = !staff.service_client_id.is_empty()
+        && !staff.audience.is_empty()
+        && !staff.required_scope.is_empty()
+        && claims.azp.as_deref() == Some(staff.service_client_id.as_str())
+        && claims.aud.as_ref().is_some_and(|aud| aud.contains(&staff.audience))
+        && claims
+            .scope
+            .as_deref()
+            .map(|scope| {
+                scope
+                    .split_whitespace()
+                    .any(|token| token == staff.required_scope)
+            })
+            .unwrap_or(false);
+
+    let is_staff_user =
+        !staff.staff_role.is_empty() && claims.has_realm_role(&staff.staff_role);
+
+    if !is_permitted_service && !is_staff_user {
+        return Err(Error::forbidden(
+            "STAFF_ACCESS_DENIED",
+            "Caller is not authorized for the staff surface",
+        ));
+    }
+
+    Ok(())
 }
 
 async fn resolve_user_ids_for_filters(
@@ -1295,5 +1462,106 @@ mod recovery_decision_tests {
             .await
             .expect("non-recovery flows pass through");
         assert!(patch.is_none());
+    }
+}
+
+#[cfg(test)]
+mod staff_authorization_tests {
+    use super::*;
+    use crate::test_utils::TestAppStateBuilder;
+
+    fn staff_config() -> backend_core::StaffAuth {
+        let state = TestAppStateBuilder::new().build();
+        state.config.staff
+    }
+
+    #[test]
+    fn non_staff_user_token_is_rejected_with_403() {
+        let staff = staff_config();
+        let claims = crate::test_utils::create_fake_jwt("usr_regular").claims;
+        let err = authorize_staff_token(&claims, &staff).unwrap_err();
+        match err {
+            Error::Http {
+                status_code,
+                error_key,
+                ..
+            } => {
+                assert_eq!(status_code, 403);
+                assert_eq!(error_key, "STAFF_ACCESS_DENIED");
+            }
+            other => panic!("expected 403 Http error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn staff_user_token_is_accepted() {
+        let staff = staff_config();
+        let claims = crate::test_utils::create_fake_staff_jwt(
+            "usr_staff",
+            &["offline_access", "staff/recovery-admin"],
+        )
+        .claims;
+        authorize_staff_token(&claims, &staff).expect("staff role grants access");
+    }
+
+    #[test]
+    fn staff_role_via_groups_is_accepted() {
+        let staff = staff_config();
+        let mut claims = crate::test_utils::create_fake_jwt("usr_group").claims;
+        claims.groups = Some(vec!["staff/recovery-admin".to_owned()]);
+        authorize_staff_token(&claims, &staff).expect("group grants access");
+    }
+
+    #[test]
+    fn bff_service_token_is_accepted() {
+        let staff = staff_config();
+        let claims =
+            crate::test_utils::create_fake_service_jwt("azamra-bff", "user-storage", "recovery:phone-lookup")
+                .claims;
+        authorize_staff_token(&claims, &staff).expect("permitted service identity grants access");
+    }
+
+    #[test]
+    fn service_token_with_wrong_scope_is_rejected() {
+        let staff = staff_config();
+        let claims =
+            crate::test_utils::create_fake_service_jwt("azamra-bff", "user-storage", "wrong:scope")
+                .claims;
+        let err = authorize_staff_token(&claims, &staff).unwrap_err();
+        match err {
+            Error::Http {
+                status_code, error_key, ..
+            } => {
+                assert_eq!(status_code, 403);
+                assert_eq!(error_key, "STAFF_ACCESS_DENIED");
+            }
+            other => panic!("expected 403 Http error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unconfigured_staff_authorization_is_rejected() {
+        let staff = backend_core::StaffAuth {
+            enabled: true,
+            base_path: "/staff".to_owned(),
+            staff_role: String::new(),
+            service_client_id: String::new(),
+            audience: String::new(),
+            required_scope: String::new(),
+        };
+        let claims = crate::test_utils::create_fake_staff_jwt("usr_staff", &["staff/recovery-admin"])
+            .claims;
+        let err = authorize_staff_token(&claims, &staff).unwrap_err();
+        match err {
+            Error::Http {
+                status_code,
+                error_key,
+                ..
+            } => {
+                assert_eq!(status_code, 403);
+                assert_eq!(error_key, "STAFF_AUTH_DISABLED");
+            }
+            other => panic!("expected 403 Http error, got {other:?}"),
+        }
     }
 }

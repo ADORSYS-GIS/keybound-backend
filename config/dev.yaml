@@ -209,6 +209,12 @@ staff:
   enabled: true
   # Base path for Staff API routes (e.g., /staff).
   base-path: /staff
+  # Realm role (or group) marking a staff principal allowed on this surface.
+  staff-role: "staff/recovery-admin"
+  # Permitted BFF service identity used for staff calls (azp / audience / scope).
+  service-client-id: "azamra-bff"
+  audience: "user-storage"
+  required-scope: "recovery:phone-lookup"
 
 # CUSS (Customer User Service) Integration
 # External KYC/document verification service.
