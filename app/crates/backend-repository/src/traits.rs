@@ -489,8 +489,9 @@ pub struct RecoveryCaseUpdate {
     pub review_reason: Option<Option<String>>,
     pub review_checklist: Option<Option<Value>>,
     pub review_expected_version: Option<Option<i64>>,
+    pub reviewer_id: Option<Option<String>>,
+    pub decided_at: Option<Option<DateTime<Utc>>>,
     pub approval_revision: Option<Option<i64>>,
-    pub evidence: Option<Value>,
     pub old_devices: Option<Value>,
     pub risk_flags: Option<Value>,
     pub expires_at: Option<Option<DateTime<Utc>>>,
@@ -518,8 +519,9 @@ impl RecoveryCaseUpdate {
             && self.review_reason.is_none()
             && self.review_checklist.is_none()
             && self.review_expected_version.is_none()
+            && self.reviewer_id.is_none()
+            && self.decided_at.is_none()
             && self.approval_revision.is_none()
-            && self.evidence.is_none()
             && self.old_devices.is_none()
             && self.risk_flags.is_none()
             && self.expires_at.is_none()

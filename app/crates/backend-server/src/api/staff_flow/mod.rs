@@ -132,7 +132,6 @@ pub struct StaffRecoveryCaseDetailResponse {
     pub reason: Option<String>,
     pub phone_number_relation: Option<String>,
     pub otp_verified: bool,
-    pub evidence: serde_json::Value,
     pub risk_flags: serde_json::Value,
     pub old_devices: serde_json::Value,
     pub review: Option<StaffRecoveryReviewResponse>,
@@ -164,11 +163,7 @@ async fn list_recovery_cases(
         limit: query.limit,
     }
     .normalized();
-    let (rows, total) = api
-        .state
-        .recovery_case
-        .list_cases(filter.clone())
-        .await?;
+    let (rows, total) = api.state.recovery_case.list_cases(filter.clone()).await?;
     Ok(Json(StaffRecoveryCaseListResponse {
         items: rows
             .into_iter()
@@ -264,8 +259,8 @@ async fn get_staff_recovery_case_detail(
             decision: case.review_decision.clone(),
             reason: case.review_reason.clone(),
             checklist: case.review_checklist.clone(),
-            reviewer_id: None,
-            decided_at: None,
+            reviewer_id: case.reviewer_id.clone(),
+            decided_at: case.decided_at,
         })
     } else {
         None
@@ -281,7 +276,6 @@ async fn get_staff_recovery_case_detail(
         reason: case.reason,
         phone_number_relation: case.phone_relation,
         otp_verified,
-        evidence: case.evidence,
         risk_flags: case.risk_flags,
         old_devices: case.old_devices,
         review,
@@ -489,7 +483,10 @@ async fn get_staff_flow(
 
     // C1: never project recovery hashes/existence signals, even to staff.
     let mut flow_response: FlowResponse = flow.into();
-    if flow_response.flow_type.eq_ignore_ascii_case("account_recovery") {
+    if flow_response
+        .flow_type
+        .eq_ignore_ascii_case("account_recovery")
+    {
         bff_service::redact_recovery_fields(&mut flow_response.context);
     }
     let mut steps: Vec<StepResponse> = steps.into_iter().map(Into::into).collect();
@@ -628,7 +625,9 @@ async fn submit_admin_step(
     headers: HeaderMap,
     Json(body): Json<SubmitStepRequest>,
 ) -> Result<Json<StepResponse>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
+    let token = require_staff_token(&api, &headers).await?;
+    let reviewer_id = token.claims.sub.clone();
+    let decided_at = Utc::now();
 
     let step = get_admin_step_row(&api, &step_id).await?;
     if !step.status.eq_ignore_ascii_case("WAITING") {
@@ -656,7 +655,8 @@ async fn submit_admin_step(
     // version-checked transition on the case is deferred until after the flow
     // transition below is committed, so a failed flow step can never leave the
     // case APPROVED while the flow never advances.
-    let recovery_decision = validate_recovery_decision(&api, &flow, &body).await?;
+    let recovery_decision =
+        validate_recovery_decision(&api, &flow, &body, &reviewer_id, decided_at).await?;
 
     let flow_definition = bff_service::get_flow_definition(&api, &flow.flow_type)?;
     let step_definition = bff_service::get_step_definition(flow_definition, &step.step_type)?;
@@ -865,6 +865,8 @@ async fn validate_recovery_decision(
     api: &BackendApi,
     flow: &backend_model::db::FlowInstanceRow,
     body: &SubmitStepRequest,
+    reviewer_id: &str,
+    decided_at: chrono::DateTime<Utc>,
 ) -> Result<Option<RecoveryDecision>, Error> {
     if !flow.flow_type.eq_ignore_ascii_case("account_recovery") {
         return Ok(None);
@@ -1000,6 +1002,8 @@ async fn validate_recovery_decision(
         )),
         review_checklist: Some(Some(checklist.clone())),
         review_expected_version: Some(Some(expected_version)),
+        reviewer_id: Some(Some(reviewer_id.to_owned())),
+        decided_at: Some(Some(decided_at)),
         status: Some(status.to_owned()),
         ..Default::default()
     };
@@ -1042,12 +1046,15 @@ async fn apply_recovery_decision_update(
 ///
 /// Kept as a convenience wrapper (validate + apply in one call) so callers that
 /// do not need the deferred-apply ordering can use a single step.
+#[cfg(test)]
 async fn apply_recovery_decision(
     api: &BackendApi,
     flow: &backend_model::db::FlowInstanceRow,
     body: &SubmitStepRequest,
 ) -> Result<Option<serde_json::Value>, Error> {
-    let Some(decision) = validate_recovery_decision(api, flow, body).await? else {
+    let Some(decision) =
+        validate_recovery_decision(api, flow, body, "test-reviewer", Utc::now()).await?
+    else {
         return Ok(None);
     };
     apply_recovery_decision_update(api, &decision).await
@@ -1126,7 +1133,10 @@ pub(crate) fn authorize_staff_token(
         && !staff.audience.is_empty()
         && !staff.required_scope.is_empty()
         && claims.azp.as_deref() == Some(staff.service_client_id.as_str())
-        && claims.aud.as_ref().is_some_and(|aud| aud.contains(&staff.audience))
+        && claims
+            .aud
+            .as_ref()
+            .is_some_and(|aud| aud.contains(&staff.audience))
         && claims
             .scope
             .as_deref()
@@ -1137,8 +1147,7 @@ pub(crate) fn authorize_staff_token(
             })
             .unwrap_or(false);
 
-    let is_staff_user =
-        !staff.staff_role.is_empty() && claims.has_realm_role(&staff.staff_role);
+    let is_staff_user = !staff.staff_role.is_empty() && claims.has_realm_role(&staff.staff_role);
 
     if !is_permitted_service && !is_staff_user {
         return Err(Error::forbidden(
@@ -1280,8 +1289,9 @@ mod recovery_decision_tests {
             review_reason: None,
             review_checklist: None,
             review_expected_version: None,
+            reviewer_id: None,
+            decided_at: None,
             approval_revision: Some(2),
-            evidence: json!({}),
             old_devices: json!([]),
             risk_flags: json!({}),
             expires_at: None,
@@ -1515,9 +1525,12 @@ mod staff_authorization_tests {
     #[test]
     fn bff_service_token_is_accepted() {
         let staff = staff_config();
-        let claims =
-            crate::test_utils::create_fake_service_jwt("azamra-bff", "user-storage", "recovery:phone-lookup")
-                .claims;
+        let claims = crate::test_utils::create_fake_service_jwt(
+            "azamra-bff",
+            "user-storage",
+            "recovery:phone-lookup",
+        )
+        .claims;
         authorize_staff_token(&claims, &staff).expect("permitted service identity grants access");
     }
 
@@ -1530,7 +1543,9 @@ mod staff_authorization_tests {
         let err = authorize_staff_token(&claims, &staff).unwrap_err();
         match err {
             Error::Http {
-                status_code, error_key, ..
+                status_code,
+                error_key,
+                ..
             } => {
                 assert_eq!(status_code, 403);
                 assert_eq!(error_key, "STAFF_ACCESS_DENIED");
@@ -1549,8 +1564,8 @@ mod staff_authorization_tests {
             audience: String::new(),
             required_scope: String::new(),
         };
-        let claims = crate::test_utils::create_fake_staff_jwt("usr_staff", &["staff/recovery-admin"])
-            .claims;
+        let claims =
+            crate::test_utils::create_fake_staff_jwt("usr_staff", &["staff/recovery-admin"]).claims;
         let err = authorize_staff_token(&claims, &staff).unwrap_err();
         match err {
             Error::Http {

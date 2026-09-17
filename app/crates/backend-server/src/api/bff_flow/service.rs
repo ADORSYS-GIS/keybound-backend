@@ -1419,14 +1419,10 @@ pub(crate) async fn sync_recovery_case(
         patch.approval_revision = Some(Some(v));
     }
 
-    // Fix 4: persist the collected evidence, computed risk flags, and the
-    // old-device list onto the case so the authorized staff-detail surface can
-    // render them. Writes are suppressed when unchanged to avoid needless
-    // version churn on every projection.
-    let evidence = normalize_recovery_evidence(&case.id, flow.context.clone());
-    if evidence != case.evidence {
-        patch.evidence = Some(evidence);
-    }
+    // Fix 4: persist the computed risk flags and the old-device list onto the
+    // case so the authorized staff-detail surface can render them. Writes are
+    // suppressed when unchanged to avoid needless version churn on every
+    // projection.
     let old_devices = recovery
         .get("old_devices")
         .filter(|value| value.is_array())
@@ -1557,34 +1553,6 @@ fn recovery_case_status(flow: &FlowInstanceRow, decision: Option<&str>) -> Strin
             }
         },
     }
-}
-
-/// Normalizes the evidence submitted on the `collect_assisted_evidence` step
-/// into an array of evidence records for the case `evidence` JSONB column. A
-/// submitted array is kept verbatim; a single object is wrapped into a record
-/// with a stable, non-enumerating id. No evidence (or a non-object) yields an
-/// empty array.
-fn normalize_recovery_evidence(case_id: &str, context: Value) -> Value {
-    let Some(value) = context.pointer("/step_output/collect_assisted_evidence") else {
-        return json!([]);
-    };
-    if value.is_array() {
-        return value.clone();
-    }
-    if value.is_object() {
-        let summary = value.clone();
-        let record_type = value
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("assisted");
-        return json!([{
-            "id": format!("{case_id}:evidence"),
-            "type": record_type,
-            "status": "COLLECTED",
-            "summary": summary,
-        }]);
-    }
-    json!([])
 }
 
 /// Computes an enumeration-safe set of risk flags for the case from the flow
@@ -1881,13 +1849,15 @@ pub async fn get_recovery_case(
 /// Projects the OTP challenge fields so their presence is identical for matched
 /// and unmatched/not-yet-issued cases.
 ///
-/// A matched case that has an outstanding OTP carries the real expiry and the
-/// real challenge ref (the case id). A no-match / not-yet-issued case has no
-/// OTP and no expiry in storage; to avoid disclosing account existence through
-/// the presence of the challenge fields, we return a synthetic opaque
-/// challenge ref plus a plausible expiry. Verification of such a synthetic
-/// challenge never succeeds (no real OTP was ever issued for it), which is
-/// indistinguishable from a wrong code on a matched case.
+/// Both branches project the SAME challenge ref (the case id) so the public
+/// response never discloses whether the phone matched an account: the caller
+/// cannot distinguish a real OTP case from a synthetic one by comparing
+/// `otp_challenge_ref` with `caseId`, and the value is stable across reads. A
+/// matched case that has an outstanding OTP carries the real expiry; a
+/// no-match / not-yet-issued case has no OTP and no expiry in storage, so we
+/// project a plausible expiry to keep field presence identical. Verification of
+/// a synthetic challenge never succeeds (no real OTP was ever issued for it),
+/// which is indistinguishable from a wrong code on a matched case.
 pub(crate) fn recovery_otp_projection(
     case_id: &str,
     otp_expires_at: Option<chrono::DateTime<Utc>>,
@@ -1895,7 +1865,7 @@ pub(crate) fn recovery_otp_projection(
     match otp_expires_at {
         Some(expires_at) => (case_id.to_owned(), Some(expires_at)),
         None => (
-            backend_id::prefixed("otp").unwrap_or_else(|_| format!("otp_{case_id}")),
+            case_id.to_owned(),
             Some(Utc::now() + chrono::Duration::minutes(30)),
         ),
     }
@@ -2996,8 +2966,9 @@ mod recovery_case_projection_tests {
             review_reason: None,
             review_checklist: None,
             review_expected_version: None,
+            reviewer_id: None,
+            decided_at: None,
             approval_revision: None,
-            evidence: json!({}),
             old_devices: json!([]),
             risk_flags: json!({}),
             expires_at: None,
@@ -3227,21 +3198,80 @@ mod recovery_case_projection_tests {
 
     #[test]
     fn otp_projection_is_uniform_for_matched_and_unmatched() {
-        // Matched / OTP outstanding: real expiry, real challenge ref.
+        // Matched / OTP outstanding: real expiry, challenge ref is the case id.
         let real_expiry = Utc::now() + chrono::Duration::minutes(10);
         let (ref_matched, expiry_matched) = recovery_otp_projection("case_1", Some(real_expiry));
         assert_eq!(ref_matched, "case_1");
         assert_eq!(expiry_matched, Some(real_expiry));
 
-        // Unmatched / not-yet-issued: no OTP in storage. Presence must be
-        // identical in shape (some ref + some future expiry), but the ref must
-        // NOT be the enumerable case id and the expiry must be plausible.
+        // Unmatched / not-yet-issued: no OTP in storage. The challenge ref MUST
+        // be identical to the matched branch (the case id) so a caller cannot
+        // tell the two apart, and identical on every read (stable). Only the
+        // expiry is a plausible future time.
         let (ref_unmatched, expiry_unmatched) = recovery_otp_projection("case_1", None);
-        assert_ne!(ref_unmatched, "case_1");
+        assert_eq!(
+            ref_unmatched, ref_matched,
+            "matched and unmatched must project the same, stable challenge ref"
+        );
+        let (ref_unmatched_again, _) = recovery_otp_projection("case_1", None);
+        assert_eq!(
+            ref_unmatched, ref_unmatched_again,
+            "ref must be stable across reads"
+        );
         let Some(expiry_unmatched) = expiry_unmatched else {
             panic!("unmatched case must still carry a plausible expiry");
         };
         assert!(expiry_unmatched > Utc::now());
+    }
+
+    #[test]
+    fn public_response_challenge_fields_are_indistinguishable_across_branches() {
+        // Contract test: two cases with the SAME case id but different OTP
+        // states (outstanding OTP vs no OTP / unmatched) must project public
+        // responses whose OTP-challenge fields are identical in value, so a
+        // caller cannot infer whether the phone matched an account.
+        let base = RecoveryCaseResponse {
+            case_id: "case_1".to_owned(),
+            status: "EVIDENCE_REQUIRED".to_owned(),
+            target_user_id: None,
+            approval_revision: 1,
+            old_device_policy: None,
+            approved_jkt: None,
+            approved_device_id: None,
+            otp_challenge_ref: None,
+            otp_expires_at: None,
+            otp_resend_allowed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            version: 1,
+        };
+
+        let matched = RecoveryCaseResponse {
+            otp_challenge_ref: Some(
+                recovery_otp_projection("case_1", Some(Utc::now() + chrono::Duration::minutes(10)))
+                    .0,
+            ),
+            otp_expires_at: Some(Utc::now() + chrono::Duration::minutes(10)),
+            ..base.clone()
+        };
+        let unmatched = RecoveryCaseResponse {
+            otp_challenge_ref: Some(recovery_otp_projection("case_1", None).0),
+            otp_expires_at: recovery_otp_projection("case_1", None).1,
+            ..base.clone()
+        };
+
+        // Identical challenge ref (same value, same relationship to the case id).
+        assert_eq!(matched.otp_challenge_ref, unmatched.otp_challenge_ref);
+        assert_eq!(
+            matched.otp_challenge_ref.as_deref(),
+            Some("case_1"),
+            "challenge ref must equal the case id for both branches"
+        );
+        // Identical field presence for the challenge expiry.
+        assert_eq!(
+            matched.otp_expires_at.is_some(),
+            unmatched.otp_expires_at.is_some()
+        );
     }
 
     #[test]
@@ -3299,21 +3329,15 @@ mod recovery_case_projection_tests {
     }
 
     #[tokio::test]
-    async fn sync_recovery_case_persists_evidence_and_risk_flags() {
+    async fn sync_recovery_case_persists_risk_flags() {
         let mut repo = MockRecoveryCaseRepo::new();
         repo.expect_get_case_by_id()
             .returning(|_| Ok(Some(case_row(3, "EVIDENCE_REQUIRED"))));
         repo.expect_update_case()
             .withf(
                 |_id: &str, _expected_version: &i64, patch: &RecoveryCaseUpdate| {
-                    // Fix 4: evidence is persisted from collect_assisted_evidence and
-                    // risk flags computed from the unmatched phone relation.
-                    let evidence_ok = patch
-                        .evidence
-                        .as_ref()
-                        .map(|value| value.is_array())
-                        .unwrap_or(false);
-                    let risk_ok = patch
+                    // Risk flags computed from the unmatched phone relation.
+                    patch
                         .risk_flags
                         .as_ref()
                         .and_then(|value| value.as_array())
@@ -3321,14 +3345,12 @@ mod recovery_case_projection_tests {
                             flags
                                 .iter()
                                 .any(|flag| flag == "UNMATCHED_OR_AMBIGUOUS_PHONE")
-                        });
-                    evidence_ok && risk_ok
+                        })
                 },
             )
             .returning(|id, _, patch| {
                 let mut row = case_row(4, patch.status.as_deref().unwrap_or_default());
                 row.id = id.to_owned();
-                row.evidence = patch.evidence.clone().unwrap_or_else(|| json!([]));
                 row.risk_flags = patch.risk_flags.clone().unwrap_or_else(|| json!([]));
                 Ok(row)
             });
